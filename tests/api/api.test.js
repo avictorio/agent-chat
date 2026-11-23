@@ -611,6 +611,49 @@ function mp4() {
       await req('DELETE', RR + '?confirm=' + race, { owner: true });
     }
 
+    // A room deleted with a post in flight, then created again under its
+    // name. The post used to answer 500 (or, with the name created again
+    // in time, land in the new room); ids started again at 1; and the
+    // Worker's minute-long copy of the old key let the old room's links
+    // open the new room's files while the new room's own links answered 403.
+    {
+      const rc = 'apitest-again-' + SUF, RC = '/api/rooms/' + rc;
+      const bare = (u) => { const x = new URL(u, BASE); return x.pathname + x.search; };
+      await req('POST', RC, { owner: true });
+      let ada = (await req('POST', RC + '/invites', { owner: true, json: { name: 'Ada', kind: 'human' } })).json.token;
+      await req('PUT', RC + '/avatar', { token: ada, headers: { 'Content-Type': 'image/png' }, body: PNG });
+      const first = await req('POST', RC + '/messages', { token: ada, json: { text: 'old room picture', image: PNG.toString('base64') } });
+      const oldAvatar = bare(((await req('GET', RC + '/members', { owner: true })).json.members || []).find((x) => x.name === 'Ada').avatar);
+      const oldImage = bare(((await req('GET', RC + '/messages', { owner: true })).json.messages || []).find((x) => x.id === first.json.id).image.url);
+      r = await req('GET', oldImage);
+      check('before the delete the old room\'s signed link opens its picture', r.status === 200, r.status);
+      await req('DELETE', RC + '/invites', { owner: true });
+      await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: rc, ms: 1500 } });
+      const inflight = req('POST', RC + '/messages', { owner: true, json: { from: 'Owner', text: 'posted as the room goes', image: PNG.toString('base64') } });
+      await sleep(300);
+      r = await req('DELETE', RC + '?confirm=' + rc, { owner: true });
+      check('the room with a post in flight is deleted', r.status === 200 && r.json.deleted === true, r.status + ' ' + r.text.slice(0, 120));
+      await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: rc, ms: 0 } });
+      r = await inflight;
+      check('the post in flight answers 410 room_deleted', r.status === 410 && r.json && r.json.code === 'room_deleted', r.status + ' ' + r.text.slice(0, 160));
+      await req('POST', RC, { owner: true });
+      ada = (await req('POST', RC + '/invites', { owner: true, json: { name: 'Ada', kind: 'human' } })).json.token;
+      await req('PUT', RC + '/avatar', { token: ada, headers: { 'Content-Type': 'image/png' }, body: PNG });
+      const again = await req('POST', RC + '/messages', { token: ada, json: { text: 'new room picture', image: PNG.toString('base64') } });
+      check('the room created again carries on the message ids', again.status === 201 && again.json.id > first.json.id, first.json.id + ' then ' + again.json.id);
+      r = await req('GET', RC + '/messages', { owner: true });
+      check('and holds only its own message', (r.json.messages || []).length === 1 && r.json.messages[0].text === 'new room picture', r.text.slice(0, 160));
+      const newImage = bare(r.json.messages[0].image.url);
+      r = await req('GET', oldAvatar);
+      check('an avatar link from before the delete opens nothing in the room created again', r.status === 403, r.status);
+      r = await req('GET', oldImage);
+      check('an image link from before the delete opens nothing in the room created again', r.status === 403 || r.status === 404, r.status);
+      r = await req('GET', newImage);
+      check('the new room\'s own signed link works at once', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+      await req('DELETE', RC + '/invites', { owner: true });
+      await req('DELETE', RC + '?confirm=' + rc, { owner: true });
+    }
+
     // invite_only invariants.
     r = await req('GET', R + '/members', { owner: true });
     check('members say invite_only', r.json && r.json.invite_only === true, JSON.stringify(r.json && r.json.invite_only));
@@ -636,6 +679,20 @@ function mp4() {
     check('stream upload auto-publishes', r.json && r.json.published === true, JSON.stringify(r.json));
     r = await req('GET', R2 + '/messages?limit=3', { token: TP });
     check('auto-published message is listed', (r.json.messages || []).some(m => m.id === pd.json.id && m.video), JSON.stringify(r.json.messages && r.json.messages.length));
+    // A real MP4 streamed with the type a tool sets (octet-stream, curl's
+    // form type, upper case, parameters) is taken: it used to answer 415.
+    for (const ct of ['application/octet-stream', 'application/x-www-form-urlencoded', 'Video/MP4; codecs="avc1.42E01E"']) {
+      const sd = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'typed ' + ct, draft: true } });
+      r = await req('PUT', R2 + '/messages/' + sd.json.id + '/video/stream', { token: TP, headers: { 'Content-Type': ct }, body: mp4() });
+      check('stream with Content-Type ' + ct + ' is taken as video/mp4', r.status === 200 && r.json.video && r.json.video.type === 'video/mp4', r.status + ' ' + JSON.stringify(r.json));
+    }
+    {
+      const sd = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'not a video', draft: true } });
+      r = await req('PUT', R2 + '/messages/' + sd.json.id + '/video/stream', { token: TP, headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.from('plain text, not a video at all') });
+      check('octet-stream that is no video -> 415', r.status === 415, r.status + ' ' + JSON.stringify(r.json));
+      r = await req('GET', R2 + '/messages/' + sd.json.id + '/video/status', { token: TP });
+      check('and nothing is left uploading', r.json && r.json.uploading === false && !r.json.complete, JSON.stringify(r.json));
+    }
     // HTML artifacts and Markdown documents (second room, member Poc).
     const HTML = '<!doctype html><title>Probe</title><p style="color:red">hello artifact</p>';
     const MD = '# Probe doc\n\nSome **markdown** body.\n';
@@ -646,6 +703,17 @@ function mp4() {
     check('post response carries doc meta', !!(r.json && r.json.doc && r.json.doc.name === 'probe.md' && r.json.doc.bytes === Buffer.byteLength(MD)), JSON.stringify(r.json && r.json.doc));
     r = await req('GET', R2 + '/messages?limit=5', { token: TP });
     check('list carries html+doc', (r.json.messages || []).some(m => m.id === amid && m.html && m.doc), 'listed');
+    // A signed page link opened in a browser tab downloads the page: it ran
+    // its script top-level on the site's address for anyone the link
+    // reached. A frame (the room's card and viewer) still renders it.
+    const pageUrl = ((r.json.messages || []).find(m => m.id === amid) || {}).html?.url || '';
+    const pageAbs = /^https?:/.test(pageUrl) ? pageUrl : BASE + pageUrl;
+    const asTab = await fetch(pageAbs, { headers: { 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate' } });
+    const tabCd = asTab.headers.get('content-disposition') || '';
+    check('a signed page link opened in a tab downloads', asTab.status === 200 && /^attachment;/.test(tabCd) && /Probe Page\.html/.test(tabCd) && (await asTab.text()) === HTML, asTab.status + ' ' + tabCd);
+    const asFrame = await fetch(pageAbs, { headers: { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate' } });
+    check('the same link in a frame renders inline', asFrame.status === 200 && !asFrame.headers.get('content-disposition') && /Sec-Fetch-Dest/i.test(asFrame.headers.get('vary') || ''), asFrame.status + ' ' + asFrame.headers.get('content-disposition') + ' vary=' + asFrame.headers.get('vary'));
+    check('a page may be framed only by the site', /frame-ancestors 'self'/.test(asFrame.headers.get('content-security-policy') || ''), asFrame.headers.get('content-security-policy'));
     r = await req('GET', R2 + '/messages/' + amid + '/html', { token: TP });
     check('html serves 200 text/html', r.status === 200 && (r.headers.get('content-type') || '').includes('text/html'), r.status + ' ' + r.headers.get('content-type'));
     check('html serves artifact CSP', (r.headers.get('content-security-policy') || '').includes('sandbox allow-scripts'), r.headers.get('content-security-policy'));
@@ -2341,6 +2409,16 @@ function mp4() {
     check('mcp post visible over REST', (r.json.messages || []).some(x => x.id === (mcpMsg && mcpMsg.id) && x.from === 'Poc' && x.text === 'hello over mcp'), JSON.stringify((r.json.messages || []).map(x => x.from + ':' + x.text)).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'react', arguments: { id: mcpMsg.id, reaction: '👍' } }, { token: TRex });
     check('mcp react works', !!(r.json && r.json.result && !r.json.result.isError && r.json.result.structuredContent && (r.json.result.structuredContent.reactions || {})['👍']), JSON.stringify(r.json).slice(0, 200));
+    // A speak link is signed only for a published message: one signed for
+    // an id not used yet kept playing the next message to a member who had
+    // been removed in between.
+    r = await mcp(R2, 'tools/call', { name: 'speak_message', arguments: { id: mcpMsg.id } }, { token: TRex });
+    check('mcp speak_message signs a link for a published message', !!(r.json && r.json.result && !r.json.result.isError && /\/messages\/\d+\/speak\?/.test((r.json.result.structuredContent || {}).url || '')), JSON.stringify(r.json).slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'speak_message', arguments: { id: mcpMsg.id + 500 } }, { token: TRex });
+    check('mcp speak_message on an id not used yet -> isError, no link', !!(r.json && r.json.result && r.json.result.isError === true && !r.json.result.structuredContent && /No message with that id/.test(JSON.stringify(r.json.result.content))), JSON.stringify(r.json).slice(0, 200));
+    const spDraft = await req('POST', R2 + '/messages', { token: TP, json: { text: 'a draft nobody may hear', draft: true } });
+    r = await mcp(R2, 'tools/call', { name: 'speak_message', arguments: { id: spDraft.json.id } }, { token: TRex });
+    check('mcp speak_message on another member\'s draft -> the same isError', !!(r.json && r.json.result && r.json.result.isError === true && /No message with that id/.test(JSON.stringify(r.json.result.content))), JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'no_such_tool', arguments: {} }, { token: TP });
     check('mcp unknown tool -> isError', !!(r.json && r.json.result && r.json.result.isError === true), JSON.stringify(r.json).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'create_game', arguments: { players: ['Poc', 'Rex'], tick_seconds: 3600, w: 12, h: 10 } }, { token: TP });
@@ -2893,6 +2971,12 @@ function mp4() {
     check('home page stamped with the build id', metaOf(homeTxt) === bid, metaOf(homeTxt));
     check('room page stamped with the build id', metaOf(roomTxt) === bid, metaOf(roomTxt));
     check('no unstamped placeholder served', !homeTxt.includes('next-dev') && !roomTxt.includes('next-dev'));
+    // The shell limits its frames: a posted page navigated the card's
+    // frame to any site. Only frame-src, so the app's own loads are untouched.
+    for (const p of ['/', '/r/apitest-main-' + SUF]) {
+      const sc = (await fetch(BASE + p)).headers.get('content-security-policy');
+      check('page ' + p.slice(0, 3) + ' sends frame-src only', sc === "frame-src 'self' https://www.youtube-nocookie.com", sc);
+    }
     // Static assets: the hashed bundle files come straight from the
     // build, with the one-year immutable cache the _headers file sets.
     const assetPath = (homeTxt.match(/\/assets\/index-[\w-]+\.js/) || [])[0];
@@ -2902,6 +2986,14 @@ function mp4() {
     check('bundle cached for a year, immutable', !!ar && /max-age=31536000/.test(ar.headers.get('cache-control') || '') && /immutable/.test(ar.headers.get('cache-control') || ''), ar && ar.headers.get('cache-control'));
     const miss = await fetch(BASE + '/assets/no-such-file-' + SUF + '.js');
     check('an unknown asset is a 404', miss.status === 404, miss.status);
+    // ...that no browser keeps: a chunk missing during a deploy or a
+    // rollback must load once the file is back under its name.
+    const missCc = miss.headers.get('cache-control') || '';
+    check('an unknown asset\'s 404 is not cached', /no-store/.test(missCc) && !/immutable|max-age/.test(missCc), missCc);
+    const iconMiss = await fetch(BASE + '/icons/no-such-icon-' + SUF + '.png');
+    check('an unknown icon\'s 404 is not cached', iconMiss.status === 404 && /no-store/.test(iconMiss.headers.get('cache-control') || ''), iconMiss.status + ' ' + iconMiss.headers.get('cache-control'));
+    const rawIndex = await fetch(BASE + '/index.html');
+    check('the raw, unstamped index.html is not served', !(await rawIndex.text()).includes('next-dev'), rawIndex.status);
     // The app icons (static files): the manifest's three
     // and the apple-touch-icon, PNGs with a day's cache.
     for (const ic of ['icon-192', 'icon-512', 'icon-512-maskable', 'icon-180']) {

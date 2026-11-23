@@ -8,7 +8,7 @@ import { Room } from "../../worker/room/Room.ts";
  * @param {{ put?: (key: string) => Promise<void> | void, before?: (op: string, key: string) => Promise<void> | void, after?: (op: string, key: string) => Promise<void> | void, env?: object }} [hooks]
  *   put runs inside every MEDIA.put, before the object is stored; before and
  *   after run around every storage call (op: put, get, head, delete, create,
- *   abort, complete), so a test can hold one call while others run, or make
+ *   part, abort, complete), so a test can hold one call while others run, or make
  *   it throw; env adds bindings and variables to the Room's env
  */
 export function makeRoom(hooks = {}) {
@@ -59,17 +59,45 @@ export function makeRoom(hooks = {}) {
     resumeMultipartUpload(key, id) {
       return {
         async abort() { return call("abort", key, async () => { if (!multipart.delete(id)) throw new Error("NoSuchUpload"); }); },
-        async complete() { return call("complete", key, async () => { const m = multipart.get(id); if (!m) throw new Error("NoSuchUpload"); objects.set(key, m.data); multipart.delete(id); return {}; }); },
+        // parts sent with uploadPart make the object; without any, it is the upload's data
+        async uploadPart(n, value) {
+          return call("part", key, async () => {
+            const m = multipart.get(id);
+            if (!m) throw new Error("NoSuchUpload");
+            const b = new Uint8Array(value instanceof ReadableStream ? await new Response(value).arrayBuffer() : value);
+            (m.parts ||= new Map()).set(n, b);
+            return { partNumber: n, etag: "e" + n };
+          });
+        },
+        async complete() {
+          return call("complete", key, async () => {
+            const m = multipart.get(id);
+            if (!m) throw new Error("NoSuchUpload");
+            let data = m.data;
+            if (m.parts) {
+              const ps = [...m.parts.keys()].sort((x, y) => x - y).map((n) => m.parts.get(n));
+              data = new Uint8Array(ps.reduce((t, b) => t + b.byteLength, 0));
+              let off = 0;
+              for (const b of ps) { data.set(b, off); off += b.byteLength; }
+            }
+            objects.set(key, data);
+            multipart.delete(id);
+            return {};
+          });
+        },
       };
     },
   };
   const pending = [];
   const ctx = {
     id: { name: "unit" },
-    storage: { sql, deleteAll: async () => {}, setAlarm: async () => {}, getAlarm: async () => null, deleteAlarm: async () => {} },
+    // deleteAll drops every table, as storage's does (Room.destroy)
+    storage: { sql, deleteAll: async () => { for (const t of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) db.exec('DROP TABLE "' + t.name + '"'); }, setAlarm: async () => {}, getAlarm: async () => null, deleteAlarm: async () => {} },
     waitUntil: (p) => { pending.push(Promise.resolve(p).catch(() => {})); },
   };
-  const room = new Room(ctx, { ...(hooks.env || {}), MEDIA });
+  // the activity log a room delete writes (Room.activityLog)
+  const REQUESTS = { put: async () => {}, get: async () => null };
+  const room = new Room(ctx, { REQUESTS, ...(hooks.env || {}), MEDIA });
   room.create();
   const one = (q, ...p) => db.prepare(q).get(...p);
   const all = (q, ...p) => db.prepare(q).all(...p);

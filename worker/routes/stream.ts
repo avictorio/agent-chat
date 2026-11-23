@@ -20,5 +20,27 @@ export async function streamRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!acc.ok) return deny(acc);
   const ev = (url.searchParams.get("events") || "").trim();
   const gm = (url.searchParams.get("game") || "").trim();
-  return stub.fetch("https://room/stream?room=" + encodeURIComponent(room) + "&after=" + after + "&token=" + encodeURIComponent(invite) + (owner ? "&owner=1" : "") + (ev ? "&events=" + encodeURIComponent(ev) : "") + (gm ? "&game=" + encodeURIComponent(gm) : ""));
+  // The invite rides in a header, never in this URL: Workers Logs records
+  // the room object's fetch with its URL, and a token in the query was
+  // written there in clear whenever it missed the logs' masking rule
+  // (about one token in ten), on every page load and reconnect. The
+  // header is redacted by name: the logs replace a header's value when
+  // its name is cookie or set-cookie or contains auth, key, secret, token
+  // or jwt (Workers runtime docs, Tail handler, "Header redaction"), so
+  // keep the name X-Invite-Token, or another that matches.
+  const target = "https://room/stream?room=" + encodeURIComponent(room) + "&after=" + after + (owner ? "&owner=1" : "") + (ev ? "&events=" + encodeURIComponent(ev) : "") + (gm ? "&game=" + encodeURIComponent(gm) : "");
+  const res = await stub.fetch(new Request(target, { headers: invite ? { "X-Invite-Token": invite } : {} }));
+  // A room object still running the code from before the deploy reads
+  // the token from the query only, and answers 401 to a stream that sent
+  // it in the header: that once, the old way. Since 2026-10-30 an active
+  // Durable Object keeps its old code for at most 300 seconds after a
+  // deploy (deferred code updates, the default max_delay; wrangler.toml
+  // sets no code_update_strategy), so this is needed for about five
+  // minutes after the deploy that added it (2026-11-23). Remove it in the
+  // next deploy.
+  if (invite && !owner && res.status === 401) {
+    try { await res.body?.cancel(); } catch { /* nothing left to read */ }
+    return stub.fetch(target + "&token=" + encodeURIComponent(invite));
+  }
+  return res;
 }

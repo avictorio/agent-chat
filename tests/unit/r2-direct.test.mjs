@@ -440,17 +440,20 @@ test("the sign route hands out only addresses made with the upload's own credent
 });
 
 test("an upload already in flight goes through the site while the check is not passing, if its parts fit", async () => {
-  const stays = (env, mode, partSize) => UploadMethods.upStaysDirect.call({ env }, mode, partSize);
+  const stays = (env, mode, partSize, owner) => UploadMethods.upStaysDirect.call({ env, upDirectOff: UploadMethods.upDirectOff }, mode, partSize, owner);
+  const on = (env) => Object.assign({ R2_DIRECT: "1" }, env);
   await withBucket(SOUND, async (b) => {
-    assert.equal(await stays(b.env, "direct", 8 * MIB), true);
-    assert.equal(await stays(b.env, null, 8 * MIB), false, "a session through the site stays there");
+    assert.equal(await stays(on(b.env), "direct", 8 * MIB), true);
+    assert.equal(await stays(on(b.env), null, 8 * MIB), false, "a session through the site stays there");
+    assert.equal(await stays(b.env, "direct", 8 * MIB), false, "the switch off: through the site");
+    assert.equal(await stays(b.env, "direct", 8 * MIB, true), true, "unless the owner, who may force it");
   });
   await withBucket(Object.assign({}, LAX, { unsignedHeaders: "refuse" }), async (b) => {
-    assert.equal(await stays(b.env, "direct", 8 * MIB), false, "parts that fit a request to the site go through it");
-    assert.equal(await stays(b.env, "direct", UP_PART_MAX), false);
-    assert.equal(await stays(b.env, "direct", UP_PART_MAX + 1), true, "bigger parts have only storage: their sign waits");
+    assert.equal(await stays(on(b.env), "direct", 8 * MIB), false, "parts that fit a request to the site go through it");
+    assert.equal(await stays(on(b.env), "direct", UP_PART_MAX), false);
+    assert.equal(await stays(on(b.env), "direct", UP_PART_MAX + 1), true, "bigger parts have only storage: their sign waits");
   });
-  assert.equal(await stays({}, "direct", 8 * MIB), false, "the credential gone: through the site");
+  assert.equal(await stays(on({}), "direct", 8 * MIB), false, "the credential gone: through the site");
 });
 
 test("the check gives storage a deadline: a request that hangs is a try not answered", async () => {

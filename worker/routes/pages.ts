@@ -11,8 +11,9 @@ import type { RouteContext } from "../index.js";
 // web/app/public/icons/, served by the asset server (wrangler.toml).
 
 // The web app is served as Workers Static Assets (web/app/dist, uploaded
-// with each deploy): Cloudflare answers /assets/* itself, and the Worker
-// runs first for everything else (wrangler.toml run_worker_first).
+// with each deploy): Cloudflare answers the files that exist under
+// /assets/* and /icons/* itself, and the Worker runs first on its own
+// paths and answers every miss (wrangler.toml run_worker_first).
 //
 // The page shell is the build's index.html, read once per isolate through
 // the ASSETS binding. Its build id is a short hash of that file: the index
@@ -22,19 +23,24 @@ import type { RouteContext } from "../index.js";
 // are served with the id stamped over the build's "next-dev" placeholder,
 // and GET /api/build reports it, so a long-lived page can tell it is
 // behind the latest deploy and offer a refresh.
-export let shellPromise: Promise<{ text: string, id: string }> | null = null;
-export function appShell(env: Env, origin: string) {
-  if (!shellPromise) {
-    shellPromise = (env.ASSETS as { fetch(req: Request): Promise<Response> }).fetch(new Request(origin + "/index.html")).then(async function (r) {
-      if (!r.ok) throw new Error("index.html is missing from the static assets (" + r.status + ")");
-      const text = await r.text();
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-      const id = Array.from(new Uint8Array(buf)).slice(0, 8).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
-      return { text: text, id: id };
-    });
-    shellPromise.catch(function () { shellPromise = null; });
-  }
-  return shellPromise;
+//
+// Only the settled shell is kept, never the fetch in flight. A promise
+// started by one request and awaited by others ties them all to the
+// first request: when it ended before the fetch did, the others waited on
+// I/O that belonged to a finished request and every page and /api/build
+// on that isolate failed until it was recycled. Requests that find no
+// shell yet each make their own (local, cheap) read; the first to finish
+// stores it.
+let shellKept: { text: string, id: string } | null = null;
+export async function appShell(env: Env, origin: string) {
+  if (shellKept) return shellKept;
+  const r = await (env.ASSETS as { fetch(req: Request): Promise<Response> }).fetch(new Request(origin + "/index.html"));
+  if (!r.ok) throw new Error("index.html is missing from the static assets (" + r.status + ")");
+  const text = await r.text();
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  const id = Array.from(new Uint8Array(buf)).slice(0, 8).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  if (!shellKept) shellKept = { text: text, id: id };
+  return shellKept;
 }
 export async function currentBuildId(env: Env, origin: string) {
   return (await appShell(env, origin)).id;
@@ -51,8 +57,21 @@ export async function page(env: Env, origin: string, room?: string) {
   // primer as the page's plain-text alternate.
   text = text.replace(/<!--page-head[^>]*-->/, room ? roomHead(origin) : HOME_HEAD);
   text = text.replace(/<!--page-note[^>]*-->/, room ? roomNote(origin, room) : "");
-  return html(text);
+  const r = html(text);
+  r.headers.set("Content-Security-Policy", SHELL_CSP);
+  return r;
 }
+
+// The page shell's policy limits frames only. A posted HTML page runs in a
+// frame with no network (mediaCsp), but no directive of its own stops it
+// navigating that frame: location.replace or a meta refresh took the feed
+// card and the viewer to any site, which learned who opened the room and
+// then showed its own live page inside the room, under the app's header.
+// The shell's frame-src applies to every navigation of its frames, so they
+// can hold only the site's own pages and YouTube's privacy-mode embed (the
+// video cards). It sets nothing else: the app's scripts, styles, fonts,
+// workers and images load as before.
+export const SHELL_CSP = "frame-src 'self' https://www.youtube-nocookie.com";
 
 const HOME_HEAD = '<meta name="description" content="Agent Chat: invite-only chat rooms where agents and people talk, play and plan together.">';
 

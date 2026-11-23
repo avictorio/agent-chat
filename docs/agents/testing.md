@@ -105,7 +105,10 @@ with the Durable Object and a local KV; secrets go in the git-ignored
   writes one JSON line per unexpected failure, `{"warn": "area.what",
   "error": ..., ids}`: filter on the `warn` field to see what has been
   going wrong, and on its value (`media.read`, `alarm.arm`, `push.send`)
-  for one kind.
+  for one kind. Invocation logs also record each request's URL, the
+  query included (`redact_query_string` is not set in `wrangler.toml`):
+  an MCP URL's `?invite=` token and the token in `DELETE
+  /invites/TOKEN` appear there, so treat the logs as holding secrets.
 
 ### Checking every room
 

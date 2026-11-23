@@ -2,6 +2,7 @@
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { BadRequest, CORS, json, settleBody } from "./lib/http.js";
+import { GONE_MSG, isGoneError } from "./lib/errors.js";
 import { MIB, ROOM_RE, SETTLED_BODY_MAX } from "./limits.js";
 import { MCP_PATH, headerToken, queryToken, queryTokenNotice } from "./lib/tokens.js";
 import { renewDirectVerdict } from "./platform/r2-direct-check.js";
@@ -60,8 +61,9 @@ export { Room } from "./room/Room.js";
 /** What every route handler gets: the request and the bindings, the parsed
  *  URL and its path, whether the owner key came with it, and the invite
  *  token from a header (X-Invite-Token or Authorization: Bearer; on the MCP
- *  route also ?invite=). */
-export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string };
+ *  route also ?invite=), and the request's ctx, whose waitUntil carries work
+ *  that must finish even if the client goes away. */
+export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, ctx: ExecutionContext };
 
 /** ?pretty=1: the JSON answer indented, for a person reading it raw. */
 async function prettyIfAsked(request: Request, res: Response): Promise<Response> {
@@ -85,6 +87,9 @@ export default {
       if (e instanceof URIError) return json({ error: "The URL has a malformed %-escape" }, 400);
       // A body that is there but is not JSON (lib/http.ts readBody).
       if (e instanceof BadRequest) return json({ error: e.message }, 400);
+      // The room was deleted while the request was in flight (Room.fence):
+      // it stopped before writing anything, so say that, not 500.
+      if (isGoneError(e)) return json({ error: GONE_MSG, code: "room_deleted" }, 410);
       throw e;
     }
   },
@@ -129,7 +134,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     // POST /api/rooms/ROOM/mcp still reads it, for MCP clients configured
     // with a URL alone, and a header wins there too.
     const invite = headerToken(request) || (MCP_PATH.test(path) ? queryToken(url) : "");
-    const rc: RouteContext = { request, env, url, path, owner, invite };
+    const rc: RouteContext = { request, env, url, path, owner, invite, ctx };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     {
@@ -264,6 +269,9 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/?$/);
     if (m) { const r = await messagesRoute(rc, m); if (r !== undefined) return r; }
 
-    return new Response("Not found", { status: 404 });
+    // no-store: this is also the answer for a hashed /assets/* file the
+    // serving build lacks (wrangler.toml), and a cached 404 would outlive
+    // the deploy that brings the file back.
+    return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 }

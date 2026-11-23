@@ -2,7 +2,7 @@
 
 import { b64urlDecode, b64urlEncode } from "../lib/crypto.js";
 import { mediaSig } from "../lib/media.js";
-import { isStoreError, storeError } from "../lib/errors.js";
+import { goneError, isStoreError, storeError } from "../lib/errors.js";
 import { parseRange } from "../lib/http.js";
 import { STORE_MSG } from "../limits.js";
 import type { CfgRow, MdRow, MsgRow, Room } from "./Room.js";
@@ -22,6 +22,11 @@ export type MediaViewer = { name?: string | null, owner?: boolean };
 export function hiddenDraft(r: DraftCols, who: string | null | undefined, owner: boolean | undefined) {
   return !!r.draft && !owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase();
 }
+
+// One stored file's row for serving it. A page's name is on its message
+// (html_name), not on the md row: it names the download a page becomes
+// when opened outside a frame (mediaHeaders).
+const MEDIA_ROW_SQL = "SELECT md.type AS type, md.r2key AS r2key, md.size AS size, COALESCE(md.name, CASE WHEN md.kind = 'html' THEN m.html_name END) AS name FROM md LEFT JOIN m ON m.id = md.msg WHERE md.msg = ? AND md.kind = ? AND md.upload_id IS NULL";
 
 export const MediaMethods = {
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
@@ -95,7 +100,13 @@ export const MediaMethods = {
   // published video. So they take turns, one at a time per message and
   // kind, in the order they came. The turns live in memory, which is
   // enough: the requests they order die with the instance too.
-  async withMediaLock<T>(id: number, kind: string, fn: () => Promise<T>): Promise<T> {
+  // The turn is also where a room deleted meanwhile is noticed (Room.fence):
+  // before fn starts and after it ends, and fn asks live() after each of
+  // its own storage awaits, before it writes a row, so a writer left over
+  // from a deleted room never writes into it or into one created since.
+  async withMediaLock<T>(id: number, kind: string, fn: (live: () => boolean) => Promise<T>): Promise<T> {
+    const gen = this.gen;
+    const live = () => this.alive(gen);
     const k = id + ":" + kind;
     const before = this.mediaLocks.get(k) || Promise.resolve();
     let done = () => {};
@@ -104,7 +115,10 @@ export const MediaMethods = {
     this.mediaLocks.set(k, tail);
     try {
       await before;
-      return await fn();
+      this.fence(gen);
+      const out = await fn(live);
+      this.fence(gen);
+      return out;
     } finally {
       done();
       if (this.mediaLocks.get(k) === tail) this.mediaLocks.delete(k);
@@ -115,8 +129,12 @@ export const MediaMethods = {
     const key = this.mediaKey(room, id, kind);
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
     const media = this.env.MEDIA;
-    return this.withMediaLock(id, kind, async () => {
+    return this.withMediaLock(id, kind, async (live) => {
       try { await media.put(key, data, { httpMetadata: { contentType: type } }); } catch { throw storeError(); }
+      // the room was deleted while the bytes were stored: its sweep has
+      // run, so this object would be nobody's (ids, and so keys, never
+      // come back: nothing else is stored under it)
+      if (!live()) { try { await media.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } throw goneError(); }
       // A single-shot attach replaces any upload in flight for the same
       // kind: the row first, then the upload ends.
       const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
@@ -142,14 +160,14 @@ export const MediaMethods = {
   mediaMeta(id: number, kind: string, viewer?: MediaViewer) {
     if (!this.mediaShown(id, viewer)) return null;
     // An upload still in flight has no object yet.
-    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
+    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>(MEDIA_ROW_SQL, id, kind).toArray()[0];
     return row ? { type: row.type, r2key: row.r2key, size: row.size, name: row.name || null } : null;
   },
 
   /** @param range the request's Range header */
   async getMedia(id: number, kind: string, range: string | null | undefined, viewer?: MediaViewer): Promise<MediaBytes | null> {
     if (!this.mediaShown(id, viewer)) return null;
-    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
+    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>(MEDIA_ROW_SQL, id, kind).toArray()[0];
     if (row && row.r2key && this.env && this.env.MEDIA) {
       try {
         const rr = parseRange(range, row.size);

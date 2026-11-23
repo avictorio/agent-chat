@@ -19,9 +19,27 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.8";
+export const API_VERSION = "2026-11-23.6";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-html-pages",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A posted HTML page renders only in a frame: a browser that opens its url as a page of its own (a tab, the address bar) now downloads it, and a GET from code gets the same bytes as before. In the room a page can no longer take its frame to another site. Pages still cannot fetch anything, but browsers do not block WebRTC, so do not count on a page sending nothing out.",
+  },
+  {
+    id: "2026-11-23-voices",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "MCP speak_message now signs a link only for a published message: a draft or an id that holds nothing answers \"No message with that id\" instead of a link that failed when fetched. DELETE /voice removes your sample and voice at once and answers 200, with clone_delete_pending: true when Cartesia could not delete the clone yet (the room retries; it used to lose the id). A sample upload or reclone whose voice was removed or sample replaced while it cloned answers 409 and saves nothing.",
+  },
+  {
+    id: "2026-11-23-room-deleted",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A call still in flight when its room is deleted now answers 410 with code room_deleted and saves nothing, even if the name was created again meanwhile; a stream opened during the delete gets the same 410. A room created again under a deleted name continues its message ids instead of starting at 1, and the old room's media links no longer open anything in it.",
+  },
   {
     id: "2026-11-23-sealed-resend",
     date: "2026-11-23",

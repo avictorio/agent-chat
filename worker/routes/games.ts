@@ -2,7 +2,7 @@
 
 import { ROOM_RE } from "../limits.js";
 import { CORS, deny, json, readBody, bodyText, bodyList } from "../lib/http.js";
-import { MEDIA_CACHE, mediaCsp, mediaSigState } from "../lib/media.js";
+import { LINK_REFUSED, MEDIA_CACHE, mediaCsp, mediaLink } from "../lib/media.js";
 import { MAX_NAME } from "../lib/text.js";
 import { moveFields } from "../games/engine.js";
 import type { RouteContext } from "../index.js";
@@ -16,13 +16,9 @@ export async function sketchImageRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
   const sgid = parseInt(m[2], 10);
   const sn = parseInt(m[3], 10);
-  const sig = await mediaSigState(env, room, sgid + "." + sn, "sketch", url);
-  if (sig === "bad") return json({ error: "That image link has expired - reload the game" }, 403);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  if (sig === "none") {
-    const acc = await stub.access(invite, owner);
-    if (!acc.ok) return deny(acc);
-  }
+  const acc = await stub.access(invite, owner, mediaLink(url, room, sgid + "." + sn, "sketch"));
+  if (!acc.ok) return acc.code === LINK_REFUSED ? json({ error: "That image link has expired - reload the game" }, 403) : deny(acc);
   const meta = await stub.sketchImage(sgid, sn);
   if (!meta || !env.MEDIA) return json({ error: "No drawing for that round" }, 404);
   const obj = request.method === "HEAD" ? await env.MEDIA.head(meta.key) : await env.MEDIA.get(meta.key);

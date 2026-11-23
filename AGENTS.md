@@ -51,7 +51,7 @@ Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
 Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
 project). Never delete the `__vapid` Durable Object; Web Push lives there.
 Leave the KV `REQUESTS` content alone too: it holds the create-room
-and voice-clone counters, the emoji cache and the activity log.
+counters, the emoji cache and the activity log.
 
 The front end ships with the Worker as Workers Static Assets: section 7 has
 the build and deploy pipeline, `docs/agents/web-app.md` the build id.
@@ -89,10 +89,10 @@ Each stands until the owner changes it; the detail is where it points.
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
 | Worker script | `victorio-chat` |
 | Code | `worker/` (entry `worker/index.ts`), `web/`, `contract/`: see Repository layout. `.txt`, `.md` and `.sh` files are text modules (`wrangler.toml`'s Text rule). |
-| Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first = ["/*", "!/assets/*"]`; `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`); the Worker serves `index.html` at `/` and `/r/:room`. |
+| Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*` and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
-| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters, the direct-upload check's verdict |
+| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room counters, the direct-upload check's verdict |
 | R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings, and the direct check's short-lived objects under `_check/` (`docs/agents/media.md`) |
 | Cron trigger | none: `wrangler.toml` carries `crons = []` (section 7) |
 | Compatibility date | `2025-04-01` |
@@ -150,7 +150,7 @@ agent-chat/
 | `ANTHROPIC_API_KEY` | **secret** | optional: Sketch & Guess's Referee asks Claude about close-call guesses (`sgClaudeJudge`); without it the game falls back to plain text matching |
 | `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential behind direct uploads: the account-owned API token "chat site direct uploads (R2 victorio-chat-media objects)", object read and write on that bucket only. It never signs an address that leaves the Worker: each upload's part addresses are signed with a temporary credential derived from it, good for uploading parts of that one file only (`docs/agents/media.md`, The direct path). Key id = the token's id; secret = the SHA-256 of its value (R2's S3 convention). To rotate, roll the token and set both secrets again. |
 | `R2_ACCOUNT_ID` / `R2_BUCKET` | plain text | where presigned part addresses point (`<account>.r2.cloudflarestorage.com/<bucket>/...`); `wrangler.toml` [vars] |
-| `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them. Either way they are offered only while the direct check passes on the live bucket. `wrangler.toml` [vars] |
+| `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them, and uploads already in flight are stopped too (their parts go through the site, or they are told to start again: `docs/agents/media.md`, The direct path). Either way they are offered only while the direct check passes on the live bucket. `wrangler.toml` [vars] |
 | `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
 
 The bindings `ROOM`, `REQUESTS`, `MEDIA` and `ASSETS` are in the table
@@ -381,12 +381,14 @@ After pushing:
    hashes the same. Run `npm run check:config` and confirm the Worker has
    no cron schedules (`GET .../schedules` lists none).
 3. Fetch the changed page and confirm the new content is actually served.
-4. **For Durable Object changes, probe behavior against a live room.** A
-   warm DO instance outlives deploys and keeps serving the old generation
-   for minutes, up to about 40 in a busy room: a new route answers 500
-   (1101), a new method fails with "RPC receiver does not implement the
-   method", and a changed method can drop a new field while still answering
-   201. A served page proves nothing about the DO. Check that the new field
+4. **For Durable Object changes, probe behavior against a live room.**
+   Since 2026-10-30 Cloudflare defers code updates by default: an active
+   DO instance keeps serving the old code after a deploy until it
+   hibernates, for at most 300 seconds (`max_delay`; `wrangler.toml` sets
+   no `code_update_strategy`), and Cloudflare can reset it sooner. In that
+   window a new route answers 500 (1101), a new method fails with "RPC
+   receiver does not implement the method", and a changed method can drop
+   a new field while still answering 201. A served page proves nothing about the DO. Check that the new field
    is in the response or the listing, not just the status; don't declare
    failure or success from the first probe; re-post once the room cycles.
 5. Live-test (section 9).

@@ -74,7 +74,11 @@ export const MessageMethods = {
    * @param pubauto publish the draft once its upload verifies
    */
   async post(sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null) {
+    // the room the post was sent to: deleted during the sweep, it takes no message (Room.fence)
+    const gen = this.gen;
+    this.fence(gen);
     await this.sweepDrafts();
+    this.fence(gen);
     this.roomName = room;
     const ts = Date.now();
     // A post with media inside it is stored as a draft until every file

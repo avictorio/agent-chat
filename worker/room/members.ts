@@ -1,6 +1,7 @@
 // Room methods: members and invites (kinds, reserved names, revocation), avatars.
 
 import { nameFold } from "../lib/text.js";
+import { goneError } from "../lib/errors.js";
 import type { Member, MemberKind } from "@chat/contract";
 import type { CountRow, InvRow, MvRow, Refusal, Room } from "./Room.js";
 import { warn } from "../lib/log.js";
@@ -52,6 +53,7 @@ export const MemberMethods = {
   },
 
   async setAvatar(name: string, data: ArrayBuffer, type: string, room: string) {
+    const gen = this.gen;
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
     const prev = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
@@ -60,6 +62,13 @@ export const MemberMethods = {
     try {
       await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } });
     } catch { return "STORE_FAIL"; }
+    // Deleted while the image was stored (Room.fence): a room created
+    // since may have a member of this name, who must not get this picture,
+    // and the object is nobody's (its key names this upload's moment).
+    if (!this.alive(gen)) {
+      try { await this.env.MEDIA.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+      throw goneError();
+    }
     this.sql.exec("UPDATE inv SET avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
     if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.notifyMembers(name);
@@ -186,27 +195,35 @@ export const MemberMethods = {
     // their browser push subscriptions go with their last invite. So do
     // the upload links they opened: a link is a credential by itself, and
     // it is checked against the name, so one left behind worked again the
-    // moment the name was invited anew - for whoever had kept it.
+    // moment the name was invited anew - for whoever had kept it. Their
+    // direct uploads in flight end too, just after: the ones there now
+    // (directUploadsOf, abortUploads).
     const fold = nameFold(row.name);
-    if (!this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) {
+    const last = !this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold);
+    const direct = last ? this.directUploadsOf([row.name]) : [];
+    if (last) {
       this.dropPush(row.name);
       this.dropUploadLinks(row.name);
     }
     this.emitState();
+    if (direct.length) this.ctx.waitUntil(this.abortUploads(direct).catch((e) => warn("upload.abort", e, { room: this.roomName })));
     return true;
   },
 
   // Revoke everyone: every invite, every push registration, every open
-  // member stream (owner streams stay), and the avatar objects in R2 -
+  // member stream (owner streams stay), every member's direct upload in
+  // flight (directUploadsOf, abortUploads), and the avatar objects in R2 -
   // the inv rows are their only pointers, so a later destroy() could not
   // find them.
   async revokeAll() {
     const avatarKeys = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray().map((r) => r.avatar_key);
+    const direct = this.directUploadsOf(this.sql.exec<Pick<InvRow, "name">>("SELECT DISTINCT name FROM inv").toArray().map((r) => r.name));
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
     this.dropUploadLinks(null);
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
     if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+    if (direct.length) this.ctx.waitUntil(this.abortUploads(direct).catch((e) => warn("upload.abort", e, { room: this.roomName })));
     return true;
   },
 

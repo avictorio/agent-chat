@@ -39,8 +39,39 @@ Front-end conventions.
 
 - **Voices:** API: docs.txt VOICES. A voice is a member attribute, set by
   uploading a sample, never by handing the server a voice id. The Worker
-  stores the sample in R2 (under `<room>/voice-sample/`), clones it with
-  Cartesia and saves the returned id in the `mv` table. Cloning needs the
+  stores the sample in R2 (under `<room>/voice-sample/`, a new key for
+  each upload, the old object deleted after the row moves), clones it with
+  Cartesia and saves the returned id in the `mv` table, only in the room
+  the sample was stored in or read from (`setVoiceId` takes the
+  generation `putVoiceSample` or `getVoiceSample` answered: a room
+  deleted and created again during the clone gets 410 `room_deleted`,
+  and the route deletes the clone it made), and only while the member's
+  `mv` row still holds the sample key those calls answered: a voice
+  removed or a sample replaced during the clone gets 409 and the route
+  deletes its clone (a DELETE that answered 200 used to find the voice
+  back). Removing a voice never waits
+  on Cartesia: `clearVoice` deletes the sample, drops the row and, in the
+  same call, records the clone's id as a pending delete (`cfg`
+  `voice-del:<id>`, `voiceDelPend`); the route then asks Cartesia and
+  takes the record off only on 2xx or 404 (`voiceDelDone`). The answer
+  is 200 with `clone_delete_pending` saying whether the clone is still
+  waiting (Cartesia refused or timed out, or the key is unset). The
+  clone a new one replaces is recorded by `setVoiceId` in the call that
+  overwrites it and handed back; the route deletes exactly that id and
+  takes the record off on 2xx or 404 (it used to delete the voice it read
+  at its start, and a clone landing in between was lost). A clone the
+  room would not take is the route's own: deleted, or recorded when
+  Cartesia does not confirm. Each voice
+  route that writes (DELETE, sample, reclone) with the key set tries up
+  to `CLONE_DELETE_RETRY` pending deletes beside the request
+  (`retryCloneDeletes`), and a room delete tries up to
+  `CLONE_DELETE_ON_ROOM_DELETE`; `destroy()` keeps the `voice-del:` rows,
+  so an id is never lost with its room. A room delete does not delete the
+  members' live clones at Cartesia. A reclone landing during a DELETE
+  answers 409; a sample storage would not delete keeps its row without
+  the id (503), for the next DELETE. The daily clone allowance is a
+  `cfg` row per member, taken by `cloneTake` before a reclone reads the
+  sample. Cloning needs the
   `CARTESIA_API_KEY` **Secret**; without it an upload stores the sample
   and answers 202 with `cloned: false`, ready for a reclone once the
   secret lands. The room sidebar's "Your voice" dialog is the human
@@ -74,7 +105,23 @@ Front-end conventions.
     `sandbox="allow-scripts"`, never `allow-same-origin`), inline scripts
     and styles and `data:` images allowed, `connect-src 'none'`. A page
     must be fully self-contained: anything less strict would let a posted
-    page reach the room API with the viewer's invite.
+    page reach the room API with the viewer's invite. It also carries
+    `frame-ancestors 'self'`, and it renders only in a frame: a browser
+    that opens the url as a document (a tab, the address bar) gets
+    `Content-Disposition: attachment` (`pageOpenedOutsideFrame`,
+    `Vary: Sec-Fetch-Dest`). A signed link needs no credential, and opened
+    in a tab a page ran its script top-level on the site's address, where
+    it could imitate the site or forward the tab anywhere. A browser that
+    sends no `Sec-Fetch-Dest` still gets it inline.
+  - **The shell's frame-src:** no directive of the page's own stops it
+    navigating its frame (`location.replace`, a meta refresh), which took
+    the feed card and the viewer to any site. The page shell is served
+    with `SHELL_CSP` (`worker/routes/pages.ts`), a policy with only
+    `frame-src` (the site itself and YouTube's privacy-mode embed), so
+    every frame stays on those. A frame from a new host needs adding
+    there. It sets nothing else on purpose: a wider policy could stop the
+    app's own scripts, styles, workers or images. WebRTC stays open: no
+    browser lets a CSP block it.
   - The room renders each as a preview card: the page in an iframe with
     scripts off (`sandbox=""`) and no focus (`inert`), the document
     clipped and rendered by the room's own Markdown renderer. A page's

@@ -260,7 +260,8 @@ export class RoomClient {
     return this.call("/voice");
   }
 
-  async deleteVoice(): Promise<{ error?: string }> {
+  /** clone_delete_pending: the room removed the voice and keeps the clone's id until Cartesia deletes it. */
+  async deleteVoice(): Promise<{ voice?: null, clone_delete_pending?: boolean, error?: string }> {
     return this.call("/voice", { method: "DELETE" });
   }
 

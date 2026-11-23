@@ -35,6 +35,9 @@ docs.txt section that owns its routes, caps and formats.
   field). `events=` (wire kinds, or `all`) and `game=` (match ids)
   narrow a subscription; the DO's stream handler parses both and answers
   400 to an unknown kind or a malformed list before the stream opens. The
+  route passes the caller's invite to the DO in `X-Invite-Token`, never in
+  the URL of that fetch: Workers Logs records it, and a token in the query
+  stayed readable there whenever it missed the logs' masking. The
   default is `all` on purpose: extra frames are filterable noise, missing
   frames are silent starvation. Only message frames replay from the
   cursor; the other kinds are live-only, and consumers re-sync from
@@ -103,6 +106,21 @@ docs.txt section that owns its routes, caps and formats.
   so a create for the same name answers 409 until the delete is done. A
   public create that landed in the middle used to get an invite into the
   old room's messages.
+  A call already in flight when the delete starts is fenced off by
+  `Room.gen`, which `destroy()` bumps: a call that waits on storage (or
+  on Claude, for the Sketch & Guess Referee) reads it as it starts and
+  checks `alive(gen)` or `fence(gen)` after each wait, before it writes a
+  row. Past the fence it writes nothing, deletes any object it stored
+  itself, and throws `goneError`, which `worker/index.ts` answers 410
+  `room_deleted`. Every writer of a message's media checks inside its
+  `withMediaLock` turn (the lock hands `fn` a `live()` check), so a new
+  writer goes through the lock or does the same. The counter is in
+  memory: the calls it fences die with the instance. `msg_hwm` is
+  written back into a fresh `cfg` right after `deleteAll`, so a room
+  created again carries on the ids, and so the media keys, of the one
+  before it; `Room.fetch` refuses a stream while the room is not ready.
+  Without both, a delete from the old room removed the new room's
+  message of the same id, and a post from it announced itself there.
 
 - **Members.** API: docs.txt MEMBERS. `GET /members` gives
   names, statuses, `joined` and `last_seen`, and every member's
@@ -342,7 +360,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `rx` | reactions: message, emoji, who, time |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |
-| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones on their last cloning day, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read: one row per member who ever cloned, kept for the room's life), `voice-del:<clone id>` (a clone a member removed or a new clone replaced that Cartesia has not confirmed deleted, the value when it was recorded: written in the call that drops or replaces the voice, tried again up to `CLONE_DELETE_RETRY` at a time by the room's voice routes with the key set and up to `CLONE_DELETE_ON_ROOM_DELETE` by a room delete, and removed only on Cartesia's 2xx or 404; `web-app.md`, Voices), test-hook flags. A deleted room keeps two kinds of row: `msg_hwm` and the `voice-del:` rows (`destroy()` writes them back after `deleteAll`). |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
 | `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
@@ -361,9 +379,9 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
   are not atomic, so a parallel burst can overshoot a cap slightly:
   they are an abuse brake, not a hard guarantee. Gmail dot/+tag variants
   count as different emails; the IP and site-wide caps are the real bind.
-- `clone:<room>:<folded name>:<day>`: voice clones per member per UTC day
-  (`VOICE_CLONES_PER_DAY`; the owner is not capped), 48 h TTL. Same
-  abuse-brake caveat.
+- `clone:<room>:<folded name>:<day>`: no longer written (the clone
+  allowance is counted in the room's `cfg`); old keys expire on their
+  48 h TTL.
 - `asset:emoji-<sha>.json` (`EMOJI_KV_KEY`): the web picker's emoji list,
   built once from the pinned dataset (`EMOJI_SOURCE`).
 - `check:r2-direct`: the direct-upload check's verdict: a day when it

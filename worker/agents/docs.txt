@@ -16,6 +16,11 @@ ROOMS
     POST   /api/rooms/ROOM                  creates the room
     DELETE /api/rooms/ROOM?confirm=ROOM     deletes the room and everything in it, for good
                                             (remove its invites first; some rooms are protected)
+  A call still in flight when its room is deleted stops there and answers 410 room_deleted; it
+  saves nothing, even if the name has been created again meanwhile. A stream opened while the
+  room is being deleted is refused the same way. A room created again under a deleted room's
+  name carries on its message ids (they never repeat), and no media link of the old room
+  opens anything in it.
   Watch a room in a browser: {{origin}}/r/ROOM
   Each room keeps its most recent {{KEEP}} messages.
 
@@ -279,6 +284,7 @@ ERRORS AND THEIR CODES
     rate_limited     429  a cap that resets with time; wait the Retry-After header's seconds
     limit_reached    429  a cap on how many exist at once (open upload tickets, active invites);
                           it frees up when one finishes, so there is no Retry-After
+    room_deleted     410  the room was deleted while this call was in flight; nothing was saved
   Errors without a code (most 400s, 404s and game moves) keep their sentence only. Over MCP, a
   refused token is JSON-RPC error -32001 with data {"code"}; a tool that hits a cap returns its
   error with structuredContent {"code", "retry_after"}.
@@ -300,7 +306,10 @@ INVITES AND TOKENS
   either way the answer carries a Deprecation header, a Sunset header with the retirement date, a
   Link to {{origin}}/api/changes, and a JSON object answer gains a "notice" saying what to change.
   Your invite fixes your name: everything you post or do uses it. Revoking one invite cuts off
-  only that person; everyone else keeps access.
+  only that person; everyone else keeps access. When it was the name's last invite, their direct
+  uploads in flight ("direct": true) are cancelled, so part addresses already handed out stop
+  working. Uploads through the site in flight stay, and whoever holds the name's next invite can
+  resume them; finished files and drafts stay.
   Owner endpoints (need the X-Owner-Key header):
     POST   /api/rooms/ROOM/invites        {"name": "henry", "kind": "agent"}  -> {"token", "link", ...}
     GET    /api/rooms/ROOM/invites        list invites
@@ -377,13 +386,19 @@ VOICES
                                                (Content-Type: audio/mpeg etc.) or JSON {"audio": "<base64 or data: URL>"}
     GET    /api/rooms/ROOM/voice               your voice status {provider, voice_id, sample}
     POST   /api/rooms/ROOM/voice/reclone       clone again from your stored sample
-    DELETE /api/rooms/ROOM/voice               removes your sample and voice id
+    DELETE /api/rooms/ROOM/voice               removes your sample and voice id at once -> {"voice": null,
+                                               "clone_delete_pending"}; the clone is deleted at Cartesia,
+                                               and when Cartesia cannot do it now (or cloning is not
+                                               configured) clone_delete_pending is true: the room keeps
+                                               the clone's id and deletes it on a later try, nothing to
+                                               send again
     PUT|DELETE /api/rooms/ROOM/members/NAME/voice/sample|voice   owner key: upload for, or clear, anyone
     POST   /api/rooms/ROOM/members/NAME/voice/reclone            owner key: reclone anyone from their sample
   Cloning is a paid call: a member gets {{VOICE_CLONES_PER_DAY}} clones a day (uploads that clone and
   reclones together; past that, 429 - an upload still stores the sample). A new clone replaces the
-  old one. GET /members gives each member a voice field (or null). Streams send an "event:
-  members" when one changes.
+  old one. A clone whose voice was removed or whose sample was replaced while it was being made
+  answers 409 and saves nothing: the server discards that clone. GET /members gives each member a
+  voice field (or null). Streams send an "event: members" when one changes.
     curl -X PUT {{origin}}/api/rooms/ROOM/voice/sample -H 'X-Invite-Token: TOKEN' \
       -H 'Content-Type: audio/mpeg' --data-binary @sample.mp3
     GET    /api/rooms/ROOM/messages/ID/speak   hear a message in its sender's cloned voice
@@ -428,7 +443,10 @@ UPLOADING FILES
   with no other headers and no credential. A url takes exactly its part's N bytes (it is
   signed for that length) and works for {{UP_SIGN_TTL}}; sign again for more. status and finish
   work as above - storage's own list of the parts is what counts. Otherwise ("direct": false
-  in the answer) the parts go through the site.
+  in the answer) the parts go through the site. If direct uploads are switched off while
+  one is in flight, sign answers 409: send the remaining parts through the site (PUT
+  /part?n=N; the parts already sent count), or, when its parts are over {{UP_PART_MAX}}, abort
+  it and start again (a start of the same file answers 409 too).
   Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then
   finish. Calling start again with the same size (and fingerprint) resumes rather than
   restarting (a 502 there means storage did not list the parts: ask again rather than
@@ -490,7 +508,12 @@ VIDEO MESSAGES
   POST /api/rooms/ROOM/video/resume is the resume lookup narrowed to videos). Messages with
   a video carry "video": {"type", "bytes", "url"}; GET on the url honours Range.
   Or send a whole video in ONE request: PUT /messages/ID/video/stream with the raw file as
-  the body. The site's edge refuses request bodies over 100 MB, so that is its practical
+  the body and its type as Content-Type (video/mp4, video/webm or video/quicktime). With
+  application/octet-stream, curl --data-binary's default type or none, the type is read
+  from the file's first bytes (415 if they are not a video's, before anything is stored):
+    curl -X PUT --data-binary @clip.mp4 -H "Content-Type: video/mp4" -H "X-Invite-Token: TOKEN" \
+      "{{origin}}/api/rooms/ROOM/messages/ID/video/stream"
+  The site's edge refuses request bodies over 100 MB, so that is its practical
   limit; bigger files go in parts. A second stream for the same message replaces one still
   in flight, which then answers 409 and stores nothing. A draft posted with "publish_on_complete": true
   publishes the moment its video verifies (stream or finish) - no /publish call needed.
@@ -509,10 +532,14 @@ HTML PAGES AND MARKDOWN DOCUMENTS
   inline in the POST body (never with "draft"): "html" is the page itself as raw text (or a
   base64 data: URL), up to {{HTML_MAX}}, with "html_name" as its display name; "doc" is the Markdown
   as raw text (or a base64 data: URL), up to {{DOC_MAX}}, with "doc_name" (e.g. "notes.md"). The page
-  runs in a sandboxed frame with an opaque origin and no network access: inline scripts, styles
-  and data: images work, anything fetched does not. Messages carry "html" / "doc" as {"type",
-  "bytes", "name", "url"} (null when absent; the url: MEDIA LINKS); the content itself is at
-  GET /api/rooms/ROOM/messages/ID/html and .../ID/doc.
+  runs in a sandboxed frame with an opaque origin: inline scripts, styles and data: images work;
+  anything fetched or loaded from elsewhere does not, and the page cannot take its frame to another
+  site. Browsers do not let a page's policy block WebRTC, so do not count on a page being unable
+  to send anything out. Messages carry "html" / "doc" as {"type", "bytes", "name", "url"} (null
+  when absent; the url: MEDIA LINKS); the content itself is at GET /api/rooms/ROOM/messages/ID/html
+  and .../ID/doc. A page renders only in a frame: a browser that opens its url as a page of its
+  own (a tab, the address bar) gets it as a download (Content-Disposition: attachment); a GET from
+  code gets the same bytes either way.
 
 PHONE NOTIFICATIONS (WEB PUSH)
   Members can get a phone notification for new messages via Web Push. The site serves

@@ -49,7 +49,14 @@ API: docs.txt MEDIA LINKS.
   use). There is no Worker secret for it, so nothing for `check:config`
   to inventory. Sketch & Guess drawings use the same signature.
 - A media GET or HEAD takes a valid signature with no credential, or the
-  invite header; an invalid or expired signature answers 403.
+  invite header; an invalid or expired signature answers 403. The room
+  checks the signature itself (`access()` with the link, `mediaLink` in
+  `lib/media.ts`), against the key it has now, so no copy of the key
+  lives in the Worker: a minute's cache there outlived a room's delete,
+  and an old room's links opened the files of a room created again under
+  the name while the new room's own links answered 403. Links the Worker
+  mints (attach answers, avatars) read the key from the room each time
+  (`mediaSigner`, one read per list).
 - The expiry sits on an hour grid, one to two hours out (`mediaQuery`),
   so every URL minted in the same hour is identical and browsers can
   cache media (`MEDIA_CACHE`: private, an hour, immutable). A message's
@@ -178,7 +185,18 @@ way; the routes are in docs.txt UPLOADING FILES.
 - The older video routes (`/video/start|part|finish|abort|status`,
   `/video/resume`) are this engine with kind `video`. Video can also go
   up whole through `PUT /messages/:id/video/stream`, whose real limit is
-  the edge's 100 MB request cap.
+  the edge's 100 MB request cap. Its Content-Type is lower-cased and
+  stripped of parameters; one that names no kind of file
+  (`application/octet-stream`, curl's form type, none) is replaced by the
+  type its first bytes show (`UNTYPED` in `worker/routes/uploads.ts`),
+  read before the upload is reserved, so a non-video costs no storage.
+  From its reservation (`streamBegin`) to
+  its answer the stream's work is also handed to `ctx.waitUntil`
+  (`RouteContext.ctx`): Cloudflare may cancel a request's work when its
+  client disconnects, awaits included, and a phone that dropped mid-body
+  left its parts in storage and its row holding the upload id, while one
+  that dropped after the last byte left the video unindexed and a
+  `publish_on_complete` draft unposted.
 - **The web composer** (`features/composer/uploads.ts`) sends small
   photos, clips, pages and documents inline and everything else through
   the engine: every video (base64 of up to `VIDEO_MAX` in one JSON body
@@ -297,6 +315,14 @@ counts as not answered. A direct session picked up again (a second
 its parts fit a request to the site (`upStaysDirect`): the client sends
 the rest through `/part`, keeping the parts it has, since storage holds
 one list of parts however they arrive. Bigger parts wait for the check.
+Turning `R2_DIRECT` off shuts the path for sessions in flight as well
+(`upDirectOff`; the owner key is exempt, as it may force direct):
+a resume answers `direct: false` and `status` says the same, `sign`
+answers 409 telling the client to send the rest through `/part`, and a
+session whose parts are over `UP_PART_MAX` gets 409 from `sign`, `/part`
+and a resume alike, telling it to abort and start again (the server
+does not drop the upload itself: the switch may come back on within the
+session's 7 days).
 Read it in the logs: a pass is `{"note": "r2direct.check"}`, anything
 else `{"warn": "r2direct.check"}`, each with storage's status and error
 code for every try. `tests/unit/r2-direct.test.mjs` recomputes the JWT
@@ -333,6 +359,20 @@ credential, and the route reads no other.
   invite again at the write, so a request that was waiting on its body
   during the revoke cannot add a link afterwards (rooms-and-api.md, "A
   revoke and the requests in flight").
+- **So do their direct uploads in flight.** `revoke` and `revokeAll`
+  take the list in their own call (`directUploadsOf`: the sessions with
+  `mode = 'direct'` the removed names hold, with their upload ids), and
+  `abortUploads` cancels exactly those after the answer (`waitUntil`),
+  each in its message and kind's turn and only while the row still holds
+  that upload id: the rows go and storage aborts the upload. Aborting is
+  the only way to stop a direct upload's part addresses, presigned for
+  `UP_SIGN_TTL`. Nothing started after the revoke is touched: the list
+  used to be read later, by name, and cancelled the upload of whoever held
+  the name's new invite (a revoke and re-invite is how a leaked link is
+  rotated). Uploads through the site in flight stay: their link went with
+  `dropUploadLinks` and every step checks the invite, so the removed
+  holder is shut out already, and the name's next holder can resume them.
+  Files already in place, and the drafts, stay.
 - **A resumable link** comes from the same mint given a `size` (any
   kind, small files too, in one part; kind `file` must give one; only a
   call without `size` gets a single-shot ticket): it starts an upload-engine session and returns

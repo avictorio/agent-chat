@@ -7,7 +7,8 @@ import { DurableObject } from "cloudflare:workers";
 import { gameEngine } from "../games/engine.js";
 import { renderRoomState, stateFrame, streamWants } from "./state.js";
 import { KEEP } from "../limits.js";
-import { SSE_HEADERS, sseFrame } from "../lib/http.js";
+import { SSE_HEADERS, json, sseFrame } from "../lib/http.js";
+import { GONE_MSG, goneError } from "../lib/errors.js";
 import { FourInARowMethods } from "../games/fourinarow.js";
 import { TrustMethods } from "../games/trust.js";
 import { AuctionMethods } from "../games/auction.js";
@@ -37,6 +38,7 @@ import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
 import type { UpFinish } from "./uploads.js";
+import { LINK_REFUSED, mediaLinkOk, type MediaLink } from "../lib/media.js";
 import { warn } from "../lib/log.js";
 
 /* ---------- storage rows ----------
@@ -305,6 +307,10 @@ export class Room extends DurableObject {
   declare testR2DelayMs?: number;
   /** True while destroy() is deleting the room's storage. */
   destroying = false;
+  /** How many times destroy() has begun in this instance's life: the
+   *  room a call began in, as fence() and alive() compare it. In memory is
+   *  enough: the calls it fences die with the instance. */
+  gen = 0;
   /** Upload links being minted right now, by folded member name (room/uploads.ts, mintUploadTicket). */
   utMinting: Map<string, number> = new Map();
   /** The writer of each message's media kind holding its turn, by "msg:kind" (room/media.ts, withMediaLock). */
@@ -339,6 +345,24 @@ export class Room extends DurableObject {
 
   exists() {
     return this.ready;
+  }
+
+  // A call that waits on storage (or on anything else) lets other calls
+  // run, a room delete among them, and nothing used to stop it carrying on
+  // afterwards: a post whose picture was still uploading then indexed and
+  // announced it in a room created again under the same name, or failed
+  // with its object left in the bucket for good. Such a call reads gen as
+  // it starts and asks here after each wait; once the room it began in is
+  // gone - deleted, whether or not created again - it writes nothing more,
+  // deletes what it stored itself, and stops with goneError (410).
+  /** @param gen this.gen as the call began */
+  alive(gen: number) {
+    return this.ready && this.gen === gen;
+  }
+
+  /** Throws goneError unless the room the call began in is still here (alive). */
+  fence(gen: number) {
+    if (!this.alive(gen)) throw goneError();
   }
 
   create() {
@@ -376,6 +400,7 @@ export class Room extends DurableObject {
     // the old room's messages, and then lost its tables to deleteAll.
     this.destroying = true;
     this.ready = false;
+    this.gen++;
     try {
       return await this.destroyNow(room);
     } finally {
@@ -417,12 +442,37 @@ export class Room extends DurableObject {
     } catch (e) {
       warn("room.destroy.media", e, { room });
     }
+    // The id counter outlives the room: storage wipes cfg with the rest,
+    // and a room created again under the name used to hand out 1, 2, 3
+    // again - the same ids and so the same media keys (ROOM/ID/KIND) as
+    // the old room's. A call still in flight from the old room then acted
+    // on the new room's message of that id (a delete removed it), and an
+    // old signed link served the new room's file. This number is kept,
+    // and nothing of the room's content.
+    let hwm = 0;
+    try { hwm = this.msgHwm(); } catch (e) { warn("room.destroy.hwm", e, { room }); }
+    // Kept too: the ids of clones members asked to delete that Cartesia
+    // has not confirmed (room/voices.ts, voiceDelPend). The room delete
+    // tries them (routes/rooms.ts); one Cartesia refused then would be
+    // lost with the room while the clone lives on.
+    let voiceDels: CfgRow[] = [];
+    try { voiceDels = this.sql.exec<CfgRow>("SELECT k, v FROM cfg WHERE substr(k, 1, 10) = 'voice-del:'").toArray(); } catch (e) { warn("room.destroy.voicedel", e, { room }); }
     await this.ctx.storage.deleteAll();
+    if (hwm || voiceDels.length) this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+    if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(hwm));
+    for (const d of voiceDels) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", d.k, d.v);
+    // A stream or long poll that slipped in during the awaits above
+    // (fetch refuses one now, but this is the last word) goes too.
+    for (const c of Array.from(this.clients)) c.close();
+    const late = this.waiters;
+    this.waiters = new Set();
+    for (const w of late) w();
     // In-memory caches of what was just deleted: a room recreated under the
     // same name in this instance's lifetime must not sign with the old key
     // or skip its draft sweep.
     this._sigBytes = null;
     this._sweptAt = 0;
+    this.sgJudging = new Set();
     return { deleted: true };
   }
 
@@ -470,9 +520,16 @@ export class Room extends DurableObject {
 
   // Access: every room is invite-only:
   // reading, streaming and posting always need a valid invite or the owner key.
-  access(token: string | null | undefined, owner: boolean): Access | Refusal {
+  // A media read may instead carry a signed link (link): it is checked
+  // here, against the key the room has now, so a link from before a delete
+  // opens nothing in a room created again (lib/media.ts says more).
+  access(token: string | null | undefined, owner: boolean, link?: MediaLink): Access | Refusal {
     if (owner) return { ok: true };
     const l = this.lookupInvite(token);
+    if (!l.ok && link) {
+      if (this.ready && mediaLinkOk(this.mediaSigKeyBytes(), link)) return { ok: true };
+      return { ok: false, status: 403, code: LINK_REFUSED, error: "This media link is invalid or has expired" };
+    }
     if (!l.ok) return l;
     const row = l.row;
     const now = Date.now();
@@ -487,6 +544,9 @@ export class Room extends DurableObject {
   // re-arm for the next deadline. This is what lets a match run to its
   // finish overnight with nobody reading it.
   async alarm() {
+    // a room deleted with its alarm still set has nothing left to advance
+    if (!this.ready) return;
+    const gen = this.gen;
     let saved = "";
     try { const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'room_name'").toArray()[0]; saved = r ? String(r.v || "") : ""; } catch (e) { warn("alarm.name", e); }
     const room: string = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
@@ -498,6 +558,9 @@ export class Room extends DurableObject {
     try {
       const rows = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
       for (const r of rows) {
+        // deleted during an earlier match's await: these ids are not the
+        // ones read above any more (a room created since starts at 1)
+        if (!this.alive(gen)) break;
         try {
           const g = this.gameRow(r.id);
           const eng = g && g.status === "running" ? gameEngine(g.st) : null;
@@ -512,12 +575,18 @@ export class Room extends DurableObject {
         }
       }
     } finally {
-      await this.armGameAlarm();
+      if (this.alive(gen)) await this.armGameAlarm();
     }
   }
 
   // Server-Sent Events stream. Called by the Worker with ?room=NAME&after=ID|latest
+  // and the caller's invite in X-Invite-Token
   async fetch(request: Request) {
+    // A stream opened while the room is being deleted (the route checked
+    // that it existed a moment before) registered after destroy's close
+    // loop, and an owner's one then carried on into a room created again
+    // under the name. A deleted room has no stream.
+    if (!this.ready) return json({ error: GONE_MSG, code: "room_deleted" }, 410);
     const url = new URL(request.url);
     const room = url.searchParams.get("room") as string; // the stream route always sends room=
     this.roomName = room;
@@ -562,7 +631,8 @@ export class Room extends DurableObject {
     // opened after it and stayed open, under a name that can be invited
     // again (its room_state frames are that member's private view).
     const isOwner = url.searchParams.get("owner") === "1";
-    const token = url.searchParams.get("token") || "";
+    // in a header, out of the logged URL (routes/stream.ts)
+    const token = request.headers.get("X-Invite-Token") || "";
     let member = "";
     if (!isOwner) {
       const l = this.lookupInvite(token);

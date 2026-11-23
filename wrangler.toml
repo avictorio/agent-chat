@@ -24,15 +24,22 @@ preview_urls = false
 routes = [{ pattern = "chat.victorio.cloud", custom_domain = true }]
 
 # The web app (web/, built by Vite) as Workers Static Assets. Cloudflare
-# answers the hashed /assets/* files and the app icons (/icons/*) itself
-# (web/app/public/_headers gives the first a one-year immutable cache, the
-# icons a day); the Worker runs first for everything else, so it owns the API, the page routes and the build-id stamp, and
-# reads index.html through the ASSETS binding. A miss under /assets/*
-# (a stale chunk after a deploy) falls through to the Worker's 404.
+# answers the files that exist itself: the hashed /assets/* (a one-year
+# immutable cache from web/app/public/_headers) and the app icons /icons/*
+# (a day). The Worker runs first on its own paths below, so it owns the API,
+# the page routes and the build-id stamp, and reads index.html through the
+# ASSETS binding ("/index.html" is listed so the raw, unstamped file is never
+# served). Every other path the asset server cannot answer falls through to
+# the Worker, whose 404 is not cached. The paths are listed instead of "/*"
+# with "!/assets/*" because a negative pattern sends the request to the asset
+# server with no fall-through: its 404 for a missing hashed file carried the
+# _headers one-year immutable cache, and a browser that asked for a chunk
+# the serving build lacked (during a deploy or a rollback) kept that 404
+# after the file came back.
 [assets]
 directory = "web/app/dist"
 binding = "ASSETS"
-run_worker_first = ["/*", "!/assets/*", "!/icons/*"]
+run_worker_first = ["/", "/index.html", "/api*", "/r/*", "/llms.txt", "/emoji.json", "/manifest.webmanifest", "/sw.js"]
 html_handling = "none"
 not_found_handling = "none"
 

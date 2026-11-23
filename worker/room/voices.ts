@@ -1,23 +1,32 @@
-// Voices: the daily clone allowance, the speak requests in flight, and the
-// Room methods for members' voice samples, clones and speaking.
+// Voices: the speak requests in flight, and the Room methods for members'
+// voice samples, clones, their daily clone allowance and speaking.
 
 import { nameFold } from "../lib/text.js";
+import { goneError } from "../lib/errors.js";
 import { VOICE_CLONES_PER_DAY } from "../limits.js";
-import type { MsgRow, MvRow, Room } from "./Room.js";
+import type { CfgRow, MsgRow, MvRow, Room } from "./Room.js";
 import { warn } from "../lib/log.js";
 
 /** speak syntheses in flight, by "room:message id" */
 export const SPEAK_INFLIGHT: Map<string, Promise<ArrayBuffer>> = new Map();
 
-export async function cloneAllowed(env: Env, room: string, who: string) {
-  const k = "clone:" + room + ":" + nameFold(who) + ":" + new Date().toISOString().slice(0, 10);
-  const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
-  if (n >= VOICE_CLONES_PER_DAY) return false;
-  await env.REQUESTS.put(k, String(n + 1), { expirationTtl: 172800 });
-  return true;
-}
-
 export const VoiceMethods = {
+  // One of the member's VOICE_CLONES_PER_DAY clones (a UTC day), taken in
+  // this one call, before anything is read or sent to Cartesia. The count
+  // was a KV get then put in the Worker: clones sent together all read the
+  // same count and all passed, and a member at the cap still had their
+  // stored sample read through the room on every refused reclone.
+  cloneTake(name: string) {
+    const k = "clone:" + nameFold(name);
+    const day = new Date().toISOString().slice(0, 10);
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = ?", k).toArray()[0];
+    const [d, c] = String((r && r.v) || "").split(":");
+    const used = d === day ? parseInt(c, 10) || 0 : 0;
+    if (used >= VOICE_CLONES_PER_DAY) return false;
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", k, day + ":" + (used + 1));
+    return true;
+  },
+
   // Voices: one cloned voice per member. The sample lives in R2; the mv row carries the
   // provider voice id the server saved when it cloned the sample. Streams get a "members"
   // event on change, like avatars.
@@ -34,47 +43,84 @@ export const VoiceMethods = {
 
   // The slug alone can collide ("José" and "Jos?" both slug to "jos-"),
   // letting one member overwrite another's sample: a hash of the folded
-  // name keeps keys distinct. Older rows keep the key they were stored under.
+  // name keeps keys distinct. The moment it was stored makes each sample's
+  // key its own, as an avatar's is: with the name alone, a sample still
+  // being stored when its room was deleted landed on the key of the same
+  // name's sample in a room created again, overwriting it. Older rows
+  // keep the key they were stored under.
   async voiceSampleKey(room: string | null | undefined, name: string) {
     const fold = nameFold(name);
     const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fold)));
     const hex = Array.from(h.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
-    return (room || this.roomName || "room") + "/voice-sample/" + fold.replace(/[^a-z0-9_-]+/g, "-").slice(0, 40) + "-" + hex;
+    return (room || this.roomName || "room") + "/voice-sample/" + fold.replace(/[^a-z0-9_-]+/g, "-").slice(0, 40) + "-" + hex + "-" + Date.now().toString(36);
   },
 
   async putVoiceSample(name: string, data: ArrayBuffer, type: string, room: string) {
+    const gen = this.gen;
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const key = await this.voiceSampleKey(room, name);
     // Storage failure is its own answer: the route turns STORE_FAIL
     // into a 503, distinct from the no-such-member null.
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
     try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch { return "STORE_FAIL"; }
+    // deleted while it was stored: no row, and the object goes (see setAvatar)
+    if (!this.alive(gen)) {
+      try { await this.env.MEDIA.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+      throw goneError();
+    }
     const prev = this.voiceRow(name);
-    if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+    // the row first, the old object after: a delete awaited in between let
+    // the room go before the row was written
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
       String(name).toLowerCase(), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
+    if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.notifyMembers(name);
-    return key;
+    // the room this sample went into, for the clone made from it (setVoiceId)
+    return { key, gen };
   },
 
   async getVoiceSample(name: string) {
+    const gen = this.gen;
     const r = this.voiceRow(name);
     if (!r || !r.sample_key || !this.env || !this.env.MEDIA) return null;
     try {
       const obj = await this.env.MEDIA.get(r.sample_key);
       if (!obj) return null;
-      return { data: await obj.arrayBuffer(), type: r.sample_type || "audio/mpeg" };
+      // read before the read's await: the room this sample is from (setVoiceId)
+      // and the sample's key, which the clone must still match (setVoiceId)
+      return { data: await obj.arrayBuffer(), type: r.sample_type || "audio/mpeg", gen, key: r.sample_key };
     } catch { return null; }
   },
 
-  async setVoiceId(name: string, provider: string, voiceId: string) {
+  // The route clones in the Worker, seconds after it stored or read the
+  // sample, and the room can be deleted, created again and the name
+  // invited in that wait: the old room's clone then became the new
+  // member's voice. gen is the room the sample belongs to (putVoiceSample,
+  // getVoiceSample); in any other the clone is refused with goneError,
+  // and the route deletes it at the provider.
+  // sampleKey is the sample the clone was made from, as those calls
+  // answered it. The member's row must still hold it: a DELETE /voice
+  // that answered 200 during the wait used to find its voice back, the
+  // clone INSERTed on the invite alone, and a clone of an older sample
+  // landed on a row whose sample was replaced meanwhile. Otherwise
+  // "changed", nothing saved, and the route deletes its clone.
+  // The clone this one replaces is recorded as a pending delete in this
+  // same call and handed back for the route to delete. The route used to
+  // delete the voice it read at its start, so with two clones overlapping
+  // the one in between was neither deleted nor recorded.
+  /** @param gen this.gen as putVoiceSample or getVoiceSample answered it
+   *  @param sampleKey the sample key putVoiceSample or getVoiceSample answered */
+  async setVoiceId(name: string, provider: string, voiceId: string, gen: number, sampleKey: string) {
+    this.fence(gen);
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const prev = this.voiceRow(name);
-    this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      String(name).toLowerCase(), provider, voiceId, (prev && prev.sample_key) || null, (prev && prev.sample_type) || null, (prev && prev.sample_ts) || null, Date.now());
+    if (!prev || !sampleKey || prev.sample_key !== sampleKey) return "changed" as const;
+    const replaced = prev.voice_id && prev.voice_id !== voiceId && (prev.provider || "cartesia") === "cartesia" ? prev.voice_id : null;
+    if (replaced) this.voiceDelPend([replaced]);
+    this.sql.exec("UPDATE mv SET provider = ?, voice_id = ?, ts = ? WHERE name = ?", provider, voiceId, Date.now(), String(name).toLowerCase());
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
-    return this.voiceOf(name);
+    return { voice: this.voiceOf(name), replaced };
   },
 
   // A voice change makes every cached speak rendering of that member's messages
@@ -89,14 +135,63 @@ export const VoiceMethods = {
     }
   },
 
-  async clearVoice(name: string) {
+  // Clones to delete at Cartesia that it has not confirmed deleted: one
+  // cfg row per id, 'voice-del:<id>' = when it was asked. A member's
+  // DELETE /voice must not wait on a third party (with the key unset it
+  // could never finish), and the clone's id must not be lost either: the
+  // row is written in the same call that forgets the voice, and only a
+  // 2xx or 404 from Cartesia takes it off (voiceDelDone). The rows outlive
+  // a room delete (destroy) and work in a deleted room, so an id is never
+  // dropped with the room that recorded it.
+  /** @param ids the clones' provider ids (empty ones are skipped) */
+  voiceDelPend(ids: Array<string | null | undefined>) {
+    const now = String(Date.now());
+    this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+    for (const id of ids) if (id) this.sql.exec("INSERT OR IGNORE INTO cfg (k, v) VALUES (?, ?)", "voice-del:" + id, now);
+  },
+
+  /** The oldest pending deletes, at most limit of them. */
+  voiceDelList(limit: number): string[] {
+    if (!this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cfg'").toArray().length) return [];
+    return this.sql.exec<Pick<CfgRow, "k">>("SELECT k FROM cfg WHERE substr(k, 1, 10) = 'voice-del:' ORDER BY v, k LIMIT ?", Math.max(0, Math.floor(limit))).toArray().map((r) => r.k.slice(10));
+  },
+
+  /** Cartesia confirmed these deleted (2xx or 404). */
+  voiceDelDone(ids: string[]) {
+    if (!this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cfg'").toArray().length) return;
+    for (const id of ids) this.sql.exec("DELETE FROM cfg WHERE k = ?", "voice-del:" + id);
+  },
+
+  // DELETE /voice's part in the room, which never waits on Cartesia: the
+  // sample goes and the room stops using the voice now, and the clone
+  // (pendingId) is recorded as a pending delete in this same call, before
+  // anything else, whatever the outcome; the route then asks Cartesia
+  // and takes the record off once it confirms. voiceId is the clone the
+  // route read: a different one here means a reclone landed meanwhile,
+  // and dropping the row would forget that new clone. A sample that
+  // storage would not delete keeps its row (the clone's id cleared), so a
+  // second DELETE finds it and tries again; the row was dropped anyway
+  // before, and the object then had no pointer left.
+  /** @param pendingId the clone to record as a pending delete */
+  async clearVoice(name: string, voiceId?: string | null, pendingId?: string | null): Promise<"none" | "changed" | "STORE_FAIL" | "cleared"> {
+    if (pendingId) this.voiceDelPend([pendingId]);
     const r = this.voiceRow(name);
-    if (!r) return false;
-    if (r.sample_key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(r.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+    if (!r) return "none";
+    if (voiceId !== undefined && (r.voice_id || null) !== (voiceId || null)) return "changed";
+    if (r.sample_key && this.env && this.env.MEDIA) {
+      try { await this.env.MEDIA.delete(r.sample_key); }
+      catch (e) {
+        warn("media.delete", e, { room: this.roomName });
+        this.sql.exec("UPDATE mv SET voice_id = NULL, ts = ? WHERE name = ?", Date.now(), String(name).toLowerCase());
+        this.notifyMembers(name);
+        await this.invalidateSpeakCache(name);
+        return "STORE_FAIL";
+      }
+    }
     this.sql.exec("DELETE FROM mv WHERE name = ?", String(name).toLowerCase());
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
-    return true;
+    return "cleared";
   },
 
   // What a speak request needs: the message's sender and text. Drafts never speak.
