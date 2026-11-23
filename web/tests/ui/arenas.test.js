@@ -609,9 +609,14 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
       await page.click('#viewer .arena-tabs button:nth-child(1)');
       await page.waitForSelector('#viewer .tq-panel .tq-input', { timeout: 10000 });
       out.kept = await page.$eval('#viewer .tq-panel .tq-input', (i) => i.value + '|' + document.querySelector('#viewer .tq-go').disabled);
-      await page.click('#viewer .tq-go');
+      // a question that starts with "guess" is still a question: Ask (on
+      // desktop) and Enter (on the phone) send it as "ask: ..."
+      await page.fill('#viewer .tq-panel .tq-input', 'Guessing by size, is it bigger than a car?');
+      if (o.w) await page.press('#viewer .tq-panel .tq-input', 'Enter');
+      else await page.click('#viewer .tq-go');
       await settle(page);
       out.moveCall = calls.filter((c) => c.includes('/games/28/moves')).pop() || '';
+      out.lastQa = await page.$$eval('#viewer .tq-qa', (els) => { const e = els[els.length - 1]; return e.className + '|' + e.textContent; });
       out.after = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       if (!/Round 1 of 3 · Ada answers · 2 of 20 asked/.test(out.cardLine)) throw new Error('the card says who answers and how far: ' + out.cardLine);
       if (out.toggle) throw new Error('wave 3 games have no 2D/3D toggle');
@@ -620,7 +625,8 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
       if (out.log.length !== 3 || !/^1HenryIs it alive\?NO/.test(out.log[0]) || !/YES · much/.test(out.log[1]) || !/unanswerable/.test(out.log[2])) throw new Error('the public log: ' + JSON.stringify(out.log));
       if (!/Ask Ada a question · 18 of 20 left/.test(out.banner)) throw new Error('the banner asks for a question: ' + out.banner);
       if (out.kept !== 'Is it blue?|false') throw new Error('a repaint keeps the draft: ' + out.kept);
-      if (!/"dir":"Is it blue\?"/.test(out.moveCall)) throw new Error('Ask sends the question: ' + out.moveCall);
+      if (!/"dir":"ask: Guessing by size, is it bigger than a car\?"/.test(out.moveCall)) throw new Error('Ask and Enter send the question as ask:, never as a guess: ' + out.moveCall);
+      if (/guess/.test(out.lastQa.split('|')[0]) || !/Guessing by size/.test(out.lastQa)) throw new Error('the question is logged as a question: ' + out.lastQa);
       if (!/Waiting on Ada's answer/.test(out.after)) throw new Error('then waits on the answer: ' + out.after);
       return out;
     });

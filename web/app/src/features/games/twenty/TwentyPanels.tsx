@@ -99,6 +99,11 @@ export function TwentyAnswerer({ g, onSend }: { g: TwentyState; onSend: (dir: st
 export function TwentyAsker({ g, onSend }: { g: TwentyState; onSend: (dir: string) => void }) {
   const [text, setText] = useState("");
   const t = text.trim();
+  // Ask and Enter always send a question: the engine reads a move that
+  // starts with "guess" as a guess, so "Guessing it's big?" sent bare
+  // spent a guess on "ing it's big?". The engine strips "ask: ";
+  // guessing is the Guess it button's job.
+  const ask = (q: string) => onSend("ask: " + q);
   return (
     <div className="tq-panel your-move">
       <div className="tq-title">{"Ask " + g.answerer + " a yes/no question - or guess"}</div>
@@ -110,7 +115,7 @@ export function TwentyAsker({ g, onSend }: { g: TwentyState; onSend: (dir: strin
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           const v = e.currentTarget.value.trim();
-          if (e.key === "Enter" && v) onSend(v);
+          if (e.key === "Enter" && v) ask(v);
         }}
       />
       <div className="tq-acts">
@@ -130,7 +135,7 @@ export function TwentyAsker({ g, onSend }: { g: TwentyState; onSend: (dir: strin
           className="duel-btn tq-go"
           disabled={!t}
           onClick={() => {
-            if (t) onSend(t);
+            if (t) ask(t);
           }}
         >
           Ask
