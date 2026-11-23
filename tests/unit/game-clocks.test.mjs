@@ -139,6 +139,40 @@ test("a match whose clock work keeps throwing backs the alarm off instead of re-
   assert.equal(h.one("SELECT v FROM cfg WHERE k = 'gm_clock_fail'"), undefined);
 });
 
+// A failure count was cleared only by an advance that saved: a move that
+// moved the match on kept a stale retry, and the alarm waited for it past
+// the earlier deadline the move set.
+test("a move that saves the match clears its clock-failure count, and the alarm keeps the new deadline", async () => {
+  const { h, id, stored } = await running("duel", ["Ann", "Bob"], { best_of: 3 });
+  const armed = [];
+  h.room.ctx.storage.setAlarm = async (at) => { armed.push(at); };
+  // left by an engine that kept throwing: a retry far past the deadline
+  h.room.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('gm_clock_fail', ?)", JSON.stringify({ [id]: { n: 9, retry: Date.now() + 10 * 86400000 } }));
+  h.room.clockFails = undefined;
+  assert.equal((await h.room.gameMove(id, "Ann", "rock", R)).status, 200);
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'gm_clock_fail'"), undefined, "the count is gone");
+  assert.equal(armed.at(-1), stored().deadline, "armed at the match's own deadline");
+});
+
+test("a Sketch & Guess judge that fails is retried no later than the round's stall fallback", async (t) => {
+  const { h, id } = await running("sketch", ["Ann", "Bob", "Cat"]);
+  const armed = [];
+  h.room.ctx.storage.setAlarm = async (at) => { armed.push(at - Date.now()); };
+  const errors = console.error;
+  console.error = () => {};
+  t.after(() => { console.error = errors; });
+  const g = h.room.gameRow(id);
+  // judging began 100 s ago: the stall fallback is 20 s away, the backoff's
+  // first retry 30 s
+  g.st.phase = "judging";
+  g.st.judge_at = Date.now() - 100000;
+  g.st.deadline = Date.now() - 5;
+  h.room.saveGame(g);
+  h.room.sgJudgeNow = async () => { throw new Error("judge down"); };
+  await h.room.alarm();
+  assert.ok(armed.at(-1) > 20000 && armed.at(-1) <= 21000, "retried at the stall time: " + armed.at(-1));
+});
+
 test("no alarm is armed in the past", async () => {
   const { h, edit } = await running("duel", ["Ann", "Bob"]);
   const armed = [];

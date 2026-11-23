@@ -349,10 +349,14 @@ export const GameMachineryMethods = {
     }
   },
 
-  gameClockFailed(id: number) {
+  /** @param until a time the retry must not pass while it is still ahead:
+   *  the match's own fallback, which the backoff would otherwise delay */
+  gameClockFailed(id: number, until?: number) {
     const map = this.gameClockFails();
     const n = (map[id] ? map[id].n : 0) + 1;
-    map[id] = { n, retry: Date.now() + Math.min(CLOCK_RETRY_MAX, CLOCK_RETRY_MIN * 2 ** (n - 1)) };
+    let retry = Date.now() + Math.min(CLOCK_RETRY_MAX, CLOCK_RETRY_MIN * 2 ** (n - 1));
+    if (until && until > Date.now()) retry = Math.min(retry, until);
+    map[id] = { n, retry };
     this.gameClockSave(map);
   },
 
@@ -511,7 +515,18 @@ export const GameMachineryMethods = {
         return { status: 409, error: "The match has moved on: it is at turn " + now + ", not " + String(turn).slice(0, 20) + " - read the state and decide again", turn: now, game: this.gameStateFull(g, who) };
       }
     }
-    return eng.move(this, g, who, dir, room, fields || null);
+    // A move that saves the match clears its clock-failure count: the
+    // failure was about the state before it. A count left by an engine that
+    // kept throwing could hold a retry up to an hour ahead, and the alarm
+    // waited for it past the earlier deadline this move set. The engine
+    // armed the alarm already, so arm again once the count is gone.
+    const saves = this.gameSaves || 0;
+    const res = await eng.move(this, g, who, dir, room, fields || null);
+    if ((this.gameSaves || 0) !== saves && this.gameClockFails()[g.id]) {
+      this.gameClockOk(g.id);
+      await this.armGameAlarm();
+    }
+    return res;
   },
 
   // Stop a running match where it stands: no winner, no result post, no
@@ -638,6 +653,8 @@ export const GameMachineryMethods = {
       st.deadline = Date.now() + gameEngine(st).clockSeconds(st) * 1000;
       st.log.push({ tick: this.gameLogTick(st), text: "Everyone is in - the match starts." });
     }
+    // a save clears the match's clock-failure count (see gameMove)
+    this.gameClockOk(g.id);
     this.saveGame(g);
     this.broadcastGame(g, room, who);
     await this.armGameAlarm();

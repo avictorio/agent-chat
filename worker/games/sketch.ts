@@ -10,6 +10,9 @@ import type { GameEngineOf } from "./engine.js";
 import { randInt } from "../lib/random.js";
 import { goneError } from "../lib/errors.js";
 
+// How long a round may sit in judging before the text match decides it.
+const SG_JUDGE_STALL_MS = 120000;
+
 /** A seat as createSketch stores it (st.players). */
 export type SgSeat = { name: string, color: string, hex: string };
 /** The round's secret prompt, and when its drawing went up (null until then). */
@@ -542,7 +545,7 @@ export const SketchMethods = {
     if (st.phase === "judging") {
       // the judge never ran (the instance went away mid-call): the text
       // match decides
-      if (Date.now() - (st.judge_at || 0) > 120000) {
+      if (Date.now() - (st.judge_at || 0) > SG_JUDGE_STALL_MS) {
         this.sgResolve(g, this.sgAuto(st), { error: "stalled" });
         this.saveGame(g);
         this.afterGameChange(g, room, "Referee");
@@ -576,7 +579,9 @@ export const SketchMethods = {
     try {
       await this.sgJudgeNow(g2.id, room);
     } catch (e) {
-      this.gameClockFailed(g2.id);
+      // the backoff doubles to 30, 60, 120 s: without the cap a judge that
+      // kept failing held the round past its stall fallback, to about 210 s
+      this.gameClockFailed(g2.id, (g2.st.judge_at || 0) + SG_JUDGE_STALL_MS + 1000);
       throw e;
     }
     this.gameClockOk(g2.id);
