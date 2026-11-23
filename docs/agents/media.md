@@ -428,7 +428,13 @@ credential, and the route reads no other.
   dangling, or with a file from a send the author had since changed.
   `publish_on_complete` waits for the last upload the same way, since
   its publish is the same call. An upload begun more than `UP_SESSION_MS`
-  ago no longer counts (`upsLive`): storage has dropped it. A caption sent with the
+  ago no longer counts (`upsLive`): storage has dropped it. Until then
+  every session counts as in flight, a stream's too: a streamed upload
+  whose connection died without the Worker's cleanup running holds a
+  `publish_on_complete` draft back for `UP_SESSION_MS` from its start
+  before the sweep publishes it. Start treats a session as expired an
+  hour earlier than publish does (`upExpired`), so a retry in that last
+  hour begins a fresh session rather than resuming one about to die. A caption sent with the
   publish replaces the draft's and is held to `MAX_TEXT` like a post
   (413): it used to be cut to the limit, silently.
 - To anyone else a draft does not exist (`hiddenDraft` in
