@@ -19,7 +19,7 @@ async function freeRoom() {
 /** Moves the pending genesis back by ms. */
 function age(h, ms) {
   const g = JSON.parse(h.one("SELECT v FROM cfg WHERE k = 'genesis'").v);
-  h.db.prepare("UPDATE cfg SET v = ? WHERE k = 'genesis'").run(JSON.stringify({ at: g.at - ms, token: g.token }));
+  h.db.prepare("UPDATE cfg SET v = ? WHERE k = 'genesis'").run(JSON.stringify({ ...g, at: g.at - ms }));
 }
 
 test("a genesis is pending until its mail is confirmed: a second creator meanwhile is told to wait", async () => {
@@ -36,10 +36,9 @@ test("a genesis is pending until its mail is confirmed: a second creator meanwhi
   assert.deepEqual(h.room.createGenesis("Bob"), { existed: true });
 });
 
-test("a stale pending room whose invite was never opened starts over for the next creator; nothing is deleted", async () => {
+test("a stale pending room nobody touched starts over for the next creator, and again after that; nothing is deleted", async () => {
   const h = await freeRoom();
   const first = h.room.createGenesis("Ada");
-  await h.room.post("Ada", "written with the owner key meanwhile", R, true);
   age(h, GENESIS_PENDING_MS + 1000);
   assert.equal(h.room.genesisCheck().state, "free");
   const second = h.room.createGenesis("Ada");
@@ -47,11 +46,89 @@ test("a stale pending room whose invite was never opened starts over for the nex
   assert.equal(h.room.lookupInvite(first.invite.token).code, "invite_revoked", "the unopened invite is replaced");
   assert.equal(h.room.lookupInvite(second.invite.token).ok, true);
   assert.equal(h.all("SELECT token FROM inv").length, 2, "its row is kept, revoked");
-  assert.equal(h.all("SELECT id FROM m").length, 1, "and so is everything else in the room");
   assert.equal(h.room.genesisCheck().state, "pending", "the new genesis is pending in its turn");
   // the first creator's late rollback does not take the second one's room
   assert.equal(await h.room.abandonGenesis(first.invite.token, R), false);
   assert.equal(h.room.exists(), true);
+  assert.equal(h.room.lookupInvite(second.invite.token).ok, true);
+  // the replaced invite's revoked row does not make the room touched
+  age(h, GENESIS_PENDING_MS + 1000);
+  assert.equal(h.room.genesisCheck().state, "free");
+  const third = h.room.createGenesis("Bob");
+  assert.ok(third.created && third.invite.token);
+  assert.equal(h.all("SELECT token FROM inv").length, 3);
+});
+
+test("a stale pending room someone wrote in is the owner's: taken, nothing revoked or destroyed", async () => {
+  // a confirm that failed after the mail went out leaves the mark for good;
+  // the owner, with the owner key, invites Carol, who posts
+  const h = await freeRoom();
+  const first = h.room.createGenesis("Ada");
+  const carol = h.room.invite("Carol", "human", null);
+  assert.equal(h.room.access(carol.token, false).ok, true);
+  await h.room.post("Carol", "carol's message", R, false);
+  age(h, GENESIS_PENDING_MS + 1000);
+  assert.equal(h.room.genesisCheck().state, "taken");
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'genesis'"), undefined, "the mark goes: an ordinary room");
+  assert.deepEqual(h.room.createGenesis("Mallory"), { existed: true });
+  assert.equal(h.room.lookupInvite(first.invite.token).ok, true, "the first creator's link still works");
+  assert.equal(h.room.lookupInvite(carol.token).ok, true);
+  assert.equal(await h.room.abandonGenesis(first.invite.token, R), false);
+  assert.equal(h.room.exists(), true);
+  assert.equal(h.all("SELECT id FROM m").length, 1);
+});
+
+test("each thing a member or the owner can write makes a stale pending room taken", async () => {
+  const writes = {
+    "an owner-key post": (h) => h.room.post("Ada", "written with the owner key", R, true),
+    "an owner invite, revoked unopened": (h) => h.room.revoke(h.room.invite("Carol", "human", null).token),
+    "the genesis invite revoked": (h, g) => h.room.revoke(g.invite.token),
+    "every invite revoked": (h) => h.room.revokeAll(),
+    "a board question, deleted": (h) => h.room.deleteQuestion(h.room.addQuestion("why?", "Ada").id),
+    "a constitution": (h) => h.room.setConstitution("be kind", "Ada"),
+    "a message deleted": async (h) => { const m = await h.room.post("Ada", "x", R, true); await h.room.deleteMessage(m.id, null, true); },
+  };
+  for (const [what, write] of Object.entries(writes)) {
+    const h = await freeRoom();
+    const g = h.room.createGenesis("Ada");
+    await write(h, g);
+    age(h, GENESIS_PENDING_MS + 1000);
+    assert.equal(h.room.genesisCheck().state, "taken", what);
+  }
+});
+
+test("a start-over refused for a held name leaves the room exactly as it was", async () => {
+  const h = await freeRoom();
+  const first = h.room.createGenesis("Ada");
+  h.room.invite("Carol", "human", null);
+  age(h, GENESIS_PENDING_MS + 1000);
+  // touched, so taken before the name is even looked at
+  assert.deepEqual(h.room.createGenesis("Carol"), { existed: true });
+  assert.equal(h.room.lookupInvite(first.invite.token).ok, true);
+  // the name check on its own, on an untouched room: a name only a
+  // reserved word holds is refused without revoking anything either
+  const h2 = await freeRoom();
+  const g2 = h2.room.createGenesis("Ada");
+  age(h2, GENESIS_PENDING_MS + 1000);
+  const mark = h2.one("SELECT v FROM cfg WHERE k = 'genesis'").v;
+  assert.deepEqual(h2.room.createGenesis("Referee"), { existed: true });
+  assert.equal(h2.room.lookupInvite(g2.invite.token).ok, true, "the first creator's link still works");
+  assert.equal(h2.one("SELECT v FROM cfg WHERE k = 'genesis'").v, mark, "and the mark is in place");
+});
+
+test("a failed mail's rollback in a room someone wrote in deletes nothing", async () => {
+  // the owner writes while the creator's mail is still out
+  const h = await freeRoom();
+  const g = h.room.createGenesis("Ada");
+  const carol = h.room.invite("Carol", "human", null);
+  await h.room.post("Ada", "written with the owner key", R, true);
+  assert.equal(await h.room.abandonGenesis(g.invite.token, R), false);
+  assert.equal(h.room.exists(), true);
+  assert.equal(h.all("SELECT id FROM m").length, 1);
+  assert.equal(h.room.lookupInvite(carol.token).ok, true);
+  assert.equal(h.room.lookupInvite(g.invite.token).code, "invite_revoked", "only the creator's own unsent invite goes");
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'genesis'"), undefined);
+  assert.equal(h.room.genesisCheck().state, "taken");
 });
 
 test("opening the genesis invite confirms the room: it never starts over, however old", async () => {

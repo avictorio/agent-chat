@@ -433,16 +433,31 @@ docs.txt section that owns its routes, caps and formats.
   room's name, in the body: the Subject is fixed and the creator's name
   is left out, since the site's mailbox sends it to any address typed in.
   - **The Room owns the pending state.** `createGenesis` makes the room
-    and its invite in one call and stores cfg `genesis` (when, and the
-    invite's token); `confirmGenesis` clears it once the mail is
+    and its invite in one call and stores cfg `genesis` (when, the
+    invite's token, the tokens it replaced, and the message and board
+    counters then); `confirmGenesis` clears it once the mail is
     accepted, and so does the invite's first open (`access`). A second
     creator who meets a pending room younger than `GENESIS_PENDING_MS`
     gets 503 `room_pending` with Retry-After (`genesisCheck`, asked
-    before anything is counted); one older than that whose invite was
-    never opened starts over: the unopened invite is revoked (its row
-    kept) and a new one made. A failed mail's rollback (`abandonGenesis`)
-    removes the room only while it is still that creator's unopened
-    genesis. No alarm is used: the room's one alarm belongs to the match
+    before anything is counted); one older than that starts over only
+    while untouched (`genesisUntouched`): its only invite rows the
+    unopened genesis invite and the revoked ones of earlier start-overs,
+    no row in any table a member or the owner writes
+    (`GENESIS_EMPTY_TABLES` in `Room.ts`, which a new such table joins),
+    no clone taken, and the message and board counters where the mark
+    recorded them. Then the unopened invite is revoked (its row kept) and
+    a new one made; the name is checked first, so a refused start-over
+    changes nothing. A stale room that is touched is an ordinary room:
+    its mark goes and it answers 409. A failed mail's rollback
+    (`abandonGenesis`) removes the room only while it is still that
+    creator's unopened genesis and untouched; otherwise it revokes that
+    invite, drops the mark and deletes nothing. "The invite was never
+    opened" used to stand for "the room is empty": a confirm that failed
+    after the mail went out left a room pending for good while its owner
+    invited people who posted, a stranger then started it over into
+    their messages, and a failed mail of the stranger's destroyed it; a
+    start-over refused for a held name had already revoked the first
+    creator's link. No alarm is used: the room's one alarm belongs to the match
     clocks. Rooms from before this never carry the mark. Before, the
     Worker made the room, waited on the mail and rolled back with calls
     of its own: a caller who left mid-mail left a room whose only invite

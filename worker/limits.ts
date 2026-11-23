@@ -227,8 +227,8 @@ export const CREATE_ROOMS_PER_IP = 5;
 export const CREATE_QUOTA_ROOM = "__create-quota";
 // A room public creation made waits this long for its genesis mail to be
 // accepted (confirmGenesis) or its invite opened: a second creator of the
-// name meanwhile gets 503 with Retry-After, and after it a room whose
-// invite was never opened can be created again (createGenesis).
+// name meanwhile gets 503 with Retry-After, and after it a room nobody
+// has written in can be created again (genesisUntouched, createGenesis).
 export const GENESIS_PENDING_MS = 600000;
 // How long one call to the mail provider (Google's token and send
 // endpoints, Resend) may take before it is given up: with no limit a

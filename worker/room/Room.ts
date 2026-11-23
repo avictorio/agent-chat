@@ -350,6 +350,14 @@ function schemaMatchResults(sql: SqlStorage) {
 /** The schema steps, in order (see above). */
 const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults];
 
+/** Every table a member or the owner writes, inv aside: one row in any of
+ *  them and a pending room is not untouched (Room.genesisUntouched). A new
+ *  table of that kind belongs here too. */
+const GENESIS_EMPTY_TABLES = ["m", "rx", "md", "upp", "ut", "mdel", "pcid", "push", "mv", "tf", "gm", "gr", "con", "oq", "dg", "sk", "dc"];
+
+/** cfg "genesis" (Room.genesisPending). */
+type GenesisMark = { at: number, token: string, prior: string[], hwm: number, rev: number };
+
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
   // set them), so the class carries no field initializers.
@@ -447,19 +455,53 @@ export class Room extends DurableObject {
   // received, and a second creator was told "already exists" for a room
   // then rolled back. Rooms from before this mark never carry it.
 
-  /** The pending genesis: when it was made and its invite's token; null once confirmed (or for any other room). */
-  genesisPending(): { at: number, token: string } | null {
+  /** The pending genesis: when it was made, its invite's token, the
+   *  tokens of the genesis invites it replaced (start-overs), and the
+   *  message and board counters as it was made; null once confirmed (or
+   *  for any other room). */
+  genesisPending(): GenesisMark | null {
     if (!this.ready) return null;
     const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'genesis'").toArray()[0];
     if (!r) return null;
-    try { const g = JSON.parse(r.v); return { at: Number(g.at) || 0, token: String(g.token || "") }; } catch { return { at: 0, token: "" }; /* unreadable: as old as can be */ }
+    // unreadable: as old as can be, and touched (genesisUntouched), since nothing tells what came after it
+    try { const g = JSON.parse(r.v); return { at: Number(g.at) || 0, token: String(g.token || ""), prior: Array.isArray(g.prior) ? g.prior.map(String) : [], hwm: Number(g.hwm) || 0, rev: Number(g.rev) || 0 }; } catch { return { at: 0, token: "", prior: [], hwm: -1, rev: -1 }; }
+  }
+
+  private markGenesis(token: string, prior: string[]) {
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('genesis', ?)", JSON.stringify({ at: Date.now(), token: token, prior: prior, hwm: this.msgHwm(), rev: this.boardRev() }));
+  }
+
+  // Whether a pending room is still as its genesis made it: its only
+  // invite row the unopened genesis invite (beside the revoked ones of
+  // earlier start-overs), and nothing written anywhere else. An unopened
+  // genesis invite alone used to count as an empty room, but a confirm
+  // that failed after the mail went out (or a Worker that died between
+  // the two) leaves a room pending for good while its owner, who has the
+  // owner key, invites people who post: a stranger then started that
+  // room over into the members' messages, and a failed mail of theirs
+  // destroyed it. A row in any table a member or the owner writes counts,
+  // and so does a message or board counter past where it stood at the
+  // genesis (an item written and deleted since). When in doubt, touched.
+  genesisUntouched(g: GenesisMark): boolean {
+    if (!g.token) return false;
+    const own = new Set([g.token].concat(g.prior));
+    const rows = this.sql.exec<Pick<InvRow, "token" | "revoked" | "used" | "posted" | "avatar_key">>("SELECT token, revoked, used, posted, avatar_key FROM inv").toArray();
+    if (!rows.some((r) => r.token === g.token)) return false;
+    // the genesis invite active, the earlier ones revoked, none opened or dressed
+    for (const r of rows) if (!own.has(r.token) || r.used || r.posted || r.avatar_key || (r.token === g.token) === !!r.revoked) return false;
+    for (const t of GENESIS_EMPTY_TABLES) if (this.sql.exec("SELECT 1 FROM " + t + " LIMIT 1").toArray().length) return false;
+    // a clone taken (cloneTake), or a clone's delete still owed since the
+    // genesis (voiceDelPend; those rows outlive a room delete)
+    if (this.sql.exec("SELECT 1 FROM cfg WHERE substr(k, 1, 6) = 'clone:' OR (substr(k, 1, 10) = 'voice-del:' AND CAST(v AS INTEGER) >= ?) LIMIT 1", g.at).toArray().length) return false;
+    return this.msgHwm() === g.hwm && this.boardRev() === g.rev;
   }
 
   // What a public creator of this name meets: free, taken, or pending -
   // made less than GENESIS_PENDING_MS ago with its mail not yet accepted
   // (try again in retry_after seconds). A pending room older than that
-  // whose invite was never opened counts as free: createGenesis starts
-  // it over.
+  // counts as free only while untouched (genesisUntouched): createGenesis
+  // starts it over. A stale room that is touched is an ordinary room, the
+  // owner's: its mark goes and it is taken.
   genesisCheck(): { state: "free" } | { state: "taken" } | { state: "pending", retry_after: number } {
     // a room that is being deleted is not free yet: see destroy()
     if (this.destroying) return { state: "taken" };
@@ -468,8 +510,9 @@ export class Room extends DurableObject {
     if (!g) return { state: "taken" };
     const age = Date.now() - g.at;
     if (age < GENESIS_PENDING_MS) return { state: "pending", retry_after: Math.max(1, Math.ceil((GENESIS_PENDING_MS - age) / 1000)) };
-    const opened = this.sql.exec<Pick<InvRow, "used">>("SELECT used FROM inv WHERE token = ?", g.token).toArray()[0];
-    return opened && opened.used ? { state: "taken" } : { state: "free" };
+    if (this.genesisUntouched(g)) return { state: "free" };
+    this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
+    return { state: "taken" };
   }
 
   // Public creation's critical section: create the room and mint the
@@ -477,18 +520,21 @@ export class Room extends DurableObject {
   // serialized, so two racing creates for the same name cannot interleave -
   // the loser is told the room existed (or is pending) and must not roll
   // anything back (with a separate check and create, a loser could
-  // destroy the winner's room). A stale pending room starts over: its
+  // destroy the winner's room). A stale untouched room starts over: its
   // unopened invite is revoked and a new one made for this creator, the
   // replacement the Worker's rollback made when a mail failed, with the
-  // row kept.
+  // row kept. Nothing changes before the start-over is sure to succeed:
+  // the old invite used to be revoked and the mark dropped before the
+  // name was checked, so a refused request still killed the first
+  // creator's link.
   createGenesis(name: string): { existed: true } | { pending: true, retry_after: number } | { created: true, invite: { token: string } | null } {
     const c = this.genesisCheck();
     if (c.state === "taken") return { existed: true };
     if (c.state === "pending") return { pending: true, retry_after: c.retry_after };
     const stale = this.ready ? this.genesisPending() : null;
     if (stale) {
-      this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
-      if (stale.token) this.revoke(stale.token);
+      if (this.isReservedName(name) || this.nameHeld(name, stale.token)) return { existed: true };
+      this.revoke(stale.token);
     } else {
       this.ensureSchema();
       this.ready = true;
@@ -496,10 +542,8 @@ export class Room extends DurableObject {
     const inv = this.invite(name, "human", null);
     // no inviter and no limits here: anything but the new invite means the name was refused
     const token = inv && "token" in inv && inv.token ? inv.token : null;
-    // A stale room whose name this creator cannot take (an invite the
-    // owner made there holds it) stays as it is, a room like any other.
-    if (!token && stale) return { existed: true };
-    if (token) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('genesis', ?)", JSON.stringify({ at: Date.now(), token: token }));
+    if (token) this.markGenesis(token, stale ? stale.prior.concat(stale.token) : []);
+    else if (stale) this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
     return { created: true, invite: token ? { token: token } : null };
   }
 
@@ -514,13 +558,21 @@ export class Room extends DurableObject {
 
   // The genesis mail failed: the room goes, as it was never there - its
   // invite revoked and its storage deleted, as the Worker's rollback did.
-  // Only while it is still this creator's unopened genesis: a creator
-  // who started the room over meanwhile, or opened the invite, keeps it.
+  // Only while it is still this creator's unopened genesis, untouched
+  // (genesisUntouched): a creator who started the room over meanwhile, or
+  // opened the invite, keeps it. A room someone wrote in is never deleted
+  // here: only this creator's invite is revoked and the mark dropped,
+  // which leaves an ordinary room.
   async abandonGenesis(token: string, room: string): Promise<boolean> {
     const g = this.genesisPending();
     if (!g || g.token !== token) return false;
     const opened = this.sql.exec<Pick<InvRow, "used">>("SELECT used FROM inv WHERE token = ?", token).toArray()[0];
     if (opened && opened.used) return false;
+    if (!this.genesisUntouched(g)) {
+      this.revoke(token);
+      this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
+      return false;
+    }
     await this.revokeAll();
     const gone = await this.destroy(room);
     return !!gone.deleted;

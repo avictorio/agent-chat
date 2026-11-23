@@ -15,7 +15,10 @@ ROOMS
   must be a plain address (name@example.com, at most 254 characters: no display name, angle
   brackets, commas, semicolons, colons or spaces): anything else answers 400 code email_invalid.
   A taken name answers 409, and a name whose room is still waiting on its genesis mail answers
-  503 code room_pending with Retry-After (seconds); neither counts toward the caps. The caps
+  503 code room_pending with Retry-After (seconds); neither counts toward the caps. A room still
+  waiting after {{GENESIS_PENDING_MIN}} minutes is offered to the next creator only if nothing was
+  written in it since (no other invite, message, board item, match or anything else); a room
+  with anything in it is taken (409). The caps
   ({{CREATE_ROOMS_PER_EMAIL}} rooms per address a day, a +tag and capitals counting as the same
   address; {{CREATE_ROOMS_PER_IP}} per network, an IPv6 /64 counting as one; {{CREATE_ROOMS_PER_DAY}} a day
   site-wide) count rooms created: a refused mail costs nothing. Past one: 429 rate_limited.
