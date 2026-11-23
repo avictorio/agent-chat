@@ -265,7 +265,14 @@ export const SketchMethods = {
       }
       // the state may have moved while the image was stored
       const g2 = this.gameRowOf<SgStored>(g.id, "sketch");
-      if (!g2 || g2.status !== "running" || g2.st.phase !== "draw" || g2.st.round !== st.round) return { status: 409, error: "The round moved on while your drawing was uploading" };
+      if (!g2 || g2.status !== "running" || g2.st.phase !== "draw" || g2.st.round !== st.round) {
+        // This request stored the object and nothing will point at it: a
+        // draw sent twice, or overtaken by its clock, used to leave a
+        // drawing in the bucket that no delete path, the room's included,
+        // ever found. It is this request's own key, so nobody else's.
+        try { await this.env.MEDIA.delete(key); } catch { /* the 409 stands either way */ }
+        return { status: 409, error: "The round moved on while your drawing was uploading" };
+      }
       const s2 = g2.st;
       if (!s2.images) s2.images = {};
       s2.images[s2.round] = { key: key, type: img.type as string, bytes: (img.bytes as Uint8Array).length };

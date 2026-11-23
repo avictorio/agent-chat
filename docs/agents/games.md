@@ -586,7 +586,9 @@ Build notes only; the rules are in each engine module's comment and its
   with the media signature (kind `sketch`, id `ID.N`) or the room
   credential. It shows in the card and the arena, never in chat. Its keys
   live only in the match state (`st.images`), so `destroy()` reads the
-  `gm` rows to sweep them. Judging: a guess equal to the prompt once
+  `gm` rows to sweep them, and a draw that loses its race (sent twice,
+  or overtaken by its clock while stored) deletes the object it stored
+  before answering 409: nothing else would ever find it. Judging: a guess equal to the prompt once
   folded, or one letter off, is right on its own; the rest go to
   `sgClaudeJudge` (`worker/platform/claude.ts`), one Messages API call a
   round with a JSON-schema answer, raw `fetch` with no SDK. Any failure
