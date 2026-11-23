@@ -491,8 +491,9 @@ UPLOADING FILES
      its last upload finished, was aborted, failed or expired. With nothing finished it stays
      a draft. An upload past {{UP_SESSION}} from its start no longer counts as in flight. The
      draft sweep publishes one only when an upload of it has expired, or a day after an
-     upload of it finished without it going live; a draft whose files were all sent inline
-     or attached is never published by the sweep, and is deleted after a day like any draft.
+     upload of it (begun with start or sent as a stream) finished without it going live; a
+     draft whose files were all sent inline, attached or put through a single-shot upload
+     link is never published by the sweep, and is deleted after a day like any draft.
   Straight to storage: add "direct": true to start. Where this deployment can, the answer says
   "direct": true, parts run up to {{UP_DIRECT_PART_MAX}} and an upload up to {{UP_MAX_DIRECT_TEXT}}. Then
   POST /messages/ID/KIND/sign {"parts": [1, 2, ...]} (up to {{UP_SIGN_MAX}} at a time) answers

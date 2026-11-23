@@ -497,7 +497,8 @@ credential, and the route reads no other.
   between ending that upload and publishing. It once published any such
   draft holding a file, so one posted a moment ago with an inline
   thumbnail went live without its video at the sweep inside that video's
-  own start. A draft whose files were all sent inline or attached is
+  own start. A draft whose files were all sent inline, attached or put through
+  a single-shot upload link (none of those writes `began`) is
   never published by the sweep and is deleted after a day. Only the
   finish used to check once the publish began waiting for the last
   upload, so a draft whose last upload was aborted after another file
