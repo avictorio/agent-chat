@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import type { GameListItem } from "@chat/contract";
 import { useFeed, useSession } from "../room/ctx";
-import { clockSeconds, finalScore, formatLeft, type GL, type GLPlayer } from "./shared/render";
+import { clockSeconds, finalScore, formatLeft, sideWin, type GL, type GLPlayer } from "./shared/render";
 import { chimeMuted, setChimeMuted } from "./shared/chime";
 import { pressable } from "../../lib/index";
 import { CATALOG, GameFacts, GameIcon, HowToPlay, accentStyle } from "./shared/catalog";
@@ -12,6 +12,13 @@ import { GAMES } from "./registry";
 // player's current streak, and their rank before the kind's most
 // recent match, so the panel can show ▲/▼ movement. Same comparator
 // as the server's record: wins, then fewest losses, then name.
+// Werewolf is won by a side: its winner is always null and the seats
+// that won are in winners. Reading winner alone filed every Werewolf
+// match as having no winner, so it got no streaks or movement.
+function wonBy(g: GL, name: string): boolean {
+  return g.winner ? g.winner === name : (g.winners || []).indexOf(name) >= 0;
+}
+
 function standingsMotion(games: GameListItem[] | null) {
   const streaks: Record<string, Record<string, { kind: "W" | "L"; n: number }>> = {};
   const prevRanks: Record<string, Record<string, number>> = {};
@@ -19,14 +26,14 @@ function standingsMotion(games: GameListItem[] | null) {
   const kinds = CATALOG.map((d) => d.id);
   kinds.forEach((t) => {
     const fin = games
-      .filter((g) => g.type === t && g.status === "finished" && g.winner)
+      .filter((g: GL) => g.type === t && g.status === "finished" && (g.winner || (g.winners || []).length))
       .sort((a, b) => (b.id || 0) - (a.id || 0));
     if (!fin.length) return;
     const st: Record<string, { kind: "W" | "L"; n: number }> = {};
     fin.forEach((g) => {
       (g.players || []).forEach((p) => {
         if (st[p.name]) return;
-        st[p.name] = { kind: g.winner === p.name ? "W" : "L", n: 0 };
+        st[p.name] = { kind: wonBy(g, p.name) ? "W" : "L", n: 0 };
       });
     });
     // Count consecutive same results from the newest match backwards.
@@ -36,7 +43,7 @@ function standingsMotion(games: GameListItem[] | null) {
         if (counted[p.name]) return;
         const s = st[p.name];
         if (!s) return;
-        if ((g.winner === p.name ? "W" : "L") === s.kind) s.n++;
+        if ((wonBy(g, p.name) ? "W" : "L") === s.kind) s.n++;
         else counted[p.name] = true;
       });
     });
@@ -45,7 +52,7 @@ function standingsMotion(games: GameListItem[] | null) {
     fin.slice(1).forEach((g) => {
       (g.players || []).forEach((p) => {
         const row = tally[p.name] || (tally[p.name] = { name: p.name, w: 0, l: 0 });
-        if (p.name === g.winner) row.w++;
+        if (wonBy(g, p.name)) row.w++;
         else row.l++;
       });
     });
@@ -414,13 +421,17 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const hrow = (g: GameListItem, group: string) => {
     const gl: GL = g;
     const players = g.players || [];
+    // A team result (Werewolf) names the side, as the card does, and
+    // the field splits by who was on it.
+    const team = sideWin(gl);
     const w = players.find((p) => p.name === g.winner);
-    const others = players.filter((p) => p.name !== g.winner).map((p) => p.name);
+    const others = players.filter((p) => !wonBy(gl, p.name)).map((p) => p.name);
     const mineP = players.find((p) => String(p.name).toLowerCase() === me);
     const off = g.status === "cancelled";
     const score = off ? "" : finalScore(gl);
     const kindName = (KIND[g.type] || g.type) + " #" + g.id;
-    const result = off ? "Called off" : w ? w.name + " won" : "No winner";
+    const result = off ? "Called off" : team ? team.text : w ? w.name + " won" : "No winner";
+    const mineWon = !!mineP && wonBy(gl, mineP.name);
     const label = kindName + ": " + result + (score ? " " + score : "") + (others.length && !off ? ", against " + others.join(", ") : "") + ". Open the arena.";
     return (
       <div className={"gm-hrow kind-" + g.type} key={g.id}>
@@ -428,6 +439,10 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
           <span className="gm-hrow-l1">
             {off ? (
               <span className="gm-hrow-who off">Called off</span>
+            ) : team ? (
+              <span className="gm-hrow-who">
+                <span aria-hidden="true">{team.icon}</span> {team.text}
+              </span>
             ) : w ? (
               <span className="gm-hrow-who">
                 <span aria-hidden="true">🏆</span> <span className="gm-dot" style={{ background: w.hex }} /> {w.name}
@@ -439,7 +454,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
             {score ? <span className="gm-hrow-score">{score}</span> : null}
           </span>
           <span className="gm-hrow-l2">
-            {mineP && !off && w ? <span className={"gm-hrow-me " + (w === mineP ? "won" : "lost")}>{w === mineP ? "Won" : "Lost"}</span> : null}
+            {mineP && !off && (w || team) ? <span className={"gm-hrow-me " + (mineWon ? "won" : "lost")}>{mineWon ? "Won" : "Lost"}</span> : null}
             <span className="gm-hrow-meta">
               {off
                 ? gl.declined_by

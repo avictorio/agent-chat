@@ -535,6 +535,40 @@ const { settle, clockNow, done, ngOpen, run, shot } = require('./harness');
     });
   }
 
+  // Werewolf is won by a side (winner null, the seats in winners): History
+  // names the side with your Won/Lost, and Standings counts its streaks.
+  for (const [label, o] of [['games-history-team', {}], ['games-history-team-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { ww: true }, init: () => { try { localStorage.setItem('ac-games-tab', 'history'); } catch { /* storage off */ } } }, o), async (page, S) => {
+      const t = clockNow();
+      const mk = (id, ago, side) => Object.assign({}, S.ww, { id, status: 'finished', phase: null, side, winner: null, draw: false,
+        winners: side === 'village' ? ['Ada', 'Henry', 'Anthony', 'Jax'] : ['Ivy'], places: ['Ada', 'Henry', 'Anthony', 'Jax', 'Ivy'], deadline: null, created: t - ago - 3600e3, ended: t - ago,
+        players: S.ww.players.map((p) => Object.assign({}, p, { role: p.name === 'Ivy' ? 'werewolf' : 'villager' })) });
+      const games = [mk(42, 60e3, 'village'), mk(41, 3600e3, 'village'), mk(40, 7200e3, 'wolves')];
+      await page.route(/\/api\/rooms\/demo\/games(\?.*)?$/, (r) => r.request().method() === 'GET'
+        ? r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ room: 'demo', games, record: { werewolf: [{ name: 'Ada', hex: '#22d3ee', w: 2, l: 1 }, { name: 'Anthony', hex: '#f472b6', w: 2, l: 1 }, { name: 'Ivy', hex: '#4ade80', w: 1, l: 2 }] } }) })
+        : r.fallback());
+      if (o.w) {
+        await page.click('#menu');
+        await settle(page);
+      }
+      await page.click('.tab[data-tab="games"]');
+      await page.click('#view-games [role="tab"]:has-text("History")');
+      await page.waitForSelector('#view-games .gm-hrow', { timeout: 10000 });
+      await settle(page);
+      const rows = await page.$$eval('#view-games .gm-hrow-open', (els) => els.map((e) => ({ who: e.querySelector('.gm-hrow-who').textContent, label: e.getAttribute('aria-label'), chip: (e.querySelector('.gm-hrow-me') || {}).textContent || null })));
+      await shot(page, label + '.png');
+      await page.click('#view-games [role="tab"]:has-text("Standings")');
+      await settle(page);
+      const streaks = await page.$$eval('#view-games .gm-rec-streak', (els) => els.map((e) => e.textContent.trim()));
+      await shot(page, label + '-standings.png');
+      if (rows.length !== 3) throw new Error('three finished matches: ' + JSON.stringify(rows));
+      if (!/The village wins/.test(rows[0].who) || !/The wolves win/.test(rows[2].who)) throw new Error('History names the winning side: ' + JSON.stringify(rows));
+      if (rows[0].chip !== 'Won' || rows[2].chip !== 'Lost') throw new Error('your own result, from winners: ' + JSON.stringify(rows));
+      if (!/The village wins, against Ivy\./.test(rows[0].label)) throw new Error('the field splits by side: ' + rows[0].label);
+      if (!streaks.some((x) => /W2/.test(x)) || !streaks.some((x) => /L2/.test(x))) throw new Error('two village wins in a row are a streak: ' + JSON.stringify(streaks));
+      return { rows, streaks };
+    });
+  }
 
   done('games');
 })();
