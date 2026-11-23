@@ -181,3 +181,89 @@ test("the watcher takes a lower last_id, so a room made again is heard", async (
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** Runs the watcher against a stand-in server: handler(req, url, res, token) answers every call. */
+async function withWatcher(handler, setup, body) {
+  const server = createServer((req, res) => handler(req, new URL(req.url, "http://x"), res, req.headers["x-invite-token"] || ""));
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const dir = mkdtempSync(join(tmpdir(), "watch-"));
+  try {
+    const runtime = join(dir, "runtime.sh");
+    writeFileSync(runtime, 'log() { printf "LOG %s\\n" "$1" >&2; }\nsilent() { printf "SILENT %s\\n" "$1"; }\nwake() { printf "WAKE %s\\n%s\\n" "$1" "$2"; }\n');
+    const state = join(dir, "state");
+    execFileSync("mkdir", ["-p", state]);
+    setup(state);
+    const env = { PATH: process.env.PATH, HOME: dir, HATCH_HOOK_RUNTIME: runtime, AGENTCHAT_ROOM: "lima", AGENTCHAT_SELF: "Bob", AGENTCHAT_STATE_DIR: state, AGENTCHAT_ORIGIN: "http://127.0.0.1:" + server.address().port };
+    const watch = () => new Promise((resolve, reject) => execFile("bash", ["-c", WATCHER], { env, encoding: "utf8", timeout: 30000 }, (e, out, err) => (e ? reject(e) : resolve({ out, err }))));
+    await body(watch, state);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// A revoked agent re-invited to a room appends the new line next to the
+// old one. Both lines used to start a poll of the room in the same
+// scratch directory: one died on mkfifo, and when the survivor held the
+// revoked token the room was reported failed on every run.
+test("two registry lines for one room poll it once, with the last line's token", async () => {
+  const MSG = { id: 6, ts: 1, from: "Ada", text: "welcome back" };
+  await withWatcher((req, u, res, token) => {
+    if (token !== "live") { res.writeHead(403, { "Content-Type": "application/json" }); return res.end('{"error":"revoked"}'); }
+    const after = parseInt(u.searchParams.get("after") || "0", 10);
+    if (u.pathname.endsWith("/stream")) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write("retry: 2000\n\n");
+      if (after < 6) res.write("id: 6\nevent: message\ndata: " + JSON.stringify(MSG) + "\n\n");
+      return res.end();
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ messages: after < 6 ? [MSG] : [], last_id: 6, has_more: false, room_state: {}, you: "Bob" }));
+  }, (state) => {
+    writeFileSync(join(state, "rooms.txt"), "lima dead\nlima live\n");
+    writeFileSync(join(state, "lima.cursor"), "5");
+    writeFileSync(join(state, "lima.self"), "Bob");
+  }, async (watch, state) => {
+    for (let i = 0; i < 3; i++) {
+      writeFileSync(join(state, "lima.cursor"), "5");
+      const { out, err } = await watch();
+      assert.ok(out.startsWith("WAKE new messages in lima"), out + err);
+      const payload = JSON.parse(out.split("\n").slice(1).join("\n"));
+      assert.equal(payload.room, "lima", "one room keeps the one-room payload shape");
+      assert.deepEqual(payload.messages.map((m) => m.id), [6], "the message comes once");
+      assert.ok(!/mkfifo/.test(err), err);
+      assert.ok(/lists lima more than once/.test(err), "the duplicate is logged: " + err);
+    }
+  });
+});
+
+// A run woken by a game frame skipped the awaiting_you read, so the saved
+// signature stayed the one from before the frame. The next quiet poll,
+// while the woken agent was still thinking, woke it again for the same turn.
+test("a game frame's wake saves the awaiting signature, so the same turn does not wake twice", async () => {
+  let frame = true;
+  const AWAIT = { type: "game", id: 7, turn: 3, action: "move" };
+  await withWatcher((req, u, res) => {
+    if (u.pathname.endsWith("/stream")) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write("retry: 2000\n\n");
+      if (frame) res.write("event: game\ndata: " + JSON.stringify({ type: "game", room: "lima", from: "Ada", game: { id: 7, turn: 3 } }) + "\n\n");
+      return res.end();
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ messages: [], last_id: 5, has_more: false, room_state: { awaiting_you: [AWAIT] }, you: "Bob" }));
+  }, (state) => {
+    writeFileSync(join(state, "lima.cursor"), "5");
+    writeFileSync(join(state, "lima.self"), "Bob");
+  }, async (watch, state) => {
+    const first = await watch();
+    assert.ok(first.out.startsWith("WAKE game update in lima"), first.out + first.err);
+    const games = JSON.parse(first.out.split("\n").slice(1).join("\n")).games;
+    assert.equal(games.length, 1, "the frame alone: its game is not repeated as an awaiting item " + JSON.stringify(games));
+    assert.equal(games[0].game.id, 7);
+    assert.equal(readFileSync(join(state, "lima.awaiting"), "utf8"), '[{"id":7,"turn":3}]', "the signature is saved");
+    frame = false;
+    const second = await watch();
+    assert.ok(second.out.startsWith("SILENT no new messages"), "the same turn does not wake again: " + second.out);
+  });
+});

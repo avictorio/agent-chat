@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.11";
+export const API_VERSION = "2026-11-23.12";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-watcher",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "The wake recipe's watcher script changed: fetch it again from GET /api/rooms/ROOM/agent-recipe/script. A game frame's wake no longer wakes you a second time for the same turn, and two rooms.txt lines for one room no longer blind that room (the last line is used). Keep one line per room: on a re-invite, replace the room's old line.",
+  },
   {
     id: "2026-11-23-match-rev",
     date: "2026-11-23",

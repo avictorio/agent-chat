@@ -74,6 +74,18 @@ if [ -f "$REGISTRY" ]; then
     esac
     printf '%s\t%s\t%s\n' "$R" "${T:-}" "${S:-}" >> "$LIST"
   done < "$TMPD/registry.txt"
+  # One line per room. A re-invite's line appended next to the old one
+  # used to start two polls of the room that shared its scratch files:
+  # one died on the second mkfifo, and when the survivor held the revoked
+  # token the room was reported failed on every run (or, with two good
+  # tokens, its messages came twice). The last line is the newest token.
+  awk -F'\t' '{ if (!($1 in last)) order[++n] = $1; else dup[$1] = 1; last[$1] = $0 }
+    END { for (i = 1; i <= n; i++) print last[order[i]] }' "$LIST" > "$TMPD/rooms.dedup"
+  awk -F'\t' 'seen[$1]++ == 1 { print $1 }' "$LIST" > "$TMPD/rooms.dups"
+  while IFS= read -r R; do
+    log "rooms.txt lists $R more than once; using its last line"
+  done < "$TMPD/rooms.dups"
+  mv "$TMPD/rooms.dedup" "$LIST"
 fi
 if [ ! -s "$LIST" ]; then
   LEGACY_TOKEN=""
@@ -99,19 +111,20 @@ else
 fi
 
 # --- Per-room poll ------------------------------------------------------------
-# Polls one room: fills $TMPD/<room>.messages.jsonl and .games.jsonl,
-# writes the room's cursor and spool (unless dry run), and leaves the
-# number of wake-worthy items in $TMPD/<room>.count (-1 when every read
-# for the room failed, so the caller can tell a dead room from a quiet
-# one).
+# Polls one room: fills $TMPD/<n>/messages.jsonl and games.jsonl (n is
+# the room's line in the list, so no two polls ever share a scratch
+# directory), writes the room's cursor and spool (unless dry run), and
+# leaves the number of wake-worthy items in $TMPD/<n>/count (-1 when
+# every read for the room failed, so the caller can tell a dead room
+# from a quiet one).
 poll_room() {
-  local P_ROOM="$1" P_TOKEN="$2" P_SELF="$3"
+  local P_ROOM="$1" P_TOKEN="$2" P_SELF="$3" P_LINE="$4"
   local BASE="$ORIGIN/api/rooms/$P_ROOM"
   local CURSOR_FILE="$STATE_DIR/$P_ROOM.cursor"
   local SPOOL_FILE="$STATE_DIR/$P_ROOM.jsonl"
   local SELF_FILE="$STATE_DIR/$P_ROOM.self"
   local AWAIT_FILE="$STATE_DIR/$P_ROOM.awaiting"
-  local RDIR="$TMPD/$P_ROOM"
+  local RDIR="$TMPD/line.$P_LINE"
   mkdir -p "$RDIR"
   local COLLECTED="$RDIR/messages.jsonl"
   local GAMES="$RDIR/games.jsonl"
@@ -297,47 +310,53 @@ poll_room() {
   # kept per room - the same turn left waiting does not re-wake you
   # every poll, but a NEW turn of the same game awaiting you does (an
   # id-only signature cannot tell round 2 from round 1).
-  local GAME_COUNT_SO_FAR=0
-  GAME_COUNT_SO_FAR=$(jq -s 'length' "$GAMES" 2>/dev/null || echo 0)
-  if [ "$GAME_COUNT_SO_FAR" = "0" ]; then
-    local SRESP=""
-    if SRESP=$(curl --fail --silent --show-error --max-time 10 "${AUTH_ARGS[@]}" "$BASE/messages?after=$CURSOR&wait=0" 2>/dev/null); then
-      READ_OK=1
-      if [ -z "$P_SELF" ]; then
-        P_SELF=$(printf '%s' "$SRESP" | jq -r '.you // empty' 2>/dev/null || true)
-        if [ -n "$P_SELF" ] && [ "$DRY" = "0" ]; then
-          printf '%s' "$P_SELF" > "$SELF_FILE"
-        fi
+  # The read runs even when a game frame already woke this run: it used
+  # to be skipped then, so the signature stayed the one from before the
+  # frame, and the next quiet poll - while the woken agent was still
+  # thinking - saw a "new" signature and woke it again for the same
+  # turn. A game whose frame was collected here is left out of the
+  # awaiting item, so one change never rides in the payload twice.
+  local FRAME_IDS="[]"
+  FRAME_IDS=$(jq -s -c '[.[] | .game.id? // empty]' "$GAMES" 2>/dev/null || echo "[]")
+  local SRESP=""
+  if SRESP=$(curl --fail --silent --show-error --max-time 10 "${AUTH_ARGS[@]}" "$BASE/messages?after=$CURSOR&wait=0" 2>/dev/null); then
+    READ_OK=1
+    if [ -z "$P_SELF" ]; then
+      P_SELF=$(printf '%s' "$SRESP" | jq -r '.you // empty' 2>/dev/null || true)
+      if [ -n "$P_SELF" ] && [ "$DRY" = "0" ]; then
+        printf '%s' "$P_SELF" > "$SELF_FILE"
       fi
-      # Anything posted since the stream slice closed is real news too.
-      printf '%s' "$SRESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' >> "$COLLECTED" || true
-      local S_LAST=""
-      S_LAST=$(printf '%s' "$SRESP" | jq -r '.last_id // empty' 2>/dev/null || true)
-      # last_id answers a read from this cursor, made after the stream
-      # slice closed, so it is the cursor to keep even when it is lower:
-      # the newest message was deleted, or the room was deleted and made
-      # again and its numbers started over. A cursor that only moved
-      # forward then heard no message until the new room's numbers passed
-      # the old room's.
-      if [ -n "$S_LAST" ] && [ "$S_LAST" -ge 0 ] 2>/dev/null; then
-        CURSOR=$S_LAST
+    fi
+    # Anything posted since the stream slice closed is real news too.
+    printf '%s' "$SRESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' >> "$COLLECTED" || true
+    local S_LAST=""
+    S_LAST=$(printf '%s' "$SRESP" | jq -r '.last_id // empty' 2>/dev/null || true)
+    # last_id answers a read from this cursor, made after the stream
+    # slice closed, so it is the cursor to keep even when it is lower:
+    # the newest message was deleted, or the room was deleted and made
+    # again and its numbers started over. A cursor that only moved
+    # forward then heard no message until the new room's numbers passed
+    # the old room's.
+    if [ -n "$S_LAST" ] && [ "$S_LAST" -ge 0 ] 2>/dev/null; then
+      CURSOR=$S_LAST
+    fi
+    local ITEMS="[]"
+    local SIG="[]"
+    ITEMS=$(printf '%s' "$SRESP" | jq -c '[.room_state.awaiting_you[]? | select(.type == "game")]' 2>/dev/null || echo "[]")
+    SIG=$(printf '%s' "$ITEMS" | jq -c '[.[] | {id: .id, turn: (.turn // 0)}] | sort_by(.id)' 2>/dev/null || echo "[]")
+    local OLD_SIG="[]"
+    if [ -f "$AWAIT_FILE" ]; then
+      OLD_SIG=$(cat "$AWAIT_FILE")
+    fi
+    if [ "$SIG" != "$OLD_SIG" ]; then
+      if [ "$DRY" = "0" ]; then
+        printf '%s' "$SIG" > "$AWAIT_FILE.tmp.$$"
+        mv "$AWAIT_FILE.tmp.$$" "$AWAIT_FILE"
       fi
-      local ITEMS="[]"
-      local SIG="[]"
-      ITEMS=$(printf '%s' "$SRESP" | jq -c '[.room_state.awaiting_you[]? | select(.type == "game")]' 2>/dev/null || echo "[]")
-      SIG=$(printf '%s' "$ITEMS" | jq -c '[.[] | {id: .id, turn: (.turn // 0)}] | sort_by(.id)' 2>/dev/null || echo "[]")
-      local OLD_SIG="[]"
-      if [ -f "$AWAIT_FILE" ]; then
-        OLD_SIG=$(cat "$AWAIT_FILE")
-      fi
-      if [ "$SIG" != "$OLD_SIG" ]; then
-        if [ "$DRY" = "0" ]; then
-          printf '%s' "$SIG" > "$AWAIT_FILE.tmp.$$"
-          mv "$AWAIT_FILE.tmp.$$" "$AWAIT_FILE"
-        fi
-        if [ "$SIG" != "[]" ]; then
-          jq -n --argjson items "$ITEMS" '{awaiting_games: $items, via: "room_state"}' >> "$GAMES"
-        fi
+      local FRESH="[]"
+      FRESH=$(printf '%s' "$ITEMS" | jq -c --argjson seen "$FRAME_IDS" '[.[] | select((.id as $i | $seen | any(. == $i)) | not)]' 2>/dev/null || echo "[]")
+      if [ "$FRESH" != "[]" ]; then
+        jq -n --argjson items "$FRESH" '{awaiting_games: $items, via: "room_state"}' >> "$GAMES"
       fi
     fi
   fi
@@ -378,25 +397,27 @@ FIRST_GAMES=0
 
 # Poll all rooms in parallel: each poll writes only its own per-room
 # files, so the run lasts one slice, not one slice per room.
-for ENTRY in "${ORDER[@]}"; do
+for N in "${!ORDER[@]}"; do
+  ENTRY="${ORDER[$N]}"
   R=$(printf '%s' "$ENTRY" | cut -f1)
   T=$(printf '%s' "$ENTRY" | cut -f2)
   S=$(printf '%s' "$ENTRY" | cut -f3)
-  poll_room "$R" "$T" "$S" &
+  poll_room "$R" "$T" "$S" "$N" &
 done
 wait
 
-for ENTRY in "${ORDER[@]}"; do
-  R=$(printf '%s' "$ENTRY" | cut -f1)
-  COUNT=$(cat "$TMPD/$R/count" 2>/dev/null || echo -1)
+for N in "${!ORDER[@]}"; do
+  R=$(printf '%s' "${ORDER[$N]}" | cut -f1)
+  RD="$TMPD/line.$N"
+  COUNT=$(cat "$RD/count" 2>/dev/null || echo -1)
   if [ "$COUNT" = "-1" ]; then
     FAILED=$((FAILED + 1))
     continue
   fi
   if [ "$COUNT" -gt 0 ]; then
     TOTAL_COUNT=$((TOTAL_COUNT + COUNT))
-    MSGS_JSON=$(jq -s '.' "$TMPD/$R/messages.jsonl")
-    GAMES_JSON=$(jq -s '.' "$TMPD/$R/games.jsonl")
+    MSGS_JSON=$(jq -s '.' "$RD/messages.jsonl")
+    GAMES_JSON=$(jq -s '.' "$RD/games.jsonl")
     if [ -z "$FIRST_ROOM" ]; then
       FIRST_ROOM="$R"
       FIRST_MSGS=$(printf '%s' "$MSGS_JSON" | jq 'length')
