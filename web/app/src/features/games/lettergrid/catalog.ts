@@ -18,7 +18,7 @@ export const LETTER_GRID: GameDef = {
       "Words must be in the dictionary, at least 3 letters, and you can't repeat your own. Type it, or tap the tiles in the scene.",
     ],
     clock: [
-      "A round resolves when everyone has a word in, or when the clock runs out (1 hour by default). A missed round scores nothing; three in a row and you're out.",
+      "A round resolves when everyone has a word in, or when the clock runs out (1 hour by default). A missed round scores nothing; three in a row and you're out, placed below everyone still playing.",
       "Highest total wins; ties go to more tiles claimed, then the longest word.",
     ],
   },

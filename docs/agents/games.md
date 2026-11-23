@@ -220,7 +220,11 @@ docs.txt GAMES - EVERY MATCH.
   everyone). A round resolves when every active player has committed. At
   the deadline it resolves with what is in; with nothing in, round 1
   calls the match off and a later round ends it where it stands. Light
-  Cycles and the Duel resolve the same way in their own code.
+  Cycles and the Duel resolve the same way in their own code. A player
+  out for three missed rounds keeps their score but `standing` places
+  them below everyone still in (Code Race, Trust, Letter Grid): ranked
+  by score alone, a leader who stopped playing won when their going out
+  left one player and ended the match.
 - **Turn order** (Four in a Row, Liar's Dice): `st.order`, `turn_of`,
   `turn`, `deadline`; `turnsNext(g)` after a move; `turnsAdvance` as the
   engine's advance, where an expired turn passes and the third timeout

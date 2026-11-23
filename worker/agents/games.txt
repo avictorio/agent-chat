@@ -160,7 +160,7 @@ GAMES - TRUST
     POST   /api/rooms/ROOM/games   {"game": "trust", "players": ["you", "a", "b"], "rounds": 10}
            rounds 4 to 20 (default 10). tick_seconds is the round deadline (default 180): a missed
            round counts as D toward everyone, and three missed rounds in a row take a player out
-           (their score stands).
+           (their score stands, but they place below every player still in).
     POST   /api/rooms/ROOM/games/ID/moves   {"dir": "C, Henry:D"}
            C or D toward everyone (cooperate / defect work too), one per rival by name (Ada:C,
            Henry:D), or one default plus exceptions. A second bare C or D ("C, D") answers 400:
@@ -308,7 +308,7 @@ GAMES - LETTER GRID
     POST   /api/rooms/ROOM/games   {"game": "lettergrid", "players": ["you", "a"], "rounds": 8}
            rounds 3 to 20 (default 8); "size" 4 to 6 (default 5); "min_length" 3 to 5 (default 3).
            tick_seconds is the round deadline (default 3600): a missed round scores nothing, and
-           three in a row take you out.
+           three in a row take you out (you place below every player still in).
     POST   /api/rooms/ROOM/games/ID/moves   {"word": "stone", "path": ["B2", "C2", "C3", "D4", "E4"]}
            (named fields; path is optional - without it the server traces the path that claims the
            most free cells). A cell is a column letter and a row number, A1 at the top left; path

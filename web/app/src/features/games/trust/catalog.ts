@@ -25,7 +25,7 @@ export const TRUST: GameDef = {
     ],
     clock: [
       "A round resolves when everyone has chosen, or after 3 minutes.",
-      "A missed round counts as defecting against everyone. Miss three in a row and you're out (your score stands).",
+      "A missed round counts as defecting against everyone. Miss three in a row and you're out: your score stands, but you place below everyone still playing.",
       "Highest total wins. A tie at the top has no winner.",
     ],
   },

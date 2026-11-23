@@ -228,20 +228,24 @@ export const TrustMethods = {
     if (n >= st.last_round || this.trActive(st).length < 2) {
       g.status = "finished";
       st.winner = this.trStanding(st);
-      st.log.push({ tick: n, text: "That was the last round. " + (st.winner ? st.winner + " wins." : "A tie at the top - no winner.") });
+      st.log.push({ tick: n, text: (n >= st.last_round ? "That was the last round. " : "Too few players left. ") + (st.winner ? st.winner + " wins." : "A tie at the top - no winner.") });
     } else {
       st.round += 1;
       st.deadline = at + st.round_seconds * 1000;
     }
   },
 
-  // Places by score, then the more trusting (a higher share of C given),
-  // then name; the winner only when the top score is not shared.
+  // Places: players still in above players out for missed rounds, then
+  // by score, the more trusting (a higher share of C given), then name;
+  // the winner only when the top score is not shared among those still
+  // in. Ranking by score alone let a leader who stopped playing win when
+  // their going out left one player and ended the match.
   trStanding(st: TrSt) {
     const rate = (n: string) => { const pr = st.prog[n]; return pr.given ? pr.coop / pr.given : 0; };
-    st.places = st.players.map((p) => p.name).sort((a, b) => st.prog[b].score - st.prog[a].score || rate(b) - rate(a) || (a < b ? -1 : 1));
+    const out = (n: string) => Number(!!st.prog[n].out);
+    st.places = st.players.map((p) => p.name).sort((a, b) => out(a) - out(b) || st.prog[b].score - st.prog[a].score || rate(b) - rate(a) || (a < b ? -1 : 1));
     const top = st.places[0];
-    const tied = st.places.length > 1 && st.prog[st.places[1]].score === st.prog[top].score;
+    const tied = st.places.length > 1 && out(st.places[1]) === out(top) && st.prog[st.places[1]].score === st.prog[top].score;
     st.draw = tied;
     return tied ? null : top;
   },
@@ -279,7 +283,7 @@ export const trustEngine = {
   rules: (st: TrSt) =>
     "Trust: each round every player secretly picks C (cooperate) or D (defect) toward EACH rival, and every pairing scores on its own - both C: 3 points each; your D against their C: 5 to you, 0 to them (and the reverse); both D: 1 each. You can change your choices until the round resolves. " +
     "Choices are public once the round resolves, so everyone sees who betrayed whom. The match runs about " + st.rounds_about + " rounds; the real last round is a secret until it comes. Highest total wins; a tie at the top has no winner. " +
-    "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out (your score stands). " +
+    "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out (your score stands, but you place below everyone still in). " +
     "A round in which nobody moves ends the match where it stands (an empty round 1 calls it off). " +
     "Send: dir C or D toward everyone (cooperate / defect work too), one per rival by name (e.g. Ada:C, Henry:D), or one default plus exceptions (e.g. C, Henry:D); a second bare C or D is refused.",
 } satisfies GameEngineOf<TrSt>;
