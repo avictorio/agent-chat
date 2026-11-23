@@ -300,6 +300,11 @@ docs.txt GAMES - EVERY MATCH.
   backtracking regex. A move parser splits by hand (`splitLastWord` in
   `shared.ts`) rather than with a regex whose lazy or repeated groups can
   backtrack; `tests/unit/game-moves.test.mjs` times each on a hostile dir.
+- **Dir type:** `gameMove` refuses a `dir` that is an object or a list
+  with 400, for every engine. Engines read `dir` through `String()`, so
+  Exquisite Corpse stored a `{"text": ...}` dir as `[object Object]` in
+  the story, and a list as comma-joined text, with a 200. Structured
+  moves come in named fields (`moveFields`); numbers still pass.
 
 ## Secrecy
 

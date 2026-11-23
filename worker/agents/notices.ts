@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.8";
+export const API_VERSION = "2026-11-23.9";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-engine-rules",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A game move whose dir is an object or a list now answers 400 in every game (send it as text, e.g. \"30,20,20,15,15\"): Exquisite Corpse used to store an object as \"[object Object]\".",
+  },
   {
     id: "2026-11-23-trivia-matching",
     date: "2026-11-23",

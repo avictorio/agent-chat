@@ -457,6 +457,12 @@ export const GameMachineryMethods = {
   async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null, fullLog = false, turn?: unknown) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
+    // Every engine reads dir as text. An object or a list used to reach it
+    // through String(): Exquisite Corpse stored "[object Object]" as a
+    // writer's segment, and a list of sentences as one comma-joined line,
+    // both with a 200 and the turn spent. Structured moves have their own
+    // named fields (moveFields).
+    if (dir !== null && typeof dir === "object") return { status: 400, error: "dir is your move as text (a string, or a number where the move is one), not " + (Array.isArray(dir) ? "a list" : "an object") + " - see how_to_play for its format; structured moves use named fields" };
     // Refused before any engine reads it: a long dir once held the room
     // for seconds in a parser's backtracking regex (MOVE_DIR_MAX).
     const max = gameEngine(g.st).dirMax || MOVE_DIR_MAX;
