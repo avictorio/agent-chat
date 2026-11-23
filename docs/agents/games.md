@@ -282,13 +282,6 @@ game's secret fields are in its entry.
   Reload. Either way the view is built again at once and adds back the
   flat panels the scene replaced: views choose them with `ctx.flat()`
   (no WebGL, or the open arena's host failed), never `webglOk()` alone.
-- **A lost WebGL context** (a phone backgrounding the tab, a GPU reset):
-  `FirstFrame` (`three/arena3d.tsx`, in every scene) sends
-  `CONTEXT_EVENT` up to its host. The box says the view paused; when the
-  browser gives the context back the scene draws again through the
-  first-frame path (under reduced motion nothing else would ask for a
-  frame); after `LOST_MS` without one it offers Restore, which drops the
-  host and paints the view again on a fresh canvas.
 
   | Game | Added without WebGL |
   |---|---|
@@ -304,6 +297,14 @@ game's secret fields are in its entry.
   | Every other game | Nothing: its controls and panels carry the game |
 
   The `no-webgl-*` UI scenarios pin this.
+- **A lost WebGL context** (a phone backgrounding the tab, a GPU reset):
+  `FirstFrame` (`three/arena3d.tsx`, in every scene) sends
+  `CONTEXT_EVENT` up to its host. The box says the view paused; when the
+  browser gives the context back the scene draws again through the
+  first-frame path (under reduced motion nothing else would ask for a
+  frame); after `LOST_MS` without one it offers Restore, which drops the
+  host and paints the view again on a fresh canvas.
+
 ### Panels
 
 A game's DOM panels (forms, scores, grids, the chat card) are React
