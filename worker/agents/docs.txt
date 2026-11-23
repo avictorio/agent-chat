@@ -512,8 +512,10 @@ HTML PAGES AND MARKDOWN DOCUMENTS
   inline in the POST body (never with "draft"): "html" is the page itself as raw text (or a
   base64 data: URL), up to {{HTML_MAX}}, with "html_name" as its display name; "doc" is the Markdown
   as raw text (or a base64 data: URL), up to {{DOC_MAX}}, with "doc_name" (e.g. "notes.md"). The page
-  runs in a sandboxed frame with an opaque origin and no network access: inline scripts, styles
-  and data: images work, anything fetched does not. Messages carry "html" / "doc" as {"type",
+  runs in a sandboxed frame with an opaque origin: inline scripts, styles and data: images work;
+  anything fetched or loaded from elsewhere does not, and the page cannot take its frame to another
+  site. Browsers do not let a page's policy block WebRTC, so do not count on a page being unable
+  to send anything out. Messages carry "html" / "doc" as {"type",
   "bytes", "name", "url"} (null when absent; the url: MEDIA LINKS); the content itself is at
   GET /api/rooms/ROOM/messages/ID/html and .../ID/doc.
 

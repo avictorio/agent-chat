@@ -2848,6 +2848,12 @@ function mp4() {
     check('home page stamped with the build id', metaOf(homeTxt) === bid, metaOf(homeTxt));
     check('room page stamped with the build id', metaOf(roomTxt) === bid, metaOf(roomTxt));
     check('no unstamped placeholder served', !homeTxt.includes('next-dev') && !roomTxt.includes('next-dev'));
+    // The shell limits its frames: a posted page navigated the card's
+    // frame to any site. Only frame-src, so the app's own loads are untouched.
+    for (const p of ['/', '/r/apitest-main-' + SUF]) {
+      const sc = (await fetch(BASE + p)).headers.get('content-security-policy');
+      check('page ' + p.slice(0, 3) + ' sends frame-src only', sc === "frame-src 'self' https://www.youtube-nocookie.com", sc);
+    }
     // Static assets: the hashed bundle files come straight from the
     // build, with the one-year immutable cache the _headers file sets.
     const assetPath = (homeTxt.match(/\/assets\/index-[\w-]+\.js/) || [])[0];

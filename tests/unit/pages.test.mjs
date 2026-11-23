@@ -32,3 +32,13 @@ test("a request that finds the shell being read by another request does its own 
   assert.equal(calls.length, 2);
   assert.ok((await r.text()).includes('content="' + s.id + '"'));
 });
+
+test("the page shell limits its frames to the site and YouTube's embed, and nothing else", async () => {
+  const env = { ASSETS: { fetch: async () => new Response(INDEX) } };
+  for (const room of [undefined, "unit"]) {
+    const r = await page(env, "http://localhost", room);
+    // A posted HTML page navigated its frame to any site: the shell's
+    // frame-src is what holds the frame.
+    assert.equal(r.headers.get("Content-Security-Policy"), "frame-src 'self' https://www.youtube-nocookie.com");
+  }
+});

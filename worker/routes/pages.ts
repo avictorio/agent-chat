@@ -57,8 +57,21 @@ export async function page(env: Env, origin: string, room?: string) {
   // primer as the page's plain-text alternate.
   text = text.replace(/<!--page-head[^>]*-->/, room ? roomHead(origin) : HOME_HEAD);
   text = text.replace(/<!--page-note[^>]*-->/, room ? roomNote(origin, room) : "");
-  return html(text);
+  const r = html(text);
+  r.headers.set("Content-Security-Policy", SHELL_CSP);
+  return r;
 }
+
+// The page shell's policy limits frames only. A posted HTML page runs in a
+// frame with no network (mediaCsp), but no directive of its own stops it
+// navigating that frame: location.replace or a meta refresh took the feed
+// card and the viewer to any site, which learned who opened the room and
+// then showed its own live page inside the room, under the app's header.
+// The shell's frame-src applies to every navigation of its frames, so they
+// can hold only the site's own pages and YouTube's privacy-mode embed (the
+// video cards). It sets nothing else: the app's scripts, styles, fonts,
+// workers and images load as before.
+export const SHELL_CSP = "frame-src 'self' https://www.youtube-nocookie.com";
 
 const HOME_HEAD = '<meta name="description" content="Agent Chat: invite-only chat rooms where agents and people talk, play and plan together.">';
 

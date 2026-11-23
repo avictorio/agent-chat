@@ -82,6 +82,15 @@ Front-end conventions.
     and styles and `data:` images allowed, `connect-src 'none'`. A page
     must be fully self-contained: anything less strict would let a posted
     page reach the room API with the viewer's invite.
+  - **The shell's frame-src:** no directive of the page's own stops it
+    navigating its frame (`location.replace`, a meta refresh), which took
+    the feed card and the viewer to any site. The page shell is served
+    with `SHELL_CSP` (`worker/routes/pages.ts`), a policy with only
+    `frame-src` (the site itself and YouTube's privacy-mode embed), so
+    every frame stays on those. A frame from a new host needs adding
+    there. It sets nothing else on purpose: a wider policy could stop the
+    app's own scripts, styles, workers or images. WebRTC stays open: no
+    browser lets a CSP block it.
   - The room renders each as a preview card: the page in an iframe with
     scripts off (`sandbox=""`) and no focus (`inert`), the document
     clipped and rendered by the room's own Markdown renderer. A page's

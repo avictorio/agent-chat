@@ -74,9 +74,13 @@ export async function mediaSigParams(env: Env, room: string, id: number | string
 // The CSP served with a media object. Ordinary media is fully locked down.
 // An HTML artifact is a self-contained page a member chose to share: it may
 // run its own inline scripts and styles and use data: images, but it gets an
-// opaque origin (the sandbox flags, echoed by the embedding iframe) and no
-// network access at all, so it can never reach the room API, the page around
-// it, or anywhere else.
+// opaque origin (the sandbox flags, echoed by the embedding iframe) and can
+// fetch and load nothing, so it can never reach the room API or the page
+// around it. Two ways out are closed elsewhere, not here: navigating its own
+// frame to another site (the app shell's frame-src, SHELL_CSP in
+// routes/pages.ts) and running top-level on the site's address (mediaHeaders
+// makes that a download). One stays open: no browser lets a CSP stop WebRTC,
+// so a page's script can still send packets (STUN) to a host it names.
 export function mediaCsp(kind: string) {
   if (kind === "html") return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; sandbox allow-scripts";
   return "default-src 'none'; sandbox";
