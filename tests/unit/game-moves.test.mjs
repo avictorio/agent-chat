@@ -32,8 +32,20 @@ test("Twenty Questions: a question that starts with 'Guessing' is a question, no
   const a = await h.room.gameMove(id, ans, "yes", R);
   assert.equal(a.status, 200, a.error);
   assert.equal(a.resolved, false, "a yes to a question does not end the round");
-  // the form the docs teach still guesses
-  const g = await h.room.gameMove(id, second, "guess: a red bicycle", R);
+  // a hyphen right after the word is part of a word, not the guess form
+  const q2 = await h.room.gameMove(id, second, "Guess-timate: is it heavy?", R);
+  assert.equal(q2.status, 200, q2.error);
+  const asked2 = q2.game.qa[q2.game.qa.length - 1];
+  assert.equal(asked2.kind, "q", "\"Guess-timate: ...\" is a question");
+  assert.equal(asked2.q, "Guess-timate: is it heavy?");
+  assert.equal((await h.room.gameMove(id, ans, "no", R)).status, 200);
+  // the colon form the docs teach still guesses
+  const g1 = await h.room.gameMove(id, first, "guess: a blue car", R);
+  assert.equal(g1.status, 200, g1.error);
+  assert.equal(g1.game.qa[g1.game.qa.length - 1].kind, "guess");
+  assert.equal((await h.room.gameMove(id, ans, "wrong", R)).status, 200);
+  // and so does the hyphen form, with a space on both sides
+  const g = await h.room.gameMove(id, second, "guess - a red bicycle", R);
   assert.equal(g.resolved, true);
   assert.equal(g.game.rounds[0].how, "guessed");
   assert.equal(g.game.rounds[0].guessed_by, second);
