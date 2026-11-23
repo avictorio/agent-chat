@@ -1297,8 +1297,36 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
     return out;
   });
 
-  // A room object still on older code sends no code with these 409s: a
-  // post with no files is never held, so its 409 can only mean "gone".
+  // A post with files whose first copy went live and was deleted since
+  // is told so by the answer's code, and is posted once more under a new
+  // id at once. Going by "it has files, so it must still be storing", it
+  // waited through every retry first.
+  await run('send-409-gone-media', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost', 'lost', 'lost', 'lost'];
+    await page.setInputFiles('#imgFile', TESTS + '/../../tests/fixtures/photo.png');
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    await page.fill('#text', 'A picture, then deleted.');
+    await page.click('#send');
+    await page.waitForSelector('#err:not([hidden])', { timeout: 15000 });
+    await idle(page);
+    const firstId = S.msgs[S.msgs.length - 1].id;
+    must(S.msgs[S.msgs.length - 1].text === 'A picture, then deleted.', 'the first copy landed');
+    S.msgs = S.msgs.filter((m) => m.id !== firstId);
+    const from = calls.length;
+    const t0 = Date.now();
+    await page.click('#send');
+    await idle(page);
+    const took = Date.now() - t0;
+    await settle(page);
+    const out = { posts: posts(calls, from), took, rows: await rowsWith(page, 'A picture, then deleted.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)) };
+    must(out.posts.length === 2 && out.posts[1][0] && out.posts[1][0] !== out.posts[0][0], 'posted once more under a new id: ' + JSON.stringify(out.posts));
+    must(took < 3000, 'no wait through the storing retries: ' + took + ' ms');
+    must(out.rows === 1 && !out.err, 'one row, no error: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // A room object still on older code sends no code with these 409s: its
+  // two sentences tell them apart.
   await run('send-409-gone-text-no-code', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
     S.noPostCodes = true;
     S.postAnswers = ['lost', 'lost', 'lost', 'lost'];
