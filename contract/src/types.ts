@@ -200,6 +200,11 @@ export interface AwaitingItem {
  *  cut to fit STATE_MAX_BYTES carries <name>_more: how many were left out. */
 export interface RoomState {
   v: number;
+  /** One more on every board write (decisions, questions, stakes and
+   *  digests: an add, an edit, any action, a delete); never goes back.
+   *  Absent until the room's first board write. A reader holding a copy
+   *  of the board reloads it when this moves. */
+  board_rev?: number;
   constitution_version?: number;
   open_questions?: Array<{ id: number; text: string; added_by: string; claimed_by: string | null }>;
   open_questions_more?: number;

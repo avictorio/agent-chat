@@ -50,6 +50,23 @@ export const BoardMethods = {
     return id;
   },
 
+  // board_rev: one more on every board write (an add, an edit, any
+  // action, a delete) on decisions, questions, stakes and digests, served
+  // in room_state. The web app reloads its board when room_state moves,
+  // and an edit that changed only a text (or a sign on a decision everyone
+  // had already been asked to sign) left every part of room_state as it
+  // was, so other members' open boards kept the old text until a reload.
+  // Kept in cfg, so it survives a restart, and carried across a room
+  // delete (destroy) as the id marks are, so it never goes back.
+  bumpBoardRev(): void {
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('board_rev', ?)", String(this.boardRev() + 1));
+  },
+
+  boardRev(): number {
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'board_rev'").toArray()[0];
+    return r ? parseInt(r.v, 10) || 0 : 0;
+  },
+
   /** The newest id the table has handed out. */
   boardHwm(table: BoardTable): number {
     const max = this.sql.exec<{ n: number | null }>("SELECT MAX(id) AS n FROM " + table).one().n || 0;
@@ -88,6 +105,7 @@ export const BoardMethods = {
     this.sql.exec("INSERT INTO oq (id, ts, added_by, text, status, updated) VALUES (?, ?, ?, ?, 'open', ?)", id, now, by, text, now);
     this.sql.exec("DELETE FROM oq WHERE status = 'resolved' AND id NOT IN (SELECT id FROM oq WHERE status = 'resolved' ORDER BY updated DESC LIMIT 150)");
     const out = this.sql.exec<OqRow>("SELECT * FROM oq WHERE id = ?", id).one();
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -116,6 +134,7 @@ export const BoardMethods = {
       return { error: "\"action\" must be claim, unclaim, resolve, reopen or edit", status: 400 };
     }
     const out = { question: this.sql.exec<OqRow>("SELECT * FROM oq WHERE id = ?", id).one() };
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -131,6 +150,7 @@ export const BoardMethods = {
     if (staleBase(row.updated, base)) return { error: "That question changed since you read it. Read it again (its updated is now " + row.updated + ") and edit that.", status: 409, question: row };
     this.sql.exec("UPDATE oq SET text = ?, updated = ? WHERE id = ?", text, nextStamp(row.updated), id);
     const out = { question: this.sql.exec<OqRow>("SELECT * FROM oq WHERE id = ?", id).one() };
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -138,6 +158,7 @@ export const BoardMethods = {
   deleteQuestion(id: number) {
     if (!this.sql.exec("SELECT id FROM oq WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM oq WHERE id = ?", id);
+    this.bumpBoardRev();
     this.emitState();
     return true;
   },
@@ -162,6 +183,7 @@ export const BoardMethods = {
     // would keep fewer
     this.sql.exec("DELETE FROM dg WHERE id NOT IN (SELECT id FROM dg ORDER BY id DESC LIMIT ?)", KEEP_DIGESTS);
     const out = this.digest(id);
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -173,6 +195,7 @@ export const BoardMethods = {
     if (staleBase(row.updated, base)) return { error: "That digest changed since you read it. Read it again (its updated is now " + row.updated + ") and edit that.", status: 409, digest: row };
     this.sql.exec("UPDATE dg SET text = ?, updated = ? WHERE id = ?", text, nextStamp(row.updated), id);
     const out = { digest: this.digest(id) as DigestOut };
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -180,6 +203,7 @@ export const BoardMethods = {
   deleteDigest(id: number) {
     if (!this.sql.exec("SELECT id FROM dg WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM dg WHERE id = ?", id);
+    this.bumpBoardRev();
     this.emitState();
     return true;
   },
@@ -199,6 +223,7 @@ export const BoardMethods = {
     this.sql.exec("INSERT INTO sk (id, ts, added_by, title, date, note, updated) VALUES (?, ?, ?, ?, ?, ?, ?)", id, now, by, title, date || null, note || null, now);
     this.sql.exec("DELETE FROM sk WHERE done IS NOT NULL AND id NOT IN (SELECT id FROM sk WHERE done IS NOT NULL ORDER BY updated DESC LIMIT 50)");
     const out = this.sql.exec<SkRow>("SELECT * FROM sk WHERE id = ?", id).one();
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -220,6 +245,7 @@ export const BoardMethods = {
       return { error: "\"action\" must be done, reopen or edit", status: 400 };
     }
     const out = { stake: this.sql.exec<SkRow>("SELECT * FROM sk WHERE id = ?", id).one() };
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -231,6 +257,7 @@ export const BoardMethods = {
     if (staleBase(row.updated, base)) return { error: "That stake changed since you read it. Read it again (its updated is now " + row.updated + ") and edit that.", status: 409, stake: row };
     this.sql.exec("UPDATE sk SET title = ?, date = ?, note = ?, updated = ? WHERE id = ?", title, date || null, note || null, nextStamp(row.updated), id);
     const out = { stake: this.sql.exec<SkRow>("SELECT * FROM sk WHERE id = ?", id).one() };
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -238,6 +265,7 @@ export const BoardMethods = {
   deleteStake(id: number) {
     if (!this.sql.exec("SELECT id FROM sk WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM sk WHERE id = ?", id);
+    this.bumpBoardRev();
     this.emitState();
     return true;
   },
@@ -258,6 +286,7 @@ export const BoardMethods = {
     const id = this.nextBoardId("dc");
     this.sql.exec("INSERT INTO dc (id, ts, added_by, title, note, signers, updated) VALUES (?, ?, ?, ?, ?, '[]', ?)", id, now, by, title, note || null, now);
     const out = this.decision(id);
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -284,6 +313,7 @@ export const BoardMethods = {
     // else signed first.
     this.sql.exec("UPDATE dc SET signers = ? WHERE id = ?", JSON.stringify(signers), id);
     const out = { decision: this.decision(id) };
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -295,6 +325,7 @@ export const BoardMethods = {
     if (staleBase(d.updated, base)) return { error: "That decision changed since you read it. Read it again (its updated is now " + d.updated + ") and edit that.", status: 409, decision: d };
     this.sql.exec("UPDATE dc SET title = ?, note = ?, updated = ? WHERE id = ?", title, note || null, nextStamp(d.updated), id);
     const out = { decision: this.decision(id) as NonNullable<ReturnType<typeof decRow>> };
+    this.bumpBoardRev();
     this.emitState();
     return out;
   },
@@ -302,6 +333,7 @@ export const BoardMethods = {
   deleteDecision(id: number) {
     if (!this.sql.exec("SELECT id FROM dc WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM dc WHERE id = ?", id);
+    this.bumpBoardRev();
     this.emitState();
     return true;
   },

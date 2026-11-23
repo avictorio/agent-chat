@@ -40,7 +40,6 @@ import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
 import type { MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 import { warn } from "../lib/log.js";
 import { nameFold, sameName, stripControlChars } from "../lib/text.js";
-import { hiddenDraft } from "./media.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
@@ -88,9 +87,10 @@ export const UploadMethods = {
   // among them. Only direct sessions: their part addresses are presigned
   // for UP_SIGN_TTL and nothing but aborting the upload recalls them. A
   // session through the site is shut to the removed holder already (its
-  // link went with dropUploadLinks, every step checks the invite), and
-  // cancelling it threw away the next holder's partly sent file on a
-  // plain link rotation.
+  // link went with dropUploadLinks, every step checks the invite) and to
+  // the name's next holder (the draft is the earlier invite's:
+  // hiddenDraft), so it is left for the draft sweep rather than cancelled
+  // here.
   directUploadsOf(names: string[]): DirectSession[] {
     const folds = new Set(names.map((n) => nameFold(n)));
     return this.sql.exec<DirectSession & { sender: string }>("SELECT md.msg AS msg, md.kind AS kind, md.upload_id AS upload_id, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.mode = 'direct'").toArray()
@@ -137,8 +137,8 @@ export const UploadMethods = {
     const gen = this.gen;
     const gone = byOwner ? null : this.inviteStill(token, member);
     if (gone) return gone;
-    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
-    if (!r || hiddenDraft(r, member, byOwner)) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "ts">>("SELECT sender, draft, ts FROM m WHERE id = ?", msgId).toArray()[0];
+    if (!r || this.draftHidden(r, member, byOwner)) return { status: 404, error: "No message with that id" };
     if (!r.draft) return { status: 409, error: "Upload tickets are minted for drafts; that message is already published" };
     if (!sameName(r.sender, member)) return { status: 403, error: "You can only open an upload for your own draft" };
     const now = Date.now();
@@ -337,7 +337,7 @@ export const UploadMethods = {
   // or holds the owner key.
   upAuth(id: number, who: string | null | undefined, owner: boolean | undefined, kind: string): { status: 404 | 403, error: string } | { status: 200, msg: Pick<MsgRow, "sender" | "ts" | "draft"> } {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "ts" | "draft">>("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
+    if (!r || this.draftHidden(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
     return { status: 200, msg: r };
   },
@@ -788,10 +788,10 @@ export const UploadMethods = {
   // author had removed meanwhile.
   async findResumableUpload(who: string | null | undefined, size: unknown, fp: unknown, owner: boolean, kind: string | null | undefined) {
     if (!fp || !size) return { status: 200, found: false };
-    const rows = this.sql.exec<{ msg: number, kind: string, sender: string }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
+    const rows = this.sql.exec<{ msg: number, kind: string, sender: string, draft: number, ts: number }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender, m.draft AS draft, m.ts AS ts FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
     for (const r of rows) {
       if (kind && r.kind !== kind) continue;
-      if (!owner && !sameName(r.sender, who)) continue;
+      if (this.draftHidden(r, who, owner)) continue;
       if (this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND kind != ? LIMIT 1", r.msg, r.kind).toArray().length) continue;
       const st = await this.uploadStatus(r.msg, r.kind);
       if (st.status !== 200 || !st.uploading) continue;
@@ -806,8 +806,8 @@ export const UploadMethods = {
   // and indexes it, streamAbort discards it, each in the message's video
   // turn (withMediaLock).
   async streamBegin(id: number, who: string | null | undefined, type: string, size: number, owner: boolean, room: string) {
-    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "ts">>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || this.draftHidden(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach a video to your own messages" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };

@@ -136,8 +136,9 @@ async function runCases(ctx) {
   for (let i = 1; i < 20; i++) await req('POST', R + '/messages/' + did + '/upload-ticket', { token: H, json: { kind: 'image' } });
   rec('ticket: outstanding cap', await req('POST', R + '/messages/' + did + '/upload-ticket', { token: H, json: { kind: 'image' } }));
 
-  // room creation: three tries per email a day, then the cap
-  const email = 'golden-' + SUF + '@example.test';
+  // room creation: three rooms per email a day, then the cap (the mail
+  // stub accepts "sent-" addresses: only a room whose mail went out counts)
+  const email = 'sent-golden-' + SUF + '@example.test';
   const cip = (ctx.IPO || '10.9.0.') + '77';
   for (let i = 0; i < 3; i++) await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': cip }, json: { room: 'apitest-gc' + i + '-' + SUF, name: 'Gold', email } });
   rec('create-room: email cap', await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': cip }, json: { room: 'apitest-gc9-' + SUF, name: 'Gold', email } }));

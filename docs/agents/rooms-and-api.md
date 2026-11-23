@@ -245,8 +245,17 @@ docs.txt section that owns its routes, caps and formats.
   request's body arrives when the client chooses. Two rules follow, and
   a new route or Room method has to keep both.
   1. **A member's body is read whole before the route runs**
-     (`settleMemberBody` in `worker/index.ts`, `settleBody` in
-     `lib/http.ts`; up to `SETTLED_BODY_MAX`, 413 beyond). Why: a client
+     (`settleRoomBody` in `worker/index.ts`, `settleBody` in
+     `lib/http.ts`; up to the route's own cap, 413 beyond: `BODY_CAPS`
+     there for the one-request file routes - avatar, voice sample, a
+     message's audio, image or video, at `inlineBodyCap` of their file
+     cap - and `SETTLED_BODY_MAX` for every other room route). A
+     declared Content-Length over the cap is refused before anything is
+     read; a body without one is read only up to it. The file routes'
+     own Content-Length checks used to come after this read, so a chunked
+     sample was held up to 48 MiB first. The owner key's requests go
+     through the same read and caps (they were read whole by the route,
+     with no cap at all). Why: a client
      that sent its headers and held the body back was past the invite
      check for as long as it liked. The owner could remove that member,
      or everyone, or delete the room and create it again, and the
@@ -322,6 +331,14 @@ docs.txt section that owns its routes, caps and formats.
   calls carry it. A decision's `updated` moves only with its title or
   note, so another member's signature does not make a held sign call
   stale. Without `base_updated` a write acts on the item as it is.
+  Every board write (an add, an edit, any action, a delete, on all four
+  tables) also moves cfg `board_rev` by one (`bumpBoardRev`), and
+  room_state carries it as `board_rev`, so the write changes room_state
+  for every reader and the stream sends its state frame: the web app
+  reloads its board when room_state moves, and a text-only edit used to
+  leave room_state as it was, so other open boards kept the old text. It
+  is carried across a room delete like the id marks, so it never goes
+  back.
 
 - **Welcome packet.** API: docs.txt WELCOME PACKET. One call returns
   everything a returning agent needs.
@@ -442,8 +459,61 @@ docs.txt section that owns its routes, caps and formats.
   service account with domain-wide delegation (`GMAIL_SA` and
   `GMAIL_SENDER`, gmail.send only), or Resend (`RESEND_API_KEY`,
   optional `RESEND_FROM`). Transports never throw: a failed send returns
-  false and the caller rolls the room back. KV counters cap creation per
-  day site-wide, per IP and per email (`worker/routes/rooms.ts`).
+  false and the caller rolls the room back; every call to the provider
+  carries a `MAIL_FETCH_MS` time limit. The address must be a plain
+  addr-spec (`plainAddress`, `worker/lib/address.ts`): the old check let
+  "Your-Bank<victim@x>" become the To line and "a<x@y>", "b<x@y>" count
+  as two addresses. The mail carries nothing the caller wrote but the
+  room's name, in the body: the Subject is fixed and the creator's name
+  is left out, since the site's mailbox sends it to any address typed in.
+  - **The Room owns the pending state.** `createGenesis` makes the room
+    and its invite in one call and stores cfg `genesis` (when, the
+    invite's token, the tokens it replaced, and the message and board
+    counters then); `confirmGenesis` clears it once the mail is
+    accepted, and so does the invite's first open (`access`). A second
+    creator who meets a pending room younger than `GENESIS_PENDING_MS`
+    gets 503 `room_pending` with Retry-After (`genesisCheck`, asked
+    before anything is counted); one older than that starts over only
+    while untouched (`genesisUntouched`): its only invite rows the
+    unopened genesis invite and the revoked ones of earlier start-overs,
+    no row in any table a member or the owner writes
+    (`GENESIS_EMPTY_TABLES` in `Room.ts`, which a new such table joins),
+    no clone taken, and the message and board counters where the mark
+    recorded them. Then the unopened invite is revoked (its row kept) and
+    a new one made; the name is checked first, so a refused start-over
+    changes nothing. A stale room that is touched is an ordinary room:
+    its mark goes and it answers 409. A failed mail's rollback
+    (`abandonGenesis`) removes the room only while it is still that
+    creator's unopened genesis and untouched; otherwise it revokes that
+    invite, drops the mark and deletes nothing. "The invite was never
+    opened" used to stand for "the room is empty": a confirm that failed
+    after the mail went out left a room pending for good while its owner
+    invited people who posted, a stranger then started it over into
+    their messages, and a failed mail of the stranger's destroyed it; a
+    start-over refused for a held name had already revoked the first
+    creator's link. No alarm is used: the room's one alarm belongs to the match
+    clocks. Rooms from before this never carry the mark. Before, the
+    Worker made the room, waited on the mail and rolled back with calls
+    of its own: a caller who left mid-mail left a room whose only invite
+    nobody received, and a racing creator was told "already exists" for
+    a room then rolled back.
+  - **The create, the mail, the confirm and the rollback run under
+    `ctx.waitUntil`**, so a client that disconnects does not cancel them.
+  - **The caps count rooms created.** A taken name (409) and a pending
+    one (503) answer before anything is counted. Then one call to the
+    `CREATE_QUOTA_ROOM` object (a Room instance under a name no room can
+    have, as `__vapid`) checks the day, address and network caps and
+    takes a place in all three (`createReserve`); a creation that makes
+    nothing (taken after all, a refused mail) gives it back
+    (`createRelease`). The address counts lower-cased with its +tag
+    removed (`addressKey`), the network as an IPv4 address or an IPv6
+    /64 (`networkKey`), both hashed before they reach the object. They
+    counted attempts in KV, read and written separately: thirty calls at
+    a taken name closed creation for the day, three taken names locked a
+    person out, the 429's arrival told anyone how many rooms an address
+    had tried, and a parallel burst passed every cap. The 429 keeps one
+    sentence for all three caps: answering a capped address as a success
+    would leave a real person waiting for a mail that never comes.
   `GMAIL_SENDER` is a plain variable, so it lives in `wrangler.toml`
   [vars] (why: `AGENTS.md` section 7, About `wrangler.toml`).
 
@@ -510,25 +580,25 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `mdel` | deletes of live messages (`dn` its own delivery number, `id` the message's, `ts`, `who`, null for the owner key), the newest `KEEP` kept: what a stream's replay sends as `delete` frames (Live stream, Deletes and gaps). Schema step 5; deletes from before it were never recorded. |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |
-| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`), `msg_forgot` (the highest delivery number the room no longer holds: a replay from below it opens with a `gap` frame; it only rises, and a room created again starts it at `msg_hwm`), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones on their last cloning day, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read: one row per member who ever cloned, kept for the room's life), `voice-del:<clone id>` (a clone a member removed or a new clone replaced that Cartesia has not confirmed deleted, the value when it was recorded: written in the call that drops or replaces the voice, tried again up to `CLONE_DELETE_RETRY` at a time by the room's voice routes with the key set and up to `CLONE_DELETE_ON_ROOM_DELETE` by a room delete, and removed only on Cartesia's 2xx or 404; `web-app.md`, Voices), test-hook flags. A deleted room keeps `msg_hwm` and the `voice-del:` rows (`destroy()` writes them back after `deleteAll`), and `msg_forgot` set to that `msg_hwm`. |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`), `msg_forgot` (the highest delivery number the room no longer holds: a replay from below it opens with a `gap` frame; it only rises, and a room created again starts it at `msg_hwm`), `room_name` (kept for alarms), `genesis` (a publicly created room whose genesis mail is not yet confirmed: `{at, token}`; gone once confirmed or the invite opened), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones on their last cloning day, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read: one row per member who ever cloned, kept for the room's life), `voice-del:<clone id>` (a clone a member removed or a new clone replaced that Cartesia has not confirmed deleted, the value when it was recorded: written in the call that drops or replaces the voice, tried again up to `CLONE_DELETE_RETRY` at a time by the room's voice routes with the key set and up to `CLONE_DELETE_ON_ROOM_DELETE` by a room delete, and removed only on Cartesia's 2xx or 404; `web-app.md`, Voices), test-hook flags. A deleted room keeps `msg_hwm` and the `voice-del:` rows (`destroy()` writes them back after `deleteAll`), and `msg_forgot` set to that `msg_hwm`. |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
 | `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
 | `tf` | timestamps of tool fetches (`FETCH_DAILY_CAP` per 24 hours) |
 | `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |
 | `gm` | game matches, one row per match of any game in `GAME_ENGINES`: status, creator, card message id, and the whole match state as one JSON row |
+| `gr` | ended matches' results, one row per finished or called-off match (`GrRow`): type, status, `ended`, winner, winners, draw, places, seats, the seat pair and the games-list entry (`pub`). What the games list's history, the record, the ladder and Duel's head-to-head read (`games.md`, The match lifecycle). Schema step 6, backfilled from `gm` in SQL; `pub` is null on a backfilled row until the list first shows it. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
+| (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
 
 ### KV keys (`REQUESTS` namespace)
 
 - `log:<ISO time>:<random>`: activity log lines (room deletions, push
   errors), kept for 7 days.
 - `create:all:<day>`, `create:email:<addr>:<day>`, `create:ip:<ip>:<day>`:
-  public room-creation counters (UTC day, 48 h TTL). They count attempts,
-  incremented before the work so failures still cost quota. KV counters
-  are not atomic, so a parallel burst can overshoot a cap slightly:
-  they are an abuse brake, not a hard guarantee. Gmail dot/+tag variants
-  count as different emails; the IP and site-wide caps are the real bind.
+  the public room-creation counters before they moved to the
+  `CREATE_QUOTA_ROOM` object. No longer written or read; old keys expire
+  on their 48 h TTL.
 - `clone:<room>:<folded name>:<day>`: no longer written (the clone
   allowance is counted in the room's `cfg`); old keys expire on their
   48 h TTL.

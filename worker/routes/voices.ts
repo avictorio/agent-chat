@@ -1,6 +1,6 @@
 // Voices: a member's voice sample and clone, and speaking a message.
 
-import { CLONE_DELETE_RETRY, mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
+import { CLONE_DELETE_RETRY, inlineBodyCap, mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
 import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT } from "../room/voices.js";
@@ -110,7 +110,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     return saveClone(smp.gen, smp.key, vid);
   }
   if ((request.method === "PUT" || request.method === "POST") && action === "sample") {
-    if (+(request.headers.get("Content-Length") || 0) > VOICE_SAMPLE_MAX * 1.4 + 1000) return json({ error: "Voice samples can be up to " + mb(VOICE_SAMPLE_MAX) }, 413);
+    if (+(request.headers.get("Content-Length") || 0) > inlineBodyCap(VOICE_SAMPLE_MAX)) return json({ error: "Voice samples can be up to " + mb(VOICE_SAMPLE_MAX) }, 413);
     let buf;
     if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
       const body = await readBody(request);

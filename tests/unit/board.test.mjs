@@ -145,3 +145,65 @@ test("unsigned decisions do not push a game accept out of awaiting_you", () => {
   assert.deepEqual(s.awaiting_you.map((a) => a.type + ":" + a.action), ["game:accept", "decision:sign", "decision:sign"]);
   assert.equal(s.awaiting_you_more, 1, "the cut falls on a decision");
 });
+
+test("board_rev in room_state moves by one on every board write, and not on a read", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const rev = () => h.room.roomState("Ada", R).board_rev || 0;
+  const steps = [];
+  /** Runs a write and records how far board_rev moved. */
+  const step = (label, fn) => { const before = rev(); const out = fn(); steps.push([label, rev() - before]); return out; };
+  const d = step("add decision", () => h.room.addDecision("Ship it", null, "Ada"));
+  step("edit decision", () => h.room.editDecision(d.id, "Ship it Friday", null));
+  step("sign", () => h.room.updateDecision(d.id, "sign", "Ada"));
+  step("unsign", () => h.room.updateDecision(d.id, "unsign", "Ada"));
+  step("delete decision", () => h.room.deleteDecision(d.id));
+  const q = step("add question", () => h.room.addQuestion("Which day?", "Ada"));
+  step("edit question", () => h.room.editQuestion(q.id, "Which day, really?"));
+  step("claim", () => h.room.updateQuestion(q.id, "claim", "Ada", null));
+  step("unclaim", () => h.room.updateQuestion(q.id, "unclaim", "Ada", null));
+  step("resolve", () => h.room.updateQuestion(q.id, "resolve", "Ada", "Friday"));
+  step("reopen question", () => h.room.updateQuestion(q.id, "reopen", "Ada", null));
+  step("delete question", () => h.room.deleteQuestion(q.id));
+  const s = step("add stake", () => h.room.addStake("Launch", null, null, "Ada"));
+  step("edit stake", () => h.room.editStake(s.id, "Launch day", null, "a note"));
+  step("done", () => h.room.updateStake(s.id, "done", "Ada"));
+  step("reopen stake", () => h.room.updateStake(s.id, "reopen", "Ada"));
+  step("delete stake", () => h.room.deleteStake(s.id));
+  const g = step("add digest", () => h.room.addDigest("Today we shipped", "Ada"));
+  step("edit digest", () => h.room.editDigest(g.id, "Today we shipped it"));
+  step("delete digest", () => h.room.deleteDigest(g.id));
+  for (const [label, moved] of steps) assert.equal(moved, 1, label);
+  const at = rev();
+  h.room.welcome(); h.room.decisions(); h.room.questions(); h.room.stakes(); h.room.digests(10);
+  assert.equal(rev(), at, "reads leave it alone");
+  assert.equal(h.room.updateDecision(9999, "sign", "Ada").status, 404);
+  assert.equal(rev(), at, "a refused write leaves it alone");
+  assert.equal(at, steps.length);
+});
+
+test("board_rev survives a restart and never goes back across a room delete", async () => {
+  const h = makeRoom();
+  h.room.addQuestion("Before?", "Ada");
+  h.room.addQuestion("Again?", "Ada");
+  assert.equal(h.room.roomState(null, R).board_rev, 2);
+  assert.equal(h.restart().roomState(null, R).board_rev, 2, "after a restart");
+  await h.room.destroy(R);
+  h.room.create();
+  assert.equal(h.room.roomState(null, R).board_rev, 2, "a room created again starts from the old number");
+  h.room.addStake("After", null, null, "Ada");
+  assert.equal(h.room.roomState(null, R).board_rev, 3);
+});
+
+test("an edit to a digest's text reaches a state subscriber's stream", () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const g = h.room.addDigest("Today we shipped", "Ada");
+  const frames = [];
+  h.room.clients.add({ token: "tok-Ada", owner: false, name: "Ada", kinds: null, games: null, stateSub: true, stateKey: null, send: (f) => frames.push(f), close() {} });
+  h.room.emitState(R);
+  assert.equal(frames.length, 1, "the first frame");
+  h.room.editDigest(g.id, "Today we shipped it, and nothing else in room_state changed");
+  assert.equal(frames.length, 2, "the edit sends a state frame");
+  assert.match(frames[1], /"board_rev":2/);
+});

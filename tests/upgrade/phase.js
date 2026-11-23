@@ -37,7 +37,11 @@ const TOK = require('path').join(process.argv[3] || __dirname, 'tokens.json');
       // never read, so every run carried a Light Cycles lobby, not a duel
       const g = await req('POST', R + '/games', { token: H, json: { game: 'duel', players: ['OldHuman', 'OldAgent'] } });
       check(room + ' duel created', g.status === 201 && g.json.game && g.json.game.type === 'duel', g.text.slice(0, 120));
-      t[room] = { H, A, msg: m1.json.id, game: g.json && g.json.game && g.json.game.id };
+      // an ended match for the results table's backfill (schema step 6)
+      const off = await req('POST', R + '/games', { token: H, json: { game: 'duel', players: ['OldHuman', 'OldAgent'] } });
+      const dec = await req('POST', R + '/games/' + (off.json && off.json.game && off.json.game.id) + '/decline', { token: A });
+      check(room + ' a duel declined', dec.status === 200 && dec.json.game && dec.json.game.status === 'cancelled', dec.text.slice(0, 120));
+      t[room] = { H, A, msg: m1.json.id, game: g.json && g.json.game && g.json.game.id, off: off.json && off.json.game && off.json.game.id };
     }
     fs.writeFileSync(TOK, JSON.stringify(t));
   } else {
@@ -60,6 +64,9 @@ const TOK = require('path').join(process.argv[3] || __dirname, 'tokens.json');
       check(room + ': the old duel reads', gm.status === 200 && gm.json.game && gm.json.game.id === game && gm.json.game.type === 'duel' && gm.json.game.status === 'lobby', gm.status + ' ' + gm.text.slice(0, 100));
       const acc = await req('POST', R + '/games/' + game + '/accept', { token: A });
       check(room + ': the old duel accepts a seat and starts', acc.status === 200 && acc.json.game && acc.json.game.type === 'duel' && acc.json.game.status === 'running', acc.status + ' ' + acc.text.slice(0, 120));
+      const gl = await req('GET', R + '/games', { token: H });
+      const offRow = gl.json && (gl.json.games || []).find((x) => x.id === t[room].off);
+      check(room + ': the old declined duel is in the games list', gl.status === 200 && offRow && offRow.status === 'cancelled' && offRow.type === 'duel', gl.status + ' ' + gl.text.slice(0, 160));
       const mb = await req('GET', R + '/members', { token: H });
       check(room + ': members list', mb.status === 200 && (mb.json.members || []).length === 2, mb.text.slice(0, 120));
       const d = await req('POST', R + '/messages', { token: A, json: { text: 'a file follows', draft: true } });

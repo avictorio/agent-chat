@@ -3,7 +3,8 @@
 import { cleanName, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
 import { json, rateLimited, readBody, secondsToUtcMidnight, settleBody, bodyText } from "../lib/http.js";
-import { CLONE_DELETE_ON_ROOM_DELETE, CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, PROTECTED_ROOMS, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
+import { CLONE_DELETE_ON_ROOM_DELETE, CREATE_QUOTA_ROOM, CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, MAIL_FETCH_MS, PROTECTED_ROOMS, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
+import { addressKey, EMAIL_MAX, networkKey, plainAddress } from "../lib/address.js";
 import type { RouteContext } from "../index.js";
 import { retryCloneDeletes } from "./voices.js";
 import { warn } from "../lib/log.js";
@@ -11,30 +12,41 @@ import { warn } from "../lib/log.js";
 // Sends the genesis invite for a freshly created room. Returns true only when
 // the provider accepted the message; the caller rolls the room back on false,
 // so a room never exists without its genesis invite on its way.
+// The mail carries nothing the caller wrote but the room's name, in the
+// body: it goes out from the site's own mailbox to any address typed in
+// the form, and the creator's name in its first line and the room in its
+// Subject let anyone send a stranger a line of their choosing from it.
 /** @param linkUrl the genesis invite link */
-export async function sendGenesisEmail(env: Env, to: string, room: string, name: string, linkUrl: string) {
+export async function sendGenesisEmail(env: Env, to: string, room: string, linkUrl: string) {
   const from = env.RESEND_FROM || "Agent Chat <rooms@send.chat.victorio.cloud>";
-  const subject = "Your Agent Chat room is ready: " + room;
+  const subject = "Your Agent Chat room is ready";
   const text = [
-    "Hi " + name + ",",
+    "Hello,",
     "",
-    "Your room '" + room + "' is ready. This is its genesis invite - the first link into the room, made for your name:",
+    "The room '" + room + "' was created on Agent Chat with this address. This is its genesis invite - the first link into the room, made for the name chosen in the form:",
     "",
     linkUrl,
     "",
     "Open it once and your device remembers the room. Treat the link like a password: anyone who opens it joins the room as you. From inside, you can invite other people and agents, each under their own name.",
     "",
+    "If you did not ask for this room, ignore this mail: nothing happens unless the link is opened.",
+    "",
     "- Agent Chat",
   ].join("\n");
-  const html = "<p>Hi " + escHtml(name) + ",</p>"
-    + "<p>Your room <strong>" + escHtml(room) + "</strong> is ready. This is its genesis invite - the first link into the room, made for your name:</p>"
+  const html = "<p>Hello,</p>"
+    + "<p>The room <strong>" + escHtml(room) + "</strong> was created on Agent Chat with this address. This is its genesis invite - the first link into the room, made for the name chosen in the form:</p>"
     + "<p><a href=\"" + linkUrl + "\">Open " + escHtml(room) + "</a></p>"
     + "<p>Open it once and your device remembers the room. Treat the link like a password: anyone who opens it joins the room as you. From inside, you can invite other people and agents, each under their own name.</p>"
+    + "<p>If you did not ask for this room, ignore this mail: nothing happens unless the link is opened.</p>"
     + "<p>- Agent Chat</p>";
   // Tests reach no mail provider: an address whose local part starts
-  // "sent-" counts as accepted, any other as refused (TEST_HOOKS is never
-  // set live; check:config fails on it).
-  if (env.TEST_HOOKS) return /^sent-/.test(to);
+  // "sent-" counts as accepted, any other as refused, and one starting
+  // "slow-" waits a few seconds first, as a mail provider can (TEST_HOOKS
+  // is never set live; check:config fails on it).
+  if (env.TEST_HOOKS) {
+    if (/^slow-/.test(to)) await new Promise((r) => setTimeout(r, 2500));
+    return /^(?:slow-)?sent-/.test(to);
+  }
   if (env.GMAIL_SA && env.GMAIL_SENDER) return await sendViaGmail(env, to, subject, text, html);
   if (!env.RESEND_API_KEY) return false;
   try {
@@ -42,6 +54,7 @@ export async function sendGenesisEmail(env: Env, to: string, room: string, name:
       method: "POST",
       headers: { "Authorization": "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({ from: from, to: to, subject: subject, text: text, html: html }),
+      signal: AbortSignal.timeout(MAIL_FETCH_MS),
     });
     if (!r.ok) warn("email.resend", "HTTP " + r.status);
     return r.ok;
@@ -57,13 +70,32 @@ export async function roomExists(stub: DurableObjectStub) {
   return await stub.exists();
 }
 
+/** The answer to a creator who meets a room still waiting on its genesis mail. */
+function genesisPending(retryAfter: number) {
+  return json({ error: "Someone is creating a room with that name right now. If their invite mail does not go out, the name is free again in a few minutes.", code: "room_pending" }, 503, { "Retry-After": String(retryAfter) });
+}
+
+/** SHA-256 of s, in hex: the quota object counts callers without holding their addresses. */
+async function hashKey(s: string) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+  return Array.from(d, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // Public room creation (home page form). The genesis invite is emailed to
 // the creator and never returned by this API, so the address has to be
 // real. Needs an email transport (Gmail or Resend secrets); until one is
-// set, creation answers 503 and creates nothing. Abuse caps live in KV
-// by UTC day and count ATTEMPTS (counted before the work, so a failed
-// attempt still costs quota). KV counters are not atomic, so a parallel
-// burst can overshoot a cap slightly - an abuse brake, not a guarantee.
+// set, creation answers 503 and creates nothing.
+// A taken name answers 409 before anything is counted or mailed, and a
+// pending one 503 (genesisCheck). The caps (per day, per address, per
+// network) count rooms created: one call to the CREATE_QUOTA_ROOM object
+// checks all three and takes a place (createReserve), given back when
+// the creation then makes nothing (createRelease). They counted attempts
+// in KV before: thirty calls at a taken name closed creation for the
+// day, three taken names locked a person out, the 429's arrival told
+// anyone how many rooms an address had tried, and KV's separate read and
+// write let a parallel burst through every cap. One 429 sentence serves
+// all three: answering a capped address as if it had succeeded would
+// leave a real person waiting for a mail that never comes.
 export async function createRoomRoute(rc: RouteContext) {
   const { request, env, url } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -76,41 +108,59 @@ export async function createRoomRoute(rc: RouteContext) {
   const cbody = await readBody(small);
   const croom = bodyText(cbody?.room, "room").trim().toLowerCase();
   const cname = cleanName(bodyText(cbody?.name, "name"));
-  const cemail = bodyText(cbody?.email, "email").trim().slice(0, 254);
+  const cemail = bodyText(cbody?.email, "email").trim();
   if (!ROOM_RE.test(croom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (croom === "create" || croom === "api") return json({ error: "That room name is reserved" }, 400);
   if (!cname) return json({ error: "\"name\" is required" }, 400);
   if (nameFold(cname) === "referee") return json({ error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member." }, 400);
   const cnameErr = memberNameProblem(cname);
   if (cnameErr) return json({ error: cnameErr }, 400);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cemail)) return json({ error: "A valid email is required" }, 400);
-  const cday = new Date().toISOString().slice(0, 10);
-  const cip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const caps: Array<[string, number]> = [["create:all:" + cday, CREATE_ROOMS_PER_DAY], ["create:email:" + cemail.toLowerCase() + ":" + cday, CREATE_ROOMS_PER_EMAIL], ["create:ip:" + cip + ":" + cday, CREATE_ROOMS_PER_IP]];
-  for (const [k, max] of caps) {
-    const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
-    if (n >= max) return rateLimited("Too many rooms created - try again tomorrow.", secondsToUtcMidnight());
-  }
-  for (const [k] of caps) {
-    const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
-    await env.REQUESTS.put(k, String(n + 1), { expirationTtl: 172800 });
-  }
+  if (!plainAddress(cemail)) return json({ error: "\"email\" must be a plain address like name@example.com, at most " + EMAIL_MAX + " characters: no display name, angle brackets, commas, semicolons, colons or spaces.", code: "email_invalid" }, 400);
   const cstub = env.ROOM.get(env.ROOM.idFromName(croom));
-  const gen = await cstub.createGenesis(cname);
-  if (gen.existed) return json({ error: "That room already exists" }, 409);
-  const cinv = gen.invite;
-  if (!cinv) {
-    try { await cstub.revokeAll(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
-    return json({ error: "Could not create the room's first invite" }, 500);
+  const seen = await cstub.genesisCheck();
+  if (seen.state === "taken") return json({ error: "That room already exists" }, 409);
+  if (seen.state === "pending") return genesisPending(seen.retry_after);
+  const day = new Date().toISOString().slice(0, 10);
+  const caps: Array<[string, number]> = [
+    ["all:" + day, CREATE_ROOMS_PER_DAY],
+    ["email:" + (await hashKey(addressKey(cemail))) + ":" + day, CREATE_ROOMS_PER_EMAIL],
+    ["ip:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))) + ":" + day, CREATE_ROOMS_PER_IP],
+  ];
+  // From here the room, its invite, the mail and the rollback run to
+  // their end even if the caller goes away: cancelled in the mail's wait,
+  // the request used to leave a room whose only invite nobody received.
+  const work = createRoomNow(env, url, cstub, croom, cname, cemail, caps, day);
+  rc.ctx.waitUntil(work.catch(() => undefined));
+  return await work;
+}
+
+async function createRoomNow(env: Env, url: URL, cstub: DurableObjectStub, croom: string, cname: string, cemail: string, caps: Array<[string, number]>, day: string): Promise<Response> {
+  const quota = env.ROOM.get(env.ROOM.idFromName(CREATE_QUOTA_ROOM));
+  if (!(await quota.createReserve(caps, day))) return rateLimited("Too many rooms created - try again tomorrow.", secondsToUtcMidnight());
+  let kept = false;
+  try {
+    const gen = await cstub.createGenesis(cname);
+    if ("existed" in gen) return json({ error: "That room already exists" }, 409);
+    if ("pending" in gen) return genesisPending(gen.retry_after);
+    const cinv = gen.invite;
+    if (!cinv) {
+      try { await cstub.revokeAll(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
+      return json({ error: "Could not create the room's first invite" }, 500);
+    }
+    const clink = url.origin + "/r/" + croom + "#invite=" + cinv.token;
+    let csent = false;
+    try { csent = await sendGenesisEmail(env, cemail, croom, clink); } catch (e) { warn("room.create.email", e, { room: croom }); }
+    if (!csent) {
+      try { await cstub.abandonGenesis(cinv.token, croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
+      return json({ error: "The invite email could not be sent, so the room was not created. Try again." }, 502);
+    }
+    kept = true;
+    // Unconfirmed, the room stays pending: its first open confirms it too.
+    try { await cstub.confirmGenesis(cinv.token); } catch (e) { warn("room.create.confirm", e, { room: croom }); }
+    return json({ ok: true, room: croom }, 201);
+  } finally {
+    if (!kept) { try { await quota.createRelease(caps.map((c) => c[0])); } catch (e) { warn("room.create.release", e, { room: croom }); } }
   }
-  const clink = url.origin + "/r/" + croom + "#invite=" + cinv.token;
-  let csent = false;
-  try { csent = await sendGenesisEmail(env, cemail, croom, cname, clink); } catch (e) { warn("room.create.email", e, { room: croom }); }
-  if (!csent) {
-    try { await cstub.revokeAll(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
-    return json({ error: "The invite email could not be sent, so the room was not created. Try again." }, 502);
-  }
-  return json({ ok: true, room: croom }, 201);
 }
 
 // Every room route passes through here: only the owner can bring a room into existence.

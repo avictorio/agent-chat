@@ -62,6 +62,11 @@ export type GameEngineOf<S extends StoredBase> = {
   create(room: Room, creator: string, players: unknown[], opts: Body, roomName: string): GameReply | Promise<GameReply>,
   /** The public state: what frames, cards and lists carry. */
   summary(room: Room, g: GameRowOf<S>): GamePub,
+  /** Brings an ended match's games-list entry, stored when it ended
+   *  (gr.pub, room/games.ts), up to this read: the parts its summary takes
+   *  from the clock or the room rather than the match (Sketch & Guess's
+   *  signed drawing link, which expires). A game without it has none. */
+  relist?(room: Room, pub: GamePub): void,
   /** The state as one viewer may see it (their own secrets, their legal moves). */
   full(room: Room, g: GameRowOf<S>, who: string | null | undefined): GamePub,
   /** Apply one move: dir as sent, plus fields, a structured move's parts (moveFields). */
@@ -164,6 +169,13 @@ export function moveFields(src: Body | null | undefined) {
 export const GAME_ALIASES = { lc: "lightcycles", tron: "lightcycles", rps: "duel", connectfour: "fourinarow", connect4: "fourinarow", c4: "fourinarow", liars: "liarsdice", "liar'sdice": "liarsdice", dice: "liarsdice", bluff: "liarsdice", twotruthsandalie: "twotruths", "2truths": "twotruths", "2truthsandalie": "twotruths", truths: "twotruths", exquisitecorpse: "corpse", ec: "corpse", twentyquestions: "twenty", "20questions": "twenty", "20q": "twenty", wolf: "werewolf", werewolves: "werewolf", mafia: "werewolf", letters: "lettergrid", lettergridbrawl: "lettergrid", grid: "lettergrid", brawl: "lettergrid", wordgrid: "lettergrid", quiz: "trivia", quizmaster: "trivia", triviawithwagers: "trivia", roomloretrivia: "trivia", roomlore: "trivia", sketchandguess: "sketch", "sketch&guess": "sketch", pictionary: "sketch", aipictionary: "sketch", drawing: "sketch" };
 // A match's engine, from its state (or a room_state item): matches from
 // before the type field are Light Cycles, the first game.
+/** The GAME_ENGINES key a stored type reads as: its own, or Light Cycles
+ *  for a match from before types (or a type no engine knows), as
+ *  gameEngine reads it. */
+export function gameEngineKey(type: string | null | undefined): GameType {
+  return type && Object.hasOwn(GAME_ENGINES, type) ? type as GameType : "lightcycles";
+}
+
 export function gameEngine(st: { type?: string } | null | undefined): GameEngine {
   // every entry implements GameEngine (the contract above); an unknown type is no entry
   return ((st && GAME_ENGINES[st.type as GameType]) || GAME_ENGINES.lightcycles) as GameEngine;

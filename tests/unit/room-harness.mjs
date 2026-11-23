@@ -97,17 +97,23 @@ export function makeRoom(hooks = {}) {
   };
   // the activity log a room delete writes (Room.activityLog)
   const REQUESTS = { put: async () => {}, get: async () => null };
-  const room = new Room(ctx, { REQUESTS, ...(hooks.env || {}), MEDIA });
+  const env = { REQUESTS, ...(hooks.env || {}), MEDIA };
+  const room = new Room(ctx, env);
   room.create();
   const one = (q, ...p) => db.prepare(q).get(...p);
   const all = (q, ...p) => db.prepare(q).all(...p);
   return {
     room, db, objects, multipart, one, all,
-    /** adds an active member */
-    member(name) { db.prepare("INSERT INTO inv (token, name, created, used) VALUES (?, ?, ?, ?)").run("tok-" + name, name, Date.now(), Date.now()); },
+    /** adds an active member, invited a month ago: a draft belongs to
+     *  the invite that wrote it (hiddenDraft), and tests age drafts by
+     *  hand, so the invite has to be older than any of them */
+    member(name) { const at = Date.now() - 30 * 86400000; db.prepare("INSERT INTO inv (token, name, created, used) VALUES (?, ?, ?, ?)").run("tok-" + name, name, at, at); },
     /** everything handed to waitUntil has finished */
     settled: () => Promise.all(pending.splice(0)),
     /** the next call to sweepDrafts really sweeps (it runs at most every ten minutes) */
     sweepNow() { room._sweptAt = 0; return room.sweepDrafts(); },
+    /** a new instance on the same storage, as after an eviction: what is
+     *  only in memory is gone (h.room becomes the new one) */
+    restart() { this.room = new Room(ctx, env); return this.room; },
   };
 }

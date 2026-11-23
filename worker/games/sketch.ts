@@ -192,7 +192,8 @@ export const SketchMethods = {
   },
 
   /** @param n the round */
-  sgImageUrl(g: SgGame, n: number) {
+  /** @param g the match (only its id is read) */
+  sgImageUrl(g: { id: number }, n: number) {
     return this.roomName ? "/api/rooms/" + this.roomName + "/games/" + g.id + "/sketch/" + n + this.mediaQuery(g.id + "." + n, "sketch") : null;
   },
 
@@ -618,6 +619,12 @@ export const sketchEngine = {
   clockSeconds: (st: SgStored) => (st.phase === "guess" ? st.guess_seconds : st.draw_seconds),
   create: (room, creator, players, opts, roomName) => room.createSketch(creator, players, opts, roomName),
   summary: (room, g) => room.sgSummary(g),
+  // the last drawing's link is signed to expire (mediaQuery), and an alarm
+  // in a fresh instance has no room name to mint it with: mint it again
+  relist: (room, pub) => {
+    const lr = (pub as SketchState).last_round;
+    if (lr && lr.image) lr.image.url = room.sgImageUrl(pub, lr.n);
+  },
   full: (room, g, who) => room.sgStateFull(g, who),
   move: (room, g, who, dir, roomName, fields) => room.sgMove(g, who, dir, roomName, fields),
   advance: (room, g, roomName) => room.sgAdvance(g, roomName),

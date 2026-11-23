@@ -556,7 +556,7 @@ test("a revoke aborts the member's direct uploads in flight and keeps their fini
   assert.ok(h.multipart.has(bobUp), "another member's upload goes on");
 });
 
-test("a revoke leaves an upload through the site in flight, for the name's next invite to resume", async () => {
+test("a revoke leaves an upload through the site in flight, and the name's next invite cannot pick it up", async () => {
   const h = makeRoom();
   const id = await draft(h);
   const up = await imageSession(h, id, 100);
@@ -565,9 +565,12 @@ test("a revoke leaves an upload through the site in flight, for the name's next 
   await h.settled();
   assert.ok(h.multipart.has(up), "storage still has the upload and its parts");
   assert.equal(row(h, id, "image").upload_id, up);
+  // the draft is the earlier invite's (hiddenDraft): the next holder of
+  // the name meets it as an id that holds nothing, and it is left for the
+  // sweep as any abandoned draft
   const r = await h.room.uploadStart(id, "image", "Ada", false, R, 100, "image/png", "pic.png", "fp-100", false);
-  assert.equal(r.status, 200, r.error);
-  assert.equal(r.resumed, true, "the new holder picks it up where it was");
+  assert.equal(r.status, 404, r.error);
+  assert.equal(row(h, id, "image").upload_id, up, "nothing is deleted");
 });
 
 test("a revoke's cancel, run after another member's media turn, leaves an upload the re-invited name started since", async () => {

@@ -147,8 +147,15 @@ export const MIB = 1048576;
  *  are a few hundred bytes; with no cap they were read whole, whatever
  *  their size, before anything was checked. */
 export const SMALL_BODY_MAX = MIB;
-/** The largest body read whole before a member's request is routed (lib/http.ts settleBody). The largest a route takes that way is a 25 MB video as base64 JSON, about 34 MB; bigger files go in parts. */
+/** The largest body read whole before a member's or the owner's request is routed (lib/http.ts settleBody). The largest a route takes that way is a 25 MB video as base64 JSON, about 34 MB; bigger files go in parts. */
 export const SETTLED_BODY_MAX = 48 * MIB;
+/** The largest body a one-request file route takes for a file of up to
+ *  max bytes: the file as base64 JSON (4/3 of it, with room for line
+ *  breaks) plus a little for the JSON around it. The routes' documented
+ *  caps (avatar, voice sample, a message's audio, image or video). */
+export function inlineBodyCap(max: number) {
+  return max * 1.4 + 1000;
+}
 export const UP_KINDS = ["image", "audio", "video", "file"];
 export const UP_PART_MIN = 8 * MIB;
 export const UP_PART_MAX = 90 * MIB;
@@ -208,11 +215,26 @@ export const VOICE_CLONES_PER_DAY = 5;
 export const CLONE_DELETE_RETRY = 3;
 export const CLONE_DELETE_ON_ROOM_DELETE = 50;
 
-// Public room creation (POST /api/create-room): rooms per UTC day, site-wide,
-// per email address and per IP.
+// Public room creation (POST /api/create-room): rooms created per UTC
+// day, site-wide, per email address (addressKey) and per network
+// (networkKey). They count rooms whose mail went out, kept by the
+// CREATE_QUOTA_ROOM object; an attempt that creates nothing costs nothing.
 export const CREATE_ROOMS_PER_DAY = 30;
 export const CREATE_ROOMS_PER_EMAIL = 3;
 export const CREATE_ROOMS_PER_IP = 5;
+// The object that holds those counters: a Room instance no room name can
+// reach (ROOM_RE wants a letter or digit first), as __vapid is.
+export const CREATE_QUOTA_ROOM = "__create-quota";
+// A room public creation made waits this long for its genesis mail to be
+// accepted (confirmGenesis) or its invite opened: a second creator of the
+// name meanwhile gets 503 with Retry-After, and after it a room nobody
+// has written in can be created again (genesisUntouched, createGenesis).
+export const GENESIS_PENDING_MS = 600000;
+// How long one call to the mail provider (Google's token and send
+// endpoints, Resend) may take before it is given up: with no limit a
+// hung call held the new room, its invite and the caller for as long as
+// the platform let the request live.
+export const MAIL_FETCH_MS = 10000;
 
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {

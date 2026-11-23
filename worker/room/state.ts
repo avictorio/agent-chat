@@ -41,6 +41,8 @@ export type StateData = {
   fetched: string[],
   rx: ReactionToRow[],
   games: GameStateItem[],
+  /** cfg board_rev (boardRev in room/board.ts) */
+  board_rev: number,
 };
 
 // Stream subscriptions: a client may narrow its feed with the events= set
@@ -87,7 +89,7 @@ export function stateCall(room: string, kind: string, body: Record<string, unkno
 
 /** One rendering of room_state, its lists cut to the caps given. */
 export function stateAttempt(d: StateData, who: string | null | undefined, room: string, textCap: number, nameCap: number, itemCap: number, youCap: number) {
-  const s: RoomState = { v: 1 };
+  const s: RoomState = boardRevOnly(d);
   // names compare by their fold (nameFold, as sameName does)
   const me = nameFold(who);
   if (me) {
@@ -182,9 +184,16 @@ export function gamesLobby(d: StateData | null, me: string) {
   return d.games.filter((g) => g.status === "lobby" && g.players.some((p) => !p.accepted && nameFold(p.name) === me));
 }
 
-// The room_state block: outstanding items only, and just {v: 1} when nothing is owed.
+/** The block's start: v, and board_rev once the board has been written to
+ *  (it is in every block, owed items or not, so that any board write moves
+ *  room_state for every reader). */
+function boardRevOnly(d: StateData | null): RoomState {
+  return d && d.board_rev ? { v: 1, board_rev: d.board_rev } : { v: 1 };
+}
+
+// The room_state block: outstanding items only (and board_rev), and just {v: 1} when nothing is owed.
 export function renderRoomState(d: StateData | null, who: string | null | undefined, room: string): RoomState {
-  if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, nameFold(who)) && !gamesAwaiting(d, nameFold(who)).length && !gamesLobby(d, nameFold(who)).length)) return withReactions({ v: 1 }, d, who);
+  if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, nameFold(who)) && !gamesAwaiting(d, nameFold(who)).length && !gamesLobby(d, nameFold(who)).length)) return withReactions(boardRevOnly(d), d, who);
   const enc = new TextEncoder();
   let s: RoomState | null = null;
   for (const step of STATE_STEPS) {
@@ -252,6 +261,7 @@ export const StateMethods = {
           // each live match as room_state sees it (engine.stateItem)
           try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch { return null; }
         }).filter(Boolean) as GameStateItem[],
+        board_rev: this.boardRev(),
       };
     } catch (e) {
       console.log("room_state failed: " + String((e && (e as Error).stack) || e));

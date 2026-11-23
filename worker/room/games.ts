@@ -2,11 +2,11 @@
 // clocks and the alarm's work, simultaneous rounds and turns, cards, listing,
 // the ladder. Each game's own rules are in games/<game>.ts.
 
-import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
+import { GAME_ALIASES, GAME_ENGINES, gameEngine, gameEngineKey } from "../games/engine.js";
 import { streamWants } from "./state.js";
 import { GAME_STATE_SOFT_MAX, LOBBY_DEFAULT_SECONDS, MOVE_DIR_MAX } from "../limits.js";
 import type { GameLogLine, GameStatus } from "@chat/contract";
-import type { CfgRow, GmRow, InvRow, MsgRow, Room } from "./Room.js";
+import type { CfgRow, GmRow, GrRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
 import { warn } from "../lib/log.js";
 import type { Body } from "../lib/http.js";
@@ -143,7 +143,54 @@ export const GameMachineryMethods = {
     // lives in the state, not a column, so no schema step was needed.
     if (g.st) g.st.rev = gameRev(g.st) + 1;
     this.sql.exec("UPDATE gm SET status = ?, state = ? WHERE id = ?", g.status, JSON.stringify(g.st), g.id);
+    // An ended match's result row (gr), written in the same turn as the
+    // state, on its first save as ended and on every save after (the
+    // Referee's result post saves it again; nothing may leave the list
+    // entry behind the state).
+    if (g.st && g.status !== "lobby" && g.status !== "running") this.gameResultSave(g);
     this.gameSaves = (this.gameSaves || 0) + 1;
+  },
+
+  /* ---------- ended matches: the results table ----------
+     gr holds one narrow row per ended match (GrRow in Room.ts, schema step
+     6): what the games list's history, the record, the ladder and Duel's
+     head-to-head need, so none of them parses a stored state. They used to
+     re-read and parse the room's whole history on every call, on the
+     room's one thread: 211 ms for a list at 1,500 matches, 54 MB held by
+     one Duel throw, and gm is never trimmed. */
+  gameResultSave(g: GameRow) {
+    const st = g.st;
+    const players = Array.isArray(st.players) ? st.players.map((p) => ({ name: p.name ?? null, hex: (p as { hex?: string }).hex ?? null })) : [];
+    const json = (v: unknown) => (v === undefined || v === null ? null : JSON.stringify(v));
+    let pub: string | null = null;
+    try {
+      pub = JSON.stringify(this.gameListEntry(g));
+    } catch (e) {
+      // the list builds the entry again the first time it shows the match
+      warn("game.result.entry", e, { room: this.roomName, id: g.id });
+    }
+    this.sql.exec("INSERT INTO gr (id, type, status, ended, winner, winners, draw, places, players, pair, pub) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT (id) DO UPDATE SET type = excluded.type, status = excluded.status, ended = excluded.ended, winner = excluded.winner, winners = excluded.winners, draw = excluded.draw, places = excluded.places, players = excluded.players, pair = excluded.pair, pub = excluded.pub",
+    g.id, typeof st.type === "string" ? st.type : null, g.status, st.ended || null, st.winner ?? null, json(st.winners), st.draw == null ? null : st.draw ? 1 : 0, json(st.places), JSON.stringify(players),
+    players.length === 2 ? players[0].name + "|" + players[1].name : null, pub);
+  },
+
+  /** A match as the games list carries it: its summary without boards
+   *  (the arena's payload, not a list's), who it waits on, when it began
+   *  and when it ended. Stored in gr.pub when the match ends. */
+  gameListEntry(g: GameRow): GamePub | null {
+    const s = this.gameSummary(g);
+    if (!s) return null;
+    // The collapsed targets, same derivation as the game frames:
+    // who this match is waiting on, readable without opening it.
+    s.targets = this.gameTargets(g, s);
+    if (s.boards) delete s.boards;
+    // When it began and (once over) when it ended, for the history's
+    // day groups. Matches that ended before the stamp existed carry
+    // ended null and file under the day they began.
+    s.created = g.created;
+    s.ended = (g.st && g.st.ended) || null;
+    return s;
   },
 
   // Resolve a proposed player list to canonical member names (case-
@@ -685,76 +732,58 @@ export const GameMachineryMethods = {
   },
 
   // The games list: every match still live (lobby or running),
-  // however old, then the most recent finished ones - a busy room's
+  // however old, then the most recent ended ones - a busy room's
   // history fills the tail but never pushes a live match off it.
-  // Boards are stripped (they are the arena's payload, not a list's).
-  // The same scan builds the room record: all-time wins and losses
-  // per player per game type, over every finished match (a winner
-  // takes a W, the other finishers an L; undecided finishes and
-  // called-off matches count for nothing).
+  // Live matches are summarised from their state (they change); ended
+  // ones come from gr, the entry stored when they ended. The record:
+  // all-time wins and losses per player per game type, over every
+  // finished match (a winner takes a W, the other finishers an L;
+  // undecided finishes and called-off matches count for nothing).
   listGames() {
-    const scanned = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray();
-    // filter(Boolean) drops the rows that did not parse
-    const all = scanned.map((r) => {
+    const liveIds = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status IN ('lobby', 'running') ORDER BY id DESC LIMIT 100").toArray();
+    const live: GamePub[] = [];
+    for (const r of liveIds) {
       const g = this.gameRow(r.id);
-      if (!g || !g.st) return null;
-      const s = this.gameSummary(g);
-      if (s) {
-        // The collapsed targets, same derivation as the game frames:
-        // who this match is waiting on, readable without opening it.
-        s.targets = this.gameTargets(g, s);
-        if (s.boards) delete s.boards;
-        // When it began and (once over) when it ended, for the history's
-        // day groups. Matches that ended before the stamp existed carry
-        // ended null and file under the day they began.
-        s.created = g.created;
-        s.ended = (g.st && g.st.ended) || null;
+      const s = g && g.st ? this.gameListEntry(g) : null;
+      if (s) live.push(s);
+    }
+    const done: GamePub[] = [];
+    if (live.length < 40) {
+      // read in full before the loop writes: a backfilled entry is kept as it is built
+      for (const r of this.sql.exec<Pick<GrRow, "id" | "pub">>("SELECT id, pub FROM gr ORDER BY id DESC LIMIT ?", 40 - live.length).toArray()) {
+        let s: GamePub | null = null;
+        if (r.pub) {
+          try { s = JSON.parse(r.pub) as GamePub; } catch { s = null; }
+        }
+        if (!s) {
+          // A row the schema step backfilled (or one whose entry failed
+          // to build): build it from the state once, and keep it.
+          const g = this.gameRow(r.id);
+          s = g && g.st ? this.gameListEntry(g) : null;
+          if (s) this.sql.exec("UPDATE gr SET pub = ? WHERE id = ?", JSON.stringify(s), r.id);
+        }
+        if (!s) continue;
+        const relist = gameEngine(s).relist;
+        if (relist) relist(this, s);
+        done.push(s);
       }
-      return s;
-    }).filter(Boolean) as GamePub[];
-    const live = all.filter((g) => g.status === "lobby" || g.status === "running").slice(0, 100);
-    const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
+    }
     /** by game type, then player name */
     const byType: Record<string, Record<string, RecordRow>> = {};
-    // A race with placements (Code Race) also counts 2nd and 3rd places
-    // (p2, p3); its W and L stay winner / everyone else.
-    const placed = (row: RecordRow, places: unknown, name: string) => {
-      const k = Array.isArray(places) ? places.indexOf(name) : -1;
-      if (k === 1) row.p2 = (row.p2 || 0) + 1;
-      else if (k === 2) row.p3 = (row.p3 || 0) + 1;
-    };
-    done.forEach((g) => {
+    for (const r of this.gameResults("DESC")) {
       // a team win (Werewolf: winners) counts for everyone on the side
-      if (g.status !== "finished" || (!g.winner && !(g.winners && g.winners.length))) return;
-      const table = byType[g.type] || (byType[g.type] = {});
-      (g.players || []).forEach((p) => {
+      if (!r.winner && !(r.winners && r.winners.length)) continue;
+      const table = byType[r.type] || (byType[r.type] = {});
+      for (const p of r.players) {
+        if (!p.name) continue;
         const row = table[p.name] || (table[p.name] = { name: p.name, hex: p.hex, w: 0, l: 0 });
-        if (g.winners ? g.winners.indexOf(p.name) >= 0 : p.name === g.winner) row.w++;
+        if (r.winners ? r.winners.indexOf(p.name) >= 0 : p.name === r.winner) row.w++;
         else row.l++;
-        placed(row, g.places, p.name);
-      });
-    });
-    // Matches older than the 500-row window still count toward the
-    // record (it promises every finished match): a light SQL pass reads
-    // just type, winner and player names, never the boards.
-    if (scanned.length === 500) {
-      const floor = scanned[scanned.length - 1].id;
-      try {
-        // ws and places come back as JSON text (json_extract of a list)
-        const rows = this.sql.exec<{ t: string | null, w: string | null, ws: string | null, places: string | null, name: string | null, hex: string | null }>("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(gm.state, '$.winners') AS ws, json_extract(gm.state, '$.places') AS places, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray();
-        for (const r of rows) {
-          if ((!r.w && !r.ws) || !r.name) continue;
-          const type = (GAME_ENGINES as Record<string, unknown>)[r.t as string] ? (r.t as string) : "lightcycles";
-          const table = byType[type] || (byType[type] = {});
-          const row = table[r.name] || (table[r.name] = { name: r.name, hex: r.hex || null, w: 0, l: 0 });
-          let ws: string[] | null = null;
-          if (r.ws) { try { ws = JSON.parse(r.ws); } catch { ws = null; } }
-          if (ws ? ws.indexOf(r.name) >= 0 : r.name === r.w) row.w++;
-          else row.l++;
-          if (r.places) { try { placed(row, JSON.parse(r.places), r.name); } catch { warn("standings.places", null, { room: this.roomName }); } }
-        }
-      } catch (e) {
-        warn("standings.scan", e, { room: this.roomName });
+        // A race with placements (Code Race) also counts 2nd and 3rd
+        // places (p2, p3); its W and L stay winner / everyone else.
+        const k = r.places ? r.places.indexOf(p.name) : -1;
+        if (k === 1) row.p2 = (row.p2 || 0) + 1;
+        else if (k === 2) row.p3 = (row.p3 || 0) + 1;
       }
     }
     /** by game type, best first */
@@ -765,44 +794,53 @@ export const GameMachineryMethods = {
     return { games: live.concat(done).slice(0, 40), record, ladder: this.gameLadder() };
   },
 
+  /** Every finished match's result from gr, by id in the order asked:
+   *  its game (a type no engine knows reads as Light Cycles, as gameEngine
+   *  reads it), winner, winners, draw, places and seats. A list column that
+   *  does not parse reads as none. */
+  gameResults(order: "ASC" | "DESC") {
+    const list = <T>(v: string | null): T[] | null => {
+      if (!v) return null;
+      try { const x = JSON.parse(v); return Array.isArray(x) ? x as T[] : null; } catch { return null; }
+    };
+    const out: Array<{ id: number, type: string, winner: string | null, winners: string[] | null, draw: boolean, places: string[] | null, players: Array<{ name: string | null, hex: string | null }> }> = [];
+    let rows: Array<Pick<GrRow, "id" | "type" | "winner" | "winners" | "draw" | "places" | "players">> = [];
+    try {
+      rows = this.sql.exec<Pick<GrRow, "id" | "type" | "winner" | "winners" | "draw" | "places" | "players">>("SELECT id, type, winner, winners, draw, places, players FROM gr WHERE status = 'finished' ORDER BY id " + (order === "ASC" ? "ASC" : "DESC")).toArray();
+    } catch (e) {
+      warn("standings.scan", e, { room: this.roomName });
+    }
+    for (const r of rows) {
+      out.push({ id: r.id, type: gameEngineKey(r.type), winner: r.winner || null, winners: list<string>(r.winners), draw: !!r.draw, places: list<string>(r.places),
+        players: list<{ name: string | null, hex: string | null }>(r.players) || [] });
+    }
+    return out;
+  },
+
   /* The ladder: an Elo rating per player per game, from 1000 with K = 32,
      replayed over every finished 2-player match in order. A win scores 1
      and a loss 0; a draw (Four in a Row's full board)
      scores a half each; a finish with no winner and no draw does not
      count. Free-for-alls stay out (the record covers them). Recomputed on
-     every read from the matches themselves, so there is no stored table
-     to drift.
+     every read from the results (gr), so there is no stored table to
+     drift.
      Rows: { name, hex, rating, w, l, d, last } - last is the rating
      change from the player's most recent ladder match. */
   gameLadder() {
     /** by game type, then player name */
     const ladder: Record<string, Record<string, LadderRow>> = {};
-    /** ps: the players as JSON text */
-    type FinishedRow = { id: number, t: string | null, w: string | null, d: number | null, ps: string | null };
-    let rows: Array<FinishedRow> = [];
-    try {
-      rows = this.sql.exec<FinishedRow>("SELECT id, json_extract(state, '$.type') AS t, json_extract(state, '$.winner') AS w, json_extract(state, '$.draw') AS d, json_extract(state, '$.players') AS ps FROM gm WHERE status = 'finished' ORDER BY id").toArray();
-    } catch {
-      return {};
-    }
-    for (const r of rows) {
-      let ps;
-      try {
-        ps = JSON.parse(r.ps || "[]");
-      } catch {
-        continue;
-      }
-      if (!Array.isArray(ps) || ps.length !== 2) continue;
-      const [a, b] = ps;
+    for (const r of this.gameResults("ASC")) {
+      if (r.players.length !== 2) continue;
+      const [a, b] = r.players;
       let sa;
-      if (r.w && r.w === a.name) sa = 1;
-      else if (r.w && r.w === b.name) sa = 0;
-      else if (r.d) sa = 0.5;
+      if (r.winner && r.winner === a.name) sa = 1;
+      else if (r.winner && r.winner === b.name) sa = 0;
+      else if (r.draw) sa = 0.5;
       else continue;
-      const type = (GAME_ENGINES as Record<string, unknown>)[r.t as string] ? (r.t as string) : "lightcycles";
-      const table = ladder[type] || (ladder[type] = {});
-      const seat = (p: { name: string, hex?: string }) => {
-        const x = table[p.name] || (table[p.name] = { name: p.name, hex: null, rating: 1000, w: 0, l: 0, d: 0, last: 0 });
+      const table = ladder[r.type] || (ladder[r.type] = {});
+      const seat = (p: { name: string | null, hex: string | null }) => {
+        const name = String(p.name);
+        const x = table[name] || (table[name] = { name, hex: null, rating: 1000, w: 0, l: 0, d: 0, last: 0 });
         if (p.hex) x.hex = p.hex;
         return x;
       };

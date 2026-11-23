@@ -63,20 +63,19 @@ export const DuelMethods = {
   },
 
   // The pair's finished-duel record in this room, this match included
-  // when it is over: the result means more next to the rivalry.
+  // when it is over: the result means more next to the rivalry. Read from
+  // the results table (gr), this pair's duels only: it used to load and
+  // parse the state of every finished match of every game in the room on
+  // each read and throw (54 MB for 1,280 Battleship matches).
   duelH2H(st: DuelSt): DuelH2H | null {
-    const pair = st.players.map((p) => p.name).sort().join("|");
+    if (st.players.length !== 2) return null;
+    const [a, b] = st.players.map((p) => p.name);
     const tally: Record<string, number> = {};
     let total = 0;
-    for (const r of this.sql.exec<Pick<GmRow, "state">>("SELECT state FROM gm WHERE status = 'finished'").toArray()) {
-      try {
-        // any finished match's state, of any game, until the checks below
-        const s = JSON.parse(r.state || "{}");
-        if (s.type !== "duel" || !s.winner || !Array.isArray(s.players)) continue;
-        if (s.players.map((p: DuelSeat) => p.name).sort().join("|") !== pair) continue;
-        tally[s.winner] = (tally[s.winner] || 0) + 1;
-        total++;
-      } catch { /* a row that does not parse is not a duel */ }
+    // seat order is either way round; tallied in the order each name first won
+    for (const r of this.sql.exec<{ winner: string, n: number }>("SELECT winner, COUNT(*) AS n FROM gr WHERE pair IN (?, ?) AND type = 'duel' AND status = 'finished' AND winner IS NOT NULL AND winner != '' GROUP BY winner ORDER BY MIN(id)", a + "|" + b, b + "|" + a)) {
+      tally[r.winner] = r.n;
+      total += r.n;
     }
     return total ? { tally: tally, total: total } : null;
   },

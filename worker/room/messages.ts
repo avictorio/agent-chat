@@ -9,7 +9,6 @@ import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
 import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, PcidRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
 import { warn } from "../lib/log.js";
-import { hiddenDraft } from "./media.js";
 
 /** The columns a message is served from (withKinds turns them into the API's fields). */
 const MSG_COLS = 'id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id';
@@ -45,19 +44,19 @@ export const MessageMethods = {
   },
 
   reactionsOf(id: number, who: string | null | undefined, owner: boolean) {
-    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "ts">>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return null;
     // Drafts are invisible to everyone but their sender and the owner, here
     // as everywhere else: a draft answers exactly like a missing message.
-    if (r.draft && !owner && !sameName(r.sender, who)) return null;
+    if (this.draftHidden(r, who, owner)) return null;
     return this.reactionsFor(id);
   },
 
   /** @param emoji null takes the reaction back */
   react(id: number, who: string, emoji: string | null, room: string, owner: boolean) {
-    const msg = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    const msg = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "ts">>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
     if (!msg) return null;
-    if (msg.draft && !owner && !sameName(msg.sender, who)) return null;
+    if (this.draftHidden(msg, who, owner)) return null;
     const ts = Date.now();
     for (const x of this.sql.exec<Pick<RxRow, "who">>("SELECT DISTINCT who FROM rx WHERE msg = ?", id).toArray()) if (sameName(x.who, who)) this.sql.exec("DELETE FROM rx WHERE msg = ? AND who = ?", id, x.who);
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
@@ -65,7 +64,7 @@ export const MessageMethods = {
     const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
     // A draft is private to its sender (and the owner): its reactions are
     // not announced to the rest of the room.
-    const sees = (c: StreamClient) => !msg.draft || c.owner || sameName(c.name, msg.sender);
+    const sees = (c: StreamClient) => !msg.draft || !this.draftHidden(msg, c.name, c.owner);
     for (const c of this.clients) { if (streamWants(c, "reaction") && sees(c)) c.send(frame); }
     if (msg.draft) return { reactions: reactions, message_from: msg.sender };
     this.emitState(room);
@@ -106,8 +105,12 @@ export const MessageMethods = {
     // below: a repeat sent while the first is still storing its media
     // finds it.
     if (cid) {
-      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft">>("SELECT msg, draft FROM pcid WHERE sender = ? AND cid = ?", this.postIdKey(sender, trusted), cid).toArray()[0];
-      if (seen) return this.repeatPost(seen.msg, !!seen.draft);
+      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft" | "ts">>("SELECT msg, draft, ts FROM pcid WHERE sender = ? AND cid = ?", this.postIdKey(sender, trusted), cid).toArray()[0];
+      // One recorded before the sender's invite was made is a previous
+      // holder's of the name (draftSince): answered as a repeat, it
+      // handed the new holder the old holder's draft, caption included.
+      // This post goes ahead, and its record takes that one's place.
+      if (seen && (trusted || Number(seen.ts) >= this.draftSince(sender))) return this.repeatPost(seen.msg, !!seen.draft);
     }
     const ts = Date.now();
     // A post with media inside it is stored as a draft until every file
@@ -210,7 +213,7 @@ export const MessageMethods = {
    *  that key's ids past the newest CLIENT_MSG_ID_KEEP or older than
    *  CLIENT_MSG_ID_MS. */
   rememberPostId(key: string, cid: string, id: number, draft: boolean, ts: number) {
-    this.sql.exec("INSERT INTO pcid (sender, cid, msg, ts, draft) VALUES (?, ?, ?, ?, ?)", key, cid, id, ts, draft ? 1 : null);
+    this.sql.exec("INSERT OR REPLACE INTO pcid (sender, cid, msg, ts, draft) VALUES (?, ?, ?, ?, ?)", key, cid, id, ts, draft ? 1 : null);
     this.sql.exec("DELETE FROM pcid WHERE sender = ? AND (ts < ? OR rowid NOT IN (SELECT rowid FROM pcid WHERE sender = ? ORDER BY ts DESC, rowid DESC LIMIT ?))", key, ts - CLIENT_MSG_ID_MS, key, CLIENT_MSG_ID_KEEP);
   },
 
@@ -350,7 +353,7 @@ export const MessageMethods = {
   /** @param text a caption to publish with (undefined or null keeps the draft's) */
   async publishMessage(id: number, who: string | null | undefined, owner: boolean, room: string, text: unknown) {
     const r = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
+    if (!r || this.draftHidden(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
     // Its post is still storing its files (Room.storing): published now it
@@ -425,8 +428,8 @@ export const MessageMethods = {
   // aborted and R2 objects deleted.
   /** @param draftOnly delete it only while it is still a draft (409 once it is live) */
   async deleteMessage(id: number, who: string | null | undefined, owner: boolean, draftOnly = false) {
-    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "ts">>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || this.draftHidden(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only delete your own messages" };
     // A client throwing away an upload it thinks never finished asks for
     // this: the draft may have been published meanwhile (another tab or

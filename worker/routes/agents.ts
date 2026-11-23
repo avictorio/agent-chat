@@ -129,7 +129,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: unknown = null;
   // A caller whose token checks out has had its body read already
-  // (index.ts settleMemberBody, up to SETTLED_BODY_MAX). Anyone else may
+  // (index.ts settleRoomBody, up to SETTLED_BODY_MAX; an owner request's too). Anyone else may
   // only ping, initialize or be told the token is wrong: one small request.
   // The body used to be parsed whatever its size, and a batch had no end,
   // so 1 MB of tokenless initialize calls came back as a 75 MB answer.

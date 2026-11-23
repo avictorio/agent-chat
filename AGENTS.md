@@ -50,8 +50,9 @@ guide and the code disagree, the code wins. The live API reference is
 Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
 Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
 project). Never delete the `__vapid` Durable Object; Web Push lives there.
-Leave the KV `REQUESTS` content alone too: it holds the create-room
-counters, the emoji cache and the activity log.
+Leave the KV `REQUESTS` content alone too: it holds the emoji cache, the
+activity log and the old create-room counters (left to expire). Leave the
+`__create-quota` object alone too: today's create-room counters.
 
 The front end ships with the Worker as Workers Static Assets: section 7 has
 the build and deploy pipeline, `docs/agents/web-app.md` the build id.
@@ -92,7 +93,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*` and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
-| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room counters, the direct-upload check's verdict |
+| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, the direct-upload check's verdict (and old create-room counters, expiring) |
 | R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings, and the direct check's short-lived objects under `_check/` (`docs/agents/media.md`) |
 | Cron trigger | none: `wrangler.toml` carries `crons = []` (section 7) |
 | Compatibility date | `2025-04-01` |
@@ -175,8 +176,9 @@ and `wrangler.toml` in the same commit.
 Each room's data is SQLite in its own `Room` Durable Object (versioned
 `SCHEMA_STEPS` in `worker/room/Room.ts`; adding one: section 13, Schema
 changes), media bytes are in R2 (`MEDIA`), and KV `REQUESTS` holds the
-counters, the emoji cache and the activity log. The object `__vapid`
-holds the Web Push VAPID keys, self-provisioned. **Never delete.** Every
+emoji cache and the activity log. The object `__vapid`
+holds the Web Push VAPID keys, self-provisioned. **Never delete.** The
+object `__create-quota` holds public room creation's daily counters. Every
 table and KV key: `docs/agents/rooms-and-api.md`, Storage.
 
 ---

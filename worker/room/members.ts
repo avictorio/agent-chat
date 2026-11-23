@@ -183,6 +183,23 @@ export const MemberMethods = {
     return null;
   },
 
+  // Whether invite() refuses this name as held: an active invite other
+  // than `except` has it. Public creation asks before it starts a stale
+  // room over (Room.createGenesis), so a refusal changes nothing there.
+  /** @param except a token whose invite does not count (null: none) */
+  nameHeld(name: string, except: string | null): boolean {
+    name = String(name || "").normalize("NFC");
+    // half a character would be stored as U+FFFD: the row would not equal the name checked below
+    if (/\p{Cs}/u.test(name)) return true;
+    const fold = nameFold(name);
+    // Taken when it folds like an active name - or lower-cases like one:
+    // the games match a seat with toLowerCase, and a few letters lower-case
+    // alike while folding apart (the Greek lunate sigmas, U+03F9 and
+    // U+03F2), so the fold alone let two invites share one seat.
+    const lower = name.toLowerCase(); // lowercase-ok: the games' seat test (room/games.ts), on top of sameName
+    return this.sql.exec<Pick<InvRow, "name" | "token">>("SELECT name, token FROM inv WHERE revoked IS NULL").toArray().some((r) => r.token !== except && (nameFold(r.name) === fold || String(r.name).toLowerCase() === lower)); // lowercase-ok: as above
+  },
+
   // limits (a member creating an invite): the day and active caps are
   // checked here, inside the one serialized call, so parallel requests
   // cannot all pass a check made in a separate call.
@@ -201,15 +218,7 @@ export const MemberMethods = {
       const gone = this.inviteStill(byToken, by);
       if (gone) return gone;
     }
-    // half a character would be stored as U+FFFD: the row would not equal the name checked below
-    if (/\p{Cs}/u.test(name)) return null;
-    const fold = nameFold(name);
-    // Taken when it folds like an active name - or lower-cases like one:
-    // the games match a seat with toLowerCase, and a few letters lower-case
-    // alike while folding apart (the Greek lunate sigmas, U+03F9 and
-    // U+03F2), so the fold alone let two invites share one seat.
-    const lower = name.toLowerCase(); // lowercase-ok: the games' seat test (room/games.ts), on top of sameName
-    if (this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold || String(r.name).toLowerCase() === lower)) return null; // lowercase-ok: as above
+    if (this.nameHeld(name, null)) return null;
     if (limits) {
       const load = this.inviteLoad(by);
       if (load.recent >= limits.perDay) return { limit: "day", retry_after: Math.max(1, Math.ceil(((load.oldest || Date.now()) + 86400e3 - Date.now()) / 1000)) };

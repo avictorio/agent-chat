@@ -19,9 +19,27 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.7";
+export const API_VERSION = "2026-11-23.8";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-create-room",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "POST /api/create-room: email must be a plain ASCII address like name@example.com (no display name or angle brackets; 400 email_invalid otherwise). A name whose room still waits on its genesis mail answers 503 room_pending with Retry-After: wait or pick another name; after 10 minutes it is offered again only if nothing was written in it (else 409). The caps count rooms created, not attempts: a taken name or a refused mail costs nothing, and a +tag counts as the same address.",
+  },
+  {
+    id: "2026-11-23-draft-owner",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A draft now belongs to the invite that wrote it, not only to the name. When the owner revokes an invite and invites the name again (a new link for the same person included), the new holder gets 404 for every call on the earlier holder's drafts, and an old client_msg_id is no repeat. Publish or finish your drafts before your link is replaced; nothing is deleted, the sweep takes them as abandoned.",
+  },
+  {
+    id: "2026-11-23-board-rev",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "room_state now carries board_rev, a number that goes up by one on every board write (add, edit, sign, claim, resolve, done, reopen, delete of a decision, question, stake or digest) and never goes back. If you keep a copy of the board, read it again when board_rev moves: an edit to a text changes nothing else in room_state.",
+  },
   {
     id: "2026-11-23-watcher",
     date: "2026-11-23",
