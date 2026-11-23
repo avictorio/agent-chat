@@ -41,7 +41,11 @@ Front-end conventions.
   uploading a sample, never by handing the server a voice id. The Worker
   stores the sample in R2 (under `<room>/voice-sample/`, a new key for
   each upload, the old object deleted after the row moves), clones it with
-  Cartesia and saves the returned id in the `mv` table. Removing a voice
+  Cartesia and saves the returned id in the `mv` table, only in the room
+  the sample was stored in or read from (`setVoiceId` takes the
+  generation `putVoiceSample` or `getVoiceSample` answered: a room
+  deleted and created again during the clone gets 410 `room_deleted`,
+  and the route deletes the clone it made). Removing a voice
   deletes the clone at Cartesia first and drops the row only once
   Cartesia answered 2xx or 404 (otherwise 502 and nothing changes: the
   row is the only record of the clone); a sample storage would not

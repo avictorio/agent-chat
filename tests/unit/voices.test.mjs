@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
 import { voiceRoute } from "../../worker/routes/voices.ts";
 import { VOICE_CLONES_PER_DAY } from "../../worker/limits.ts";
+import { isGoneError } from "../../worker/lib/errors.ts";
 
 const ROUTE = /^\/api\/rooms\/([^/]+)\/(?:voice(?:\/(sample|reclone))?|members\/([^/]+)\/voice(?:\/(sample|reclone))?)\/?$/;
 const MP3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]).buffer;
@@ -30,18 +31,18 @@ async function withVoice(hooks) {
   const h = makeRoom(hooks);
   h.member("Ada");
   assert.ok(await h.room.putVoiceSample("Ada", MP3, "audio/mpeg", "unit"));
-  await h.room.setVoiceId("Ada", "cartesia", "v-old");
+  await h.room.setVoiceId("Ada", "cartesia", "v-old", h.room.gen);
   return h;
 }
 
 /** the route's answer to method on /api/rooms/unit/<rest> as Ada */
-async function call(h, method, rest) {
+async function call(h, method, rest, body) {
   const url = new URL("http://localhost/api/rooms/unit/" + rest);
   // a KV with KV's delay, for code that counts there (the clone cap did)
   const kv = h.kv || (h.kv = new Map());
   const REQUESTS = { get: async (k) => { await new Promise((r) => setTimeout(r, 1)); return kv.get(k) ?? null; }, put: async (k, v) => { await new Promise((r) => setTimeout(r, 1)); kv.set(k, v); } };
   const env = { ROOM: { idFromName: (n) => n, get: () => h.room }, REQUESTS, CARTESIA_API_KEY: "test-key" };
-  const request = new Request(url, { method });
+  const request = new Request(url, body ? { method, body, headers: { "Content-Type": "audio/mpeg" } } : { method });
   const r = await voiceRoute({ request, env, url, path: url.pathname, owner: false, invite: "tok-Ada" }, ROUTE.exec(url.pathname));
   return { status: r.status, json: await r.json() };
 }
@@ -107,3 +108,31 @@ test("reclones sent together take the daily allowance once each, and a refused o
     assert.equal(reads, VOICE_CLONES_PER_DAY, "a member at the cap costs no read");
   } finally { c.restore(); }
 });
+
+// The route clones in the Worker, seconds after the room stored or read
+// the sample. A room deleted, created again and the name invited in that
+// wait used to give the new room's member the old room's clone.
+for (const [what, method, rest] of [["a sample upload", "PUT", "voice/sample"], ["a reclone", "POST", "voice/reclone"]]) {
+  test(what + " whose room is deleted and created again while it clones answers 410 and deletes its clone", async () => {
+    const h = await withVoice();
+    let cloned, release;
+    const reached = new Promise((r) => { cloned = r; });
+    const gate = new Promise((r) => { release = r; });
+    const c = cartesia(async (x) => {
+      if (x.url.endsWith("/voices/clone")) { cloned(); await gate; return Response.json({ id: "v-stale" }); }
+      return new Response(null, { status: 200 });
+    });
+    try {
+      const r = call(h, method, rest, method === "PUT" ? MP3 : undefined);
+      await reached;
+      await h.room.revokeAll();
+      assert.deepEqual(await h.room.destroy("unit"), { deleted: true });
+      assert.equal(h.room.create(), true);
+      h.member("Ada");
+      release();
+      await assert.rejects(r, (e) => isGoneError(e), "410 room_deleted");
+      assert.equal(mv(h), undefined, "the new room's Ada has no voice");
+      assert.ok(c.calls.some((x) => x.method === "DELETE" && x.url.endsWith("/voices/v-stale")), "the clone it made is deleted at Cartesia");
+    } finally { c.restore(); }
+  });
+}

@@ -75,20 +75,31 @@ export const VoiceMethods = {
       String(name).toLowerCase(), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
     if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.notifyMembers(name);
-    return key;
+    // the room this sample went into, for the clone made from it (setVoiceId)
+    return { key, gen };
   },
 
   async getVoiceSample(name: string) {
+    const gen = this.gen;
     const r = this.voiceRow(name);
     if (!r || !r.sample_key || !this.env || !this.env.MEDIA) return null;
     try {
       const obj = await this.env.MEDIA.get(r.sample_key);
       if (!obj) return null;
-      return { data: await obj.arrayBuffer(), type: r.sample_type || "audio/mpeg" };
+      // read before the read's await: the room this sample is from (setVoiceId)
+      return { data: await obj.arrayBuffer(), type: r.sample_type || "audio/mpeg", gen };
     } catch { return null; }
   },
 
-  async setVoiceId(name: string, provider: string, voiceId: string) {
+  // The route clones in the Worker, seconds after it stored or read the
+  // sample, and the room can be deleted, created again and the name
+  // invited in that wait: the old room's clone then became the new
+  // member's voice. gen is the room the sample belongs to (putVoiceSample,
+  // getVoiceSample); in any other the clone is refused with goneError,
+  // and the route deletes it at the provider.
+  /** @param gen this.gen as putVoiceSample or getVoiceSample answered it */
+  async setVoiceId(name: string, provider: string, voiceId: string, gen: number) {
+    this.fence(gen);
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const prev = this.voiceRow(name);
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",

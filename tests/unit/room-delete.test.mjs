@@ -182,7 +182,7 @@ test("a voice sample stored while the room is deleted and created again does not
   await p.reached;
   await deleteAndRecreate(h);
   h.member("Ada");
-  const key = await h.room.putVoiceSample("Ada", new Uint8Array([9, 9]).buffer, "audio/mpeg", R);
+  const { key } = await h.room.putVoiceSample("Ada", new Uint8Array([9, 9]).buffer, "audio/mpeg", R);
   p.release();
   await assert.rejects(put, (e) => isGoneError(e));
   assert.equal(h.one("SELECT sample_key FROM mv WHERE name = 'ada'").sample_key, key, "the new Ada keeps her own sample");
