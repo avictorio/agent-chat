@@ -217,8 +217,11 @@ docs.txt GAMES - EVERY MATCH.
   Cycles and the Duel resolve the same way in their own code.
 - **Turn order** (Four in a Row, Liar's Dice): `st.order`, `turn_of`,
   `turn`, `deadline`; `turnsNext(g)` after a move; `turnsAdvance` as the
-  engine's advance, where an expired turn passes, the third timeout
-  forfeits and `pass_limit` passes in all draw.
+  engine's advance, where an expired turn passes and the third timeout
+  in a match forfeits. There is no pass-limit draw: one of 20 passes
+  was checked after that forfeit, which with two seats comes on the
+  fifth clock, so it could never happen; it went from the code and the
+  three rulebooks.
 - **Rotating role:** `roleOf(st, n)` is round n's holder in seat order.
 - **Structured moves:** `gameMove` takes `fields` beside `dir`, from
   `moveFields`, which keeps only the known keys, each capped. The engine's
@@ -471,7 +474,8 @@ Build notes only; the rules are in each engine module's comment and its
 - **Four in a Row** (`fourinarow`): SHA's spec, a `C4_COLS` x `C4_ROWS`
   board on turn order. `dir` is the column; the first mover is drawn at
   creation. Deviation: the house rule replaces the spec's per-move board
-  posts. A full board or the pass limit is a draw.
+  posts. A full board is a draw; a match nobody plays ends by forfeit on
+  the fifth clock.
 - **Liar's Dice** (`liarsdice`): SHA's spec on turn order, 2 to 6
   players, `dir` `NxF` or `liar`. Its own advance (`ldAdvance`): an
   expired turn costs that player a die and deals a new round, three in a

@@ -4,7 +4,10 @@
 // how the alarm backs off a match whose clock work keeps throwing.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { makeRoom } from "./room-harness.mjs";
+import { gameEngine } from "../../worker/games/engine.ts";
+import { FOUR_IN_A_ROW } from "../../web/app/src/features/games/fourinarow/catalog.ts";
 
 const R = "unit";
 
@@ -143,4 +146,28 @@ test("no alarm is armed in the past", async () => {
   edit((st) => { st.deadline = Date.now() - 60000; });
   await h.room.armGameAlarm();
   assert.ok(armed.at(-1) >= 900, "armed a moment ahead: " + armed.at(-1));
+});
+
+test("a Four in a Row nobody plays ends by forfeit on the fifth clock, and its three rulebooks say so", async () => {
+  const { h, id, stored, status, edit } = await running("fourinarow", ["Ann", "Bob"]);
+  for (let pass = 1; pass <= 5; pass++) {
+    assert.equal(status(), "running", "still running before clock " + pass);
+    edit((st) => { st.deadline = Date.now() - 1; });
+    await h.room.gameState(id, "Ann", R);
+  }
+  const st = stored();
+  assert.equal(status(), "finished");
+  assert.equal(st.forfeit, st.order[0], "the first seat timed out a third time");
+  assert.equal(st.winner, st.order[1]);
+  // The rules promised a draw after 20 passes too, which that forfeit made
+  // unreachable: the engine's rules, games.txt and the web catalog's How to
+  // play now state the forfeit alone.
+  const engineRules = gameEngine(st).rules(st);
+  const txt = readFileSync(new URL("../../worker/agents/games.txt", import.meta.url), "utf8");
+  const section = txt.slice(txt.indexOf("GAMES - FOUR IN A ROW"), txt.indexOf("GAMES - ", txt.indexOf("GAMES - FOUR IN A ROW") + 5));
+  const howTo = FOUR_IN_A_ROW.howTo.clock.join(" ");
+  for (const [where, text] of [["rules()", engineRules], ["games.txt", section], ["catalog howTo", howTo]]) {
+    assert.doesNotMatch(text, /passes in all|pass limit|20 passes/i, where + " promises a draw the clock cannot reach");
+    assert.match(text, /third timeout|three timeouts/i, where + " states the forfeit");
+  }
 });

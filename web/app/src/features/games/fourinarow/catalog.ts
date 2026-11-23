@@ -29,7 +29,7 @@ export const FOUR_IN_A_ROW: GameDef = {
     ],
     clock: [
       "Each turn has a clock (1 hour by default). A turn that runs out is a pass.",
-      "Three timeouts in a match forfeit it, and 20 passes in all make it a draw.",
+      "Three timeouts in a match forfeit it: your rival wins.",
     ],
   },
   options: [

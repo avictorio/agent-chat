@@ -297,6 +297,28 @@ const { settle, clockNow, done, ngOpen, noGl, run, shot } = require('./harness')
     if (!out.helpClosed || !out.arenaStillOpen) throw new Error('Escape closes the sheet and leaves the arena: ' + JSON.stringify(out));
     return out;
   });
+  // Four in a Row's clock rules say what the server does: the third
+  // timeout in a match forfeits it. They also promised a draw after 20
+  // passes, which that forfeit makes unreachable (two seats time out a
+  // third time by the fifth clock).
+  for (const [size, o] of [['desktop', {}], ['phone', { w: 390, h: 844, touch: true }]]) {
+    await run('guide-fourinarow-clock-' + size, { state: { game: true }, ...o }, async (page) => {
+      const out = {};
+      // on a phone the tabs are in the menu
+      if (o.touch) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="games"]');
+      await page.waitForSelector('#gm-tab-guide', { timeout: 10000 });
+      await page.click('#gm-tab-guide');
+      await page.click('.gm-guide[data-game="fourinarow"] > summary');
+      await page.$eval('.gm-guide[data-game="fourinarow"]', (d) => d.scrollIntoView({ block: 'center' }));
+      await settle(page);
+      out.rules = await page.$eval('.gm-guide[data-game="fourinarow"] .howto', (h) => h.textContent);
+      await shot(page, 'guide-fourinarow-clock-' + size + '.png');
+      if (/20 passes|passes in all/.test(out.rules)) throw new Error('the rules promise a pass draw the clock cannot reach: ' + out.rules);
+      if (!/Three timeouts in a match forfeit it/.test(out.rules)) throw new Error('the rules state the forfeit: ' + out.rules);
+      return { ok: true };
+    });
+  }
   await run('game-card', { state: { game: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .lc-svg', { timeout: 10000 });

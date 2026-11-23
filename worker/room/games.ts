@@ -51,7 +51,7 @@ export type StoredBase = {
 export type RoundsStored = StoredBase & { round: number, deadline: number | null, pending: Record<string, unknown>, pending_at?: Record<string, number> };
 /** The turn-order games' share (turnsNext, turnsAdvance): the seats in
  *  order, whose turn it is, the turn count and clock, the timeouts. */
-export type TurnsStored = StoredBase & { order: string[], turn_of: string | null, turn: number, turn_seconds: number, deadline: number | null, timeouts?: Record<string, number>, passes?: number, pass_limit?: number };
+export type TurnsStored = StoredBase & { order: string[], turn_of: string | null, turn: number, turn_seconds: number, deadline: number | null, timeouts?: Record<string, number>, passes?: number };
 /** A match as gameRow reads it: its gm row, with the state parsed.
  *  fullLog is not stored (saveGame writes only status and st): it is set
  *  on a call that asked for the whole move record (REST ?log=full, MCP
@@ -243,9 +243,11 @@ export const GameMachineryMethods = {
      count and st.deadline its clock (turn_seconds). A move that ends a
      turn calls turnsNext(g). An expired turn is a pass: the turn moves on
      and the player's timeouts count up. The third timeout in a match
-     forfeits it (the rival wins), and st.pass_limit passes in all, when
-     set, call it a draw, so two absent players cannot keep a match alive
-     forever. The engine's advance is turnsAdvance. */
+     forfeits it (the rival wins), so two absent players cannot keep a
+     match alive forever. A pass_limit draw (20 passes in all) was checked
+     after that forfeit and so could never happen with two seats: it is
+     gone from the code and the rules, and a stored pass_limit is ignored.
+     The engine's advance is turnsAdvance. */
   turnsNext(g: GameRowOf<TurnsStored>) {
     const st = g.st;
     // no one's turn (-1) hands it to the first seat
@@ -262,17 +264,12 @@ export const GameMachineryMethods = {
     const who = String(st.turn_of);
     const timeouts = st.timeouts || (st.timeouts = {});
     timeouts[who] = (timeouts[who] || 0) + 1;
-    const passes = (st.passes = (st.passes || 0) + 1);
+    st.passes = (st.passes || 0) + 1;
     if (timeouts[who] >= 3) {
       g.status = "finished";
       st.forfeit = who;
       st.winner = st.order.find((n: string) => n !== who) || null;
       st.log.push({ tick: st.turn, text: who + "'s turn timed out a third time - " + who + " forfeits; " + st.winner + " wins." });
-    } else if (st.pass_limit && passes >= st.pass_limit) {
-      g.status = "finished";
-      st.winner = null;
-      st.draw = true;
-      st.log.push({ tick: st.turn, text: passes + " turns passed on the clock - the match is a draw." });
     } else {
       st.log.push({ tick: st.turn, text: who + "'s turn timed out - a pass (" + timeouts[who] + " of 3)." });
       this.turnsNext(g);
@@ -717,7 +714,7 @@ export const GameMachineryMethods = {
 
   /* The ladder: an Elo rating per player per game, from 1000 with K = 32,
      replayed over every finished 2-player match in order. A win scores 1
-     and a loss 0; a draw (Four in a Row's full board or its pass limit)
+     and a loss 0; a draw (Four in a Row's full board)
      scores a half each; a finish with no winner and no draw does not
      count. Free-for-alls stay out (the record covers them). Recomputed on
      every read from the matches themselves, so there is no stored table

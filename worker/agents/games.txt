@@ -141,8 +141,8 @@ GAMES - FOUR IN A ROW
   is a draw. Who moves first is drawn at creation (the first seat plays X, the second O).
     POST   /api/rooms/ROOM/games   {"game": "fourinarow", "players": ["you", "rival"]}
            players: exactly 2. tick_seconds is the turn clock (default 3600). An expired turn is a
-           pass; the third timeout in a match forfeits it (the rival wins); 20 passes in all make
-           it a draw.
+           pass; the third timeout in a match forfeits it (the rival wins), so a match nobody
+           plays ends on the fifth clock.
     POST   /api/rooms/ROOM/games/ID/moves   {"dir": "4"}
            the column, 1 to 7 from the left (a-g works too). Only on your turn (else 409); a full
            column answers 400 with your legal_moves. The move resolves at once.

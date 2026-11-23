@@ -27,7 +27,8 @@ export type C4St = {
   line: Array<[number, number]> | null,
   timeouts: Record<string, number>,
   passes: number,
-  pass_limit: number,
+  /** stored by matches made before the pass-limit draw went; never read */
+  pass_limit?: number,
   deadline: number | null,
   lobby_deadline: number,
   accepted: Record<string, boolean>,
@@ -65,8 +66,11 @@ export function c4BoardOf(st: Pick<C4St, "cols">) {
 export const FourInARowMethods = {
   /* ---------- games: Four in a Row ----------
      Player rules: rules() below. Rides the turn-order helper (turnsNext
-     and turnsAdvance in room/games.ts): an expired turn passes, the third
-     timeout in a match forfeits, pass_limit passes draw. Who moves first
+     and turnsAdvance in room/games.ts): an expired turn passes, and the
+     third timeout in a match forfeits it, so with two seats a match where
+     nobody moves ends on the fifth clock. (The rules once also promised
+     a draw after 20 passes, which that forfeit made unreachable: matches
+     from then still store a pass_limit nothing reads.) Who moves first
      is drawn at creation. The Referee posts only the result; the board
      lives in the card and the arena. */
   c4Board(st: C4St) {
@@ -141,7 +145,7 @@ export const FourInARowMethods = {
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const st: C4St = {
       type: "fourinarow", turn_seconds: turnSeconds, turn: 1, order: names.slice(), turn_of: names[0],
-      cols: Array.from({ length: C4_COLS }, () => []), moves: [], line: null, timeouts: {}, passes: 0, pass_limit: 20,
+      cols: Array.from({ length: C4_COLS }, () => []), moves: [], line: null, timeouts: {}, passes: 0,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
       log: [{ tick: 0, text: "Four in a Row created by " + creator + " - " + names.join(" vs ") + "; " + names[0] + " moves first. The clock starts when both players accept." }],
       winner: null, draw: false, forfeit: null, announced: false,
@@ -198,7 +202,7 @@ export const FourInARowMethods = {
     const st = g.st;
     const [a, b] = st.players;
     const n = st.moves.length;
-    if (st.draw) return "Four in a Row match #" + g.id + " is over - a draw between " + a.name + " and " + b.name + (st.cols.every((col) => col.length >= C4_ROWS) ? ": the board filled with no four in a line." : ": " + st.passes + " turns passed on the clock.") + " Moves: " + n + ".";
+    if (st.draw) return "Four in a Row match #" + g.id + " is over - a draw between " + a.name + " and " + b.name + ": the board filled with no four in a line. Moves: " + n + ".";
     if (st.forfeit) return "Four in a Row match #" + g.id + " is over - " + st.winner + " wins by forfeit: " + st.forfeit + " timed out three times. Moves: " + n + ".";
     const line = st.line || [];
     const dir = line.length >= 2 ? (line[0][1] === line[1][1] ? "across" : line[0][0] === line[1][0] ? "up a column" : "on a diagonal") : "in a line";
@@ -224,5 +228,5 @@ export const fourinarowEngine = {
   result: (room, g) => room.c4ResultText(g),
   rules: (st: C4St) =>
     "Four in a Row: two players take turns dropping a disc into one of 7 columns; it falls to the lowest free cell of the 6 rows. Four of your discs in a line - across, up a column or on a diagonal - wins; a full board is a draw. " +
-    st.order[0] + " moves first and plays X (board rows are listed top first: X, O or . for empty). Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out is a pass, the third timeout forfeits the match, and " + (st.pass_limit || 20) + " passes in all make it a draw. Send: dir as the column number, 1 to 7 from the left; you.legal_moves lists the columns with room.",
+    st.order[0] + " moves first and plays X (board rows are listed top first: X, O or . for empty). Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out is a pass, and the third timeout in the match forfeits it (the rival wins). Send: dir as the column number, 1 to 7 from the left; you.legal_moves lists the columns with room.",
 } satisfies GameEngineOf<C4St>;
