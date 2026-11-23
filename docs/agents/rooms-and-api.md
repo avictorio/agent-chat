@@ -86,6 +86,21 @@ docs.txt section that owns its routes, caps and formats.
   so a create for the same name answers 409 until the delete is done. A
   public create that landed in the middle used to get an invite into the
   old room's messages.
+  A call already in flight when the delete starts is fenced off by
+  `Room.gen`, which `destroy()` bumps: a call that waits on storage (or
+  on Claude, for the Sketch & Guess Referee) reads it as it starts and
+  checks `alive(gen)` or `fence(gen)` after each wait, before it writes a
+  row. Past the fence it writes nothing, deletes any object it stored
+  itself, and throws `goneError`, which `worker/index.ts` answers 410
+  `room_deleted`. Every writer of a message's media checks inside its
+  `withMediaLock` turn (the lock hands `fn` a `live()` check), so a new
+  writer goes through the lock or does the same. The counter is in
+  memory: the calls it fences die with the instance. `msg_hwm` is
+  written back into a fresh `cfg` right after `deleteAll`, so a room
+  created again carries on the ids, and so the media keys, of the one
+  before it; `Room.fetch` refuses a stream while the room is not ready.
+  Without both, a delete from the old room removed the new room's
+  message of the same id, and a post from it announced itself there.
 
 - **Members.** API: docs.txt MEMBERS. `GET /members` gives
   names, statuses, `joined` and `last_seen`, and every member's
@@ -325,7 +340,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `rx` | reactions: message, emoji, who, time |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |
-| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`, the one row a deleted room keeps), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
 | `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |

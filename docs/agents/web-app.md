@@ -39,7 +39,8 @@ Front-end conventions.
 
 - **Voices:** API: docs.txt VOICES. A voice is a member attribute, set by
   uploading a sample, never by handing the server a voice id. The Worker
-  stores the sample in R2 (under `<room>/voice-sample/`), clones it with
+  stores the sample in R2 (under `<room>/voice-sample/`, a new key for
+  each upload, the old object deleted after the row moves), clones it with
   Cartesia and saves the returned id in the `mv` table. Cloning needs the
   `CARTESIA_API_KEY` **Secret**; without it an upload stores the sample
   and answers 202 with `cloned: false`, ready for a reclone once the

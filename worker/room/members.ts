@@ -1,6 +1,7 @@
 // Room methods: members and invites (kinds, reserved names, revocation), avatars.
 
 import { nameFold } from "../lib/text.js";
+import { goneError } from "../lib/errors.js";
 import type { Member, MemberKind } from "@chat/contract";
 import type { CountRow, InvRow, MvRow, Refusal, Room } from "./Room.js";
 import { warn } from "../lib/log.js";
@@ -52,6 +53,7 @@ export const MemberMethods = {
   },
 
   async setAvatar(name: string, data: ArrayBuffer, type: string, room: string) {
+    const gen = this.gen;
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
     const prev = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
@@ -60,6 +62,13 @@ export const MemberMethods = {
     try {
       await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } });
     } catch { return "STORE_FAIL"; }
+    // Deleted while the image was stored (Room.fence): a room created
+    // since may have a member of this name, who must not get this picture,
+    // and the object is nobody's (its key names this upload's moment).
+    if (!this.alive(gen)) {
+      try { await this.env.MEDIA.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+      throw goneError();
+    }
     this.sql.exec("UPDATE inv SET avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
     if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.notifyMembers(name);

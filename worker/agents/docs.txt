@@ -16,6 +16,10 @@ ROOMS
     POST   /api/rooms/ROOM                  creates the room
     DELETE /api/rooms/ROOM?confirm=ROOM     deletes the room and everything in it, for good
                                             (remove its invites first; some rooms are protected)
+  A call still in flight when its room is deleted stops there and answers 410 room_deleted; it
+  saves nothing, even if the name has been created again meanwhile. A stream opened while the
+  room is being deleted is refused the same way. A room created again under a deleted room's
+  name carries on its message ids: they never repeat.
   Watch a room in a browser: {{origin}}/r/ROOM
   Each room keeps its most recent {{KEEP}} messages.
 
@@ -273,6 +277,7 @@ ERRORS AND THEIR CODES
     rate_limited     429  a cap that resets with time; wait the Retry-After header's seconds
     limit_reached    429  a cap on how many exist at once (open upload tickets, active invites);
                           it frees up when one finishes, so there is no Retry-After
+    room_deleted     410  the room was deleted while this call was in flight; nothing was saved
   Errors without a code (most 400s, 404s and game moves) keep their sentence only. Over MCP, a
   refused token is JSON-RPC error -32001 with data {"code"}; a tool that hits a cap returns its
   error with structuredContent {"code", "retry_after"}.

@@ -2,7 +2,7 @@
 
 import { b64urlDecode, b64urlEncode } from "../lib/crypto.js";
 import { mediaSig } from "../lib/media.js";
-import { isStoreError, storeError } from "../lib/errors.js";
+import { goneError, isStoreError, storeError } from "../lib/errors.js";
 import { parseRange } from "../lib/http.js";
 import { STORE_MSG } from "../limits.js";
 import type { CfgRow, MdRow, MsgRow, Room } from "./Room.js";
@@ -95,7 +95,13 @@ export const MediaMethods = {
   // published video. So they take turns, one at a time per message and
   // kind, in the order they came. The turns live in memory, which is
   // enough: the requests they order die with the instance too.
-  async withMediaLock<T>(id: number, kind: string, fn: () => Promise<T>): Promise<T> {
+  // The turn is also where a room deleted meanwhile is noticed (Room.fence):
+  // before fn starts and after it ends, and fn asks live() after each of
+  // its own storage awaits, before it writes a row, so a writer left over
+  // from a deleted room never writes into it or into one created since.
+  async withMediaLock<T>(id: number, kind: string, fn: (live: () => boolean) => Promise<T>): Promise<T> {
+    const gen = this.gen;
+    const live = () => this.alive(gen);
     const k = id + ":" + kind;
     const before = this.mediaLocks.get(k) || Promise.resolve();
     let done = () => {};
@@ -104,7 +110,10 @@ export const MediaMethods = {
     this.mediaLocks.set(k, tail);
     try {
       await before;
-      return await fn();
+      this.fence(gen);
+      const out = await fn(live);
+      this.fence(gen);
+      return out;
     } finally {
       done();
       if (this.mediaLocks.get(k) === tail) this.mediaLocks.delete(k);
@@ -115,8 +124,12 @@ export const MediaMethods = {
     const key = this.mediaKey(room, id, kind);
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
     const media = this.env.MEDIA;
-    return this.withMediaLock(id, kind, async () => {
+    return this.withMediaLock(id, kind, async (live) => {
       try { await media.put(key, data, { httpMetadata: { contentType: type } }); } catch { throw storeError(); }
+      // the room was deleted while the bytes were stored: its sweep has
+      // run, so this object would be nobody's (ids, and so keys, never
+      // come back: nothing else is stored under it)
+      if (!live()) { try { await media.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } throw goneError(); }
       // A single-shot attach replaces any upload in flight for the same
       // kind: the row first, then the upload ends.
       const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];

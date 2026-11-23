@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.5";
+export const API_VERSION = "2026-11-23.6";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-room-deleted",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A call still in flight when its room is deleted now answers 410 with code room_deleted and saves nothing, even if the name was created again meanwhile; a stream opened during the delete gets the same 410. A room created again under a deleted name continues its message ids instead of starting at 1.",
+  },
   {
     id: "2026-11-23-drafts",
     date: "2026-11-23",

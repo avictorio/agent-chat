@@ -24,7 +24,7 @@ import {
 } from "../limits.js";
 import { b64urlEncode, sha256hex } from "../lib/crypto.js";
 import { cleanFileName, sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
-import { isStoreError } from "../lib/errors.js";
+import { goneError, isGoneError, isStoreError } from "../lib/errors.js";
 import {
   cleanMediaType,
   partLength,
@@ -86,6 +86,7 @@ export const UploadMethods = {
   /** @param token the caller's invite (not needed with the owner key): see inviteStill (room/members.ts) */
   async mintUploadTicket(msgId: number, kind: string, member: string, room: string, byOwner: boolean, session?: UploadSessionAsk | null, token?: string | null) {
     if (!this.ready) return { status: 404, error: "No message with that id" };
+    const gen = this.gen;
     const gone = byOwner ? null : this.inviteStill(token, member);
     if (gone) return gone;
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
@@ -116,6 +117,9 @@ export const UploadMethods = {
         expires = plan.expires_at ?? now;
       }
       const h = await sha256hex(raw);
+      // no link into a room deleted during the awaits above (Room.fence);
+      // its delete ended the session started for it
+      this.fence(gen);
       // Asked again here, with no await between the answer and the write:
       // revoke() drops a member's links, so one written after it (the
       // awaits above leave room) would be the one link it missed.
@@ -202,6 +206,8 @@ export const UploadMethods = {
     // the PUT can simply retry.
     this.sql.exec("UPDATE ut SET used = ? WHERE h = ?", now, h);
     try { await this.putMedia(t.msg, kind, data, type, room); } catch (e) {
+      // a deleted room has no ticket row to release
+      if (isGoneError(e)) throw e;
       this.sql.exec("UPDATE ut SET used = NULL WHERE h = ?", h);
       if (isStoreError(e)) return { status: 503, error: STORE_MSG };
       throw e;
@@ -220,6 +226,9 @@ export const UploadMethods = {
   // ---- Drafts: a long upload finishes before its message goes live ----
   async sweepDrafts() {
     if (this._sweptAt && Date.now() - this._sweptAt < 600000) return;
+    // a room deleted during one of the storage calls below has no rows
+    // left to sweep, and one created since is not this room
+    const gen = this.gen;
     const now = Date.now();
     this._sweptAt = now;
     // A draft lives a day - or, while an upload for it is in flight, as
@@ -238,6 +247,7 @@ export const UploadMethods = {
       this.sql.exec("DELETE FROM rx WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM m WHERE id = ?", d.id);
       await this.dropStored(media);
+      if (!this.alive(gen)) return;
     }
     // Media whose message is gone: a write that was under way when the
     // message was deleted finishes after it (mediaShown never serves
@@ -331,14 +341,18 @@ export const UploadMethods = {
    */
   async uploadStart(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string, size: number | string | null | undefined, type: unknown, name: unknown, fp: unknown, direct: unknown) {
     if (UP_KINDS.indexOf(kind) < 0) return { status: 400, error: "kind must be one of: " + UP_KINDS.join(", ") };
+    const gen = this.gen;
+    this.fence(gen);
     // the sweep runs before the message is looked at, never between the look and the write
     await this.sweepDrafts();
+    this.fence(gen);
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     size = Math.floor(Number(size));
     if (!Number.isFinite(size) || size < 1) return { status: 400, error: "\"size\" is required: the file's exact length in bytes" };
     const useDirect = await this.upDirectAllowed(direct, owner);
+    this.fence(gen);
     if (size > (useDirect ? UP_MAX_DIRECT : UP_MAX)) {
       if (useDirect) return { status: 413, error: "Uploads can be up to " + UP_MAX_DIRECT_TEXT };
       const could = r2DirectConfigured(this.env) && this.env.R2_DIRECT === "1";
@@ -350,11 +364,12 @@ export const UploadMethods = {
     const want = size;
     // the direct check above can wait on storage: from here the session
     // is decided and replaced in this message and kind's turn (withMediaLock)
-    return this.withMediaLock(id, kind, () => this.upStartNow(id, kind, who, owner, room, want, type, name, fpv, useDirect));
+    return this.withMediaLock(id, kind, (live) => this.upStartNow(id, kind, who, owner, room, want, type, name, fpv, useDirect, live));
   },
 
   /** uploadStart's part that reads and replaces the session, in the turn */
-  async upStartNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string, size: number, type: unknown, name: unknown, fp: string | null, useDirect: boolean): Promise<UpPlan | { status: number, error: string }> {
+  /** @param live false once the room is deleted (withMediaLock) */
+  async upStartNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string, size: number, type: unknown, name: unknown, fp: string | null, useDirect: boolean, live: () => boolean): Promise<UpPlan | { status: number, error: string }> {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     const media = this.env.MEDIA;
@@ -380,7 +395,7 @@ export const UploadMethods = {
         // place. upFinishNow tells the two apart by the object at the key,
         // as a finish sent again does, and indexes it; the answer is then
         // the one for a file in place.
-        const done = await this.upFinishNow(id, kind, who, owner, room, null);
+        const done = await this.upFinishNow(id, kind, who, owner, room, null, live);
         if (done.status === 200) return { status: 409, error: "That message already has " + upNoun(kind) };
         // Storage has dropped it (expired or cancelled): a fresh session
         // below, rather than a resume onto an upload that is gone.
@@ -396,7 +411,12 @@ export const UploadMethods = {
     let up;
     try { up = await media.createMultipartUpload(key, { httpMetadata: { contentType: kind === "file" ? "application/octet-stream" : (declared || "application/octet-stream") } }); }
     catch { return { status: 503, error: STORE_MSG }; }
-    // the message may have been deleted while storage answered: no session for a message that is gone
+    // the room, or the message, may have been deleted while storage
+    // answered: no session for either
+    if (!live()) {
+      try { await up.abort(); } catch { /* nothing to end */ }
+      throw goneError();
+    }
     if (this.upAuth(id, who, owner, kind).status !== 200) {
       try { await up.abort(); } catch { /* nothing to end */ }
       return { status: 404, error: "No message with that id" };
@@ -494,7 +514,7 @@ export const UploadMethods = {
     const k = id + ":" + kind;
     const running = this._finishing.get(k);
     if (running) return running;
-    const p = this.withMediaLock(id, kind, () => this.upFinishNow(id, kind, who, owner, room, opts));
+    const p = this.withMediaLock(id, kind, (live) => this.upFinishNow(id, kind, who, owner, room, opts, live));
     this._finishing.set(k, p);
     try { return await p; } finally { if (this._finishing.get(k) === p) this._finishing.delete(k); }
   },
@@ -513,8 +533,9 @@ export const UploadMethods = {
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id = ?", id, kind, uploadId);
   },
 
-  /** uploadFinish's work, in the message and kind's turn */
-  async upFinishNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: UpFinishAsk | null | undefined): Promise<UpFinish> {
+  /** uploadFinish's work, in the message and kind's turn
+   *  @param live false once the room is deleted (withMediaLock) */
+  async upFinishNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: UpFinishAsk | null | undefined, live: () => boolean): Promise<UpFinish> {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     const row = this.upSession(id, kind);
@@ -556,13 +577,21 @@ export const UploadMethods = {
       try { const hd = await media.head(row.r2key); return !!hd && hd.size === row.size; } catch (e) { warn("upload.head", e, { room, id, kind }); return false; }
     };
     const gone = { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
+    // The room was deleted during a storage call: its delete has run, so
+    // an object this finish completed is nobody's (the key is never used
+    // again), and no row is written.
+    const roomGone = async () => {
+      try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+      throw goneError();
+    };
     let got: Map<number, string> | null = null;
     try { got = await this.upReceived(id, kind, row); }
     catch (e) {
       const em = String((e && (e as Error).message) || e);
       if (!/NoSuchUpload/i.test(em)) return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); finish again" };
-      if (!(await landed())) { this.upDrop(id, kind, uploadId); return gone; }
+      if (!(await landed())) { if (!live()) return roomGone(); this.upDrop(id, kind, uploadId); return gone; }
     }
+    if (!live()) return roomGone();
     if (got) {
       const missing = [];
       for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
@@ -573,8 +602,8 @@ export const UploadMethods = {
       try { await media.resumeMultipartUpload(row.r2key, uploadId).complete(parts); }
       catch (e) {
         const em = String((e && (e as Error).message) || e);
-        if (!/NoSuchUpload|upload does not exist|10024/i.test(em)) return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." };
-        if (!(await landed())) { this.upDrop(id, kind, uploadId); return gone; }
+        if (!/NoSuchUpload|upload does not exist|10024/i.test(em)) { if (!live()) return roomGone(); return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." }; }
+        if (!(await landed())) { if (!live()) return roomGone(); this.upDrop(id, kind, uploadId); return gone; }
       }
     }
     /** the R2 object's head */
@@ -591,6 +620,7 @@ export const UploadMethods = {
         warn("upload.sniff", e, { room, id, kind });
       }
     }
+    if (!live()) return roomGone();
     if (!this.upStill(id, kind, uploadId)) {
       // The message was deleted while storage answered. Its delete has
       // already run, so the object this upload just made is nobody's:
@@ -600,6 +630,7 @@ export const UploadMethods = {
     }
     if (!sized || !type) {
       try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+      if (!live()) throw goneError();
       this.upDrop(id, kind, uploadId);
       return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
     }
@@ -625,11 +656,12 @@ export const UploadMethods = {
     // In the message and kind's turn: an abort sent while a finish runs
     // waits for it (and then finds nothing to cancel), instead of deleting
     // the row the finish was completing.
-    return this.withMediaLock(id, kind, async () => {
+    return this.withMediaLock(id, kind, async (live) => {
       const row = this.upSession(id, kind);
       if (!row || !row.upload_id) return { status: 200, aborted: false };
       const uploadId = row.upload_id;
       if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ } }
+      if (!live()) throw goneError();
       this.upDrop(id, kind, uploadId);
       return { status: 200, aborted: true };
     });
@@ -665,14 +697,18 @@ export const UploadMethods = {
     if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: VIDEO_STREAM_TOO_BIG };
     const media = this.env.MEDIA;
     const key = this.mediaKey(room, id, "video");
-    return this.withMediaLock(id, "video", async () => {
+    return this.withMediaLock(id, "video", async (live) => {
       const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
       if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
       // created first, swapped in one step after, as in upStartNow
       let up;
       try { up = await media.createMultipartUpload(key, { httpMetadata: { contentType: type } }); }
       catch { return { status: 503, error: STORE_MSG }; }
-      // as in uploadStart: the message may be gone by now
+      // as in uploadStart: the room or the message may be gone by now
+      if (!live()) {
+        try { await up.abort(); } catch { /* nothing to end */ }
+        throw goneError();
+      }
       if (!this.sql.exec("SELECT id FROM m WHERE id = ?", id).toArray().length) {
         try { await up.abort(); } catch { /* nothing to end */ }
         return { status: 404, error: "No message with that id" };
@@ -701,7 +737,7 @@ export const UploadMethods = {
   async streamFinish(id: number, uploadId: string, parts: R2UploadedPart[], size: number, room: string | null | undefined, sender?: { token: string | null, member: string } | null) {
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const media = this.env.MEDIA;
-    return this.withMediaLock(id, "video", async () => {
+    return this.withMediaLock(id, "video", async (live) => {
       const replaced = { status: 409, error: "This upload was replaced by a newer one for the same message" };
       const row = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
       if (!row || row.upload_id !== uploadId) return replaced;
@@ -713,17 +749,25 @@ export const UploadMethods = {
       const gone = sender ? this.inviteStill(sender.token, sender.member) : null;
       if (gone) {
         try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
+        if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
         return { status: gone.status, error: gone.error };
       }
+      // the room was deleted during a storage call (see upFinishNow)
+      const roomGone = async () => {
+        try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+        throw goneError();
+      };
       const discard = async (status: number, error: string) => {
         if (this.upStill(id, "video", uploadId) || !this.upSession(id, "video")) { try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+        if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
         return { status: status, error: error };
       };
       try { await media.resumeMultipartUpload(row.r2key, uploadId).complete(parts); }
       catch (e) {
         try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
+        if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
         return { status: 502, error: "Upload stream failed: " + String((e && (e as Error).message) || e) };
       }
@@ -732,6 +776,7 @@ export const UploadMethods = {
       if (head && head.size === size) {
         try { const obj = await media.get(row.r2key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) { warn("upload.sniff", e, { room, id }); }
       }
+      if (!live()) return roomGone();
       if (!head || head.size !== size || !sniffed) return discard(400, "The uploaded bytes do not check out as that video; upload discarded");
       // the message was deleted while storage answered (see upFinishNow)
       if (!this.upStill(id, "video", uploadId)) return discard(409, "This upload was cancelled while it finished");
@@ -756,11 +801,12 @@ export const UploadMethods = {
     // Discard means the R2 multipart dies too, as in uploadAbort: the
     // one current caller aborts it first, but the upload id is deleted here,
     // so a caller that trusted this method alone would orphan the session.
-    return this.withMediaLock(id, "video", async () => {
+    return this.withMediaLock(id, "video", async (live) => {
       const row = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
       if (!row || !row.upload_id || (uploadId && row.upload_id !== uploadId)) return { status: 200 };
       const own = row.upload_id;
       if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, own).abort(); } catch { /* already completed, aborted or expired */ } }
+      if (!live()) throw goneError();
       this.upDrop(id, "video", own);
       return { status: 200 };
     });

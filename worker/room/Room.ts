@@ -7,7 +7,8 @@ import { DurableObject } from "cloudflare:workers";
 import { gameEngine } from "../games/engine.js";
 import { renderRoomState, stateFrame, streamWants } from "./state.js";
 import { KEEP } from "../limits.js";
-import { SSE_HEADERS, sseFrame } from "../lib/http.js";
+import { SSE_HEADERS, json, sseFrame } from "../lib/http.js";
+import { GONE_MSG, goneError } from "../lib/errors.js";
 import { FourInARowMethods } from "../games/fourinarow.js";
 import { TrustMethods } from "../games/trust.js";
 import { AuctionMethods } from "../games/auction.js";
@@ -305,6 +306,10 @@ export class Room extends DurableObject {
   declare testR2DelayMs?: number;
   /** True while destroy() is deleting the room's storage. */
   destroying = false;
+  /** How many times destroy() has begun in this instance's life: the
+   *  room a call began in, as fence() and alive() compare it. In memory is
+   *  enough: the calls it fences die with the instance. */
+  gen = 0;
   /** Upload links being minted right now, by folded member name (room/uploads.ts, mintUploadTicket). */
   utMinting: Map<string, number> = new Map();
   /** The writer of each message's media kind holding its turn, by "msg:kind" (room/media.ts, withMediaLock). */
@@ -339,6 +344,24 @@ export class Room extends DurableObject {
 
   exists() {
     return this.ready;
+  }
+
+  // A call that waits on storage (or on anything else) lets other calls
+  // run, a room delete among them, and nothing used to stop it carrying on
+  // afterwards: a post whose picture was still uploading then indexed and
+  // announced it in a room created again under the same name, or failed
+  // with its object left in the bucket for good. Such a call reads gen as
+  // it starts and asks here after each wait; once the room it began in is
+  // gone - deleted, whether or not created again - it writes nothing more,
+  // deletes what it stored itself, and stops with goneError (410).
+  /** @param gen this.gen as the call began */
+  alive(gen: number) {
+    return this.ready && this.gen === gen;
+  }
+
+  /** Throws goneError unless the room the call began in is still here (alive). */
+  fence(gen: number) {
+    if (!this.alive(gen)) throw goneError();
   }
 
   create() {
@@ -376,6 +399,7 @@ export class Room extends DurableObject {
     // the old room's messages, and then lost its tables to deleteAll.
     this.destroying = true;
     this.ready = false;
+    this.gen++;
     try {
       return await this.destroyNow(room);
     } finally {
@@ -417,12 +441,32 @@ export class Room extends DurableObject {
     } catch (e) {
       warn("room.destroy.media", e, { room });
     }
+    // The id counter outlives the room: storage wipes cfg with the rest,
+    // and a room created again under the name used to hand out 1, 2, 3
+    // again - the same ids and so the same media keys (ROOM/ID/KIND) as
+    // the old room's. A call still in flight from the old room then acted
+    // on the new room's message of that id (a delete removed it), and an
+    // old signed link served the new room's file. Only this number is
+    // kept: nothing of the room's content.
+    let hwm = 0;
+    try { hwm = this.msgHwm(); } catch (e) { warn("room.destroy.hwm", e, { room }); }
     await this.ctx.storage.deleteAll();
+    if (hwm) {
+      this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+      this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(hwm));
+    }
+    // A stream or long poll that slipped in during the awaits above
+    // (fetch refuses one now, but this is the last word) goes too.
+    for (const c of Array.from(this.clients)) c.close();
+    const late = this.waiters;
+    this.waiters = new Set();
+    for (const w of late) w();
     // In-memory caches of what was just deleted: a room recreated under the
     // same name in this instance's lifetime must not sign with the old key
     // or skip its draft sweep.
     this._sigBytes = null;
     this._sweptAt = 0;
+    this.sgJudging = new Set();
     return { deleted: true };
   }
 
@@ -487,6 +531,9 @@ export class Room extends DurableObject {
   // re-arm for the next deadline. This is what lets a match run to its
   // finish overnight with nobody reading it.
   async alarm() {
+    // a room deleted with its alarm still set has nothing left to advance
+    if (!this.ready) return;
+    const gen = this.gen;
     let saved = "";
     try { const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'room_name'").toArray()[0]; saved = r ? String(r.v || "") : ""; } catch (e) { warn("alarm.name", e); }
     const room: string = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
@@ -498,6 +545,9 @@ export class Room extends DurableObject {
     try {
       const rows = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
       for (const r of rows) {
+        // deleted during an earlier match's await: these ids are not the
+        // ones read above any more (a room created since starts at 1)
+        if (!this.alive(gen)) break;
         try {
           const g = this.gameRow(r.id);
           const eng = g && g.status === "running" ? gameEngine(g.st) : null;
@@ -512,12 +562,17 @@ export class Room extends DurableObject {
         }
       }
     } finally {
-      await this.armGameAlarm();
+      if (this.alive(gen)) await this.armGameAlarm();
     }
   }
 
   // Server-Sent Events stream. Called by the Worker with ?room=NAME&after=ID|latest
   async fetch(request: Request) {
+    // A stream opened while the room is being deleted (the route checked
+    // that it existed a moment before) registered after destroy's close
+    // loop, and an owner's one then carried on into a room created again
+    // under the name. A deleted room has no stream.
+    if (!this.ready) return json({ error: GONE_MSG, code: "room_deleted" }, 410);
     const url = new URL(request.url);
     const room = url.searchParams.get("room") as string; // the stream route always sends room=
     this.roomName = room;

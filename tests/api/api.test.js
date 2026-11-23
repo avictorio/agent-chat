@@ -611,6 +611,35 @@ function mp4() {
       await req('DELETE', RR + '?confirm=' + race, { owner: true });
     }
 
+    // A room deleted with a post in flight, then created again under its
+    // name. The post used to answer 500 (or, with the name created again
+    // in time, land in the new room), and ids started again at 1.
+    {
+      const rc = 'apitest-again-' + SUF, RC = '/api/rooms/' + rc;
+      await req('POST', RC, { owner: true });
+      let ada = (await req('POST', RC + '/invites', { owner: true, json: { name: 'Ada', kind: 'human' } })).json.token;
+      await req('PUT', RC + '/avatar', { token: ada, headers: { 'Content-Type': 'image/png' }, body: PNG });
+      const first = await req('POST', RC + '/messages', { token: ada, json: { text: 'old room picture', image: PNG.toString('base64') } });
+      await req('DELETE', RC + '/invites', { owner: true });
+      await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: rc, ms: 1500 } });
+      const inflight = req('POST', RC + '/messages', { owner: true, json: { from: 'Owner', text: 'posted as the room goes', image: PNG.toString('base64') } });
+      await sleep(300);
+      r = await req('DELETE', RC + '?confirm=' + rc, { owner: true });
+      check('the room with a post in flight is deleted', r.status === 200 && r.json.deleted === true, r.status + ' ' + r.text.slice(0, 120));
+      await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: rc, ms: 0 } });
+      r = await inflight;
+      check('the post in flight answers 410 room_deleted', r.status === 410 && r.json && r.json.code === 'room_deleted', r.status + ' ' + r.text.slice(0, 160));
+      await req('POST', RC, { owner: true });
+      ada = (await req('POST', RC + '/invites', { owner: true, json: { name: 'Ada', kind: 'human' } })).json.token;
+      await req('PUT', RC + '/avatar', { token: ada, headers: { 'Content-Type': 'image/png' }, body: PNG });
+      const again = await req('POST', RC + '/messages', { token: ada, json: { text: 'new room picture', image: PNG.toString('base64') } });
+      check('the room created again carries on the message ids', again.status === 201 && again.json.id > first.json.id, first.json.id + ' then ' + again.json.id);
+      r = await req('GET', RC + '/messages', { owner: true });
+      check('and holds only its own message', (r.json.messages || []).length === 1 && r.json.messages[0].text === 'new room picture', r.text.slice(0, 160));
+      await req('DELETE', RC + '/invites', { owner: true });
+      await req('DELETE', RC + '?confirm=' + rc, { owner: true });
+    }
+
     // invite_only invariants.
     r = await req('GET', R + '/members', { owner: true });
     check('members say invite_only', r.json && r.json.invite_only === true, JSON.stringify(r.json && r.json.invite_only));

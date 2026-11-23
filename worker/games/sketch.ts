@@ -8,6 +8,7 @@ import type { CfgRow, GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import { randInt } from "../lib/random.js";
+import { goneError } from "../lib/errors.js";
 
 /** A seat as createSketch stores it (st.players). */
 export type SgSeat = { name: string, color: string, hex: string };
@@ -231,6 +232,9 @@ export const SketchMethods = {
   },
 
   async sgMove(g: SgGame, who: string, raw: unknown, room: string, fields: Record<string, unknown> | null | undefined) {
+    // match ids start again at 1 in a room created again under the name:
+    // after an await, a move from a deleted room stops (Room.fence)
+    const gen = this.gen;
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this game" };
@@ -255,6 +259,10 @@ export const SketchMethods = {
         this.saveGame(g);
       }
       try { await this.env.MEDIA.put(key, img.bytes as Uint8Array, { httpMetadata: { contentType: img.type } }); } catch { return { status: 503, error: "The image could not be stored - try again" }; }
+      if (!this.alive(gen)) {
+        try { await this.env.MEDIA.delete(key); } catch { /* nobody's object either way: the room's delete has run */ }
+        throw goneError();
+      }
       // the state may have moved while the image was stored
       const g2 = this.gameRowOf<SgStored>(g.id, "sketch");
       if (!g2 || g2.status !== "running" || g2.st.phase !== "draw" || g2.st.round !== st.round) return { status: 409, error: "The round moved on while your drawing was uploading" };
@@ -288,6 +296,7 @@ export const SketchMethods = {
     this.sgClose(g);
     this.saveGame(g);
     await this.sgJudgeNow(g.id, room);
+    this.fence(gen);
     const g3 = this.gameRowOf<SgStored>(g.id, "sketch");
     // the row this move saved, unless the room was destroyed during the
     // Referee's call
@@ -324,7 +333,11 @@ export const SketchMethods = {
     if (this.sgJudging.has(gid)) return;
     const g0 = this.gameRowOf<SgStored>(gid, "sketch");
     if (!g0 || g0.status !== "running" || g0.st.phase !== "judging") return;
-    this.sgJudging.add(gid);
+    // destroy() starts a fresh set: this judge's entry stays in its own
+    // room's, so it neither holds up nor clears a judge in a room created since
+    const judging = this.sgJudging;
+    judging.add(gid);
+    const gen = this.gen;
     try {
       const st0 = g0.st;
       const n = st0.round;
@@ -343,14 +356,16 @@ export const SketchMethods = {
         else if (this.sgJudgeBudget()) verdict = await sgClaudeJudge(this.env, (st0.cur as SgCur).prompt, pending, !anyRight); // judging: the drawing is up
         else verdict = { error: "daily_cap" };
       }
-      // the round may have moved on while the Referee thought
+      // the round may have moved on while the Referee thought, or the room
+      // gone: one created again since has its own match under this id
+      if (!this.alive(gen)) return;
       const g = this.gameRowOf<SgStored>(gid, "sketch");
       if (!g || g.status !== "running" || g.st.phase !== "judging" || g.st.round !== n) return;
       this.sgResolve(g, auto, verdict);
       this.saveGame(g);
       this.afterGameChange(g, room, "Referee");
     } finally {
-      this.sgJudging.delete(gid);
+      judging.delete(gid);
     }
   },
 

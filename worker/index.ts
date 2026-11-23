@@ -2,6 +2,7 @@
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { BadRequest, CORS, json, settleBody } from "./lib/http.js";
+import { GONE_MSG, isGoneError } from "./lib/errors.js";
 import { MIB, ROOM_RE, SETTLED_BODY_MAX } from "./limits.js";
 import { MCP_PATH, headerToken, queryToken, queryTokenNotice } from "./lib/tokens.js";
 import { renewDirectVerdict } from "./platform/r2-direct-check.js";
@@ -85,6 +86,9 @@ export default {
       if (e instanceof URIError) return json({ error: "The URL has a malformed %-escape" }, 400);
       // A body that is there but is not JSON (lib/http.ts readBody).
       if (e instanceof BadRequest) return json({ error: e.message }, 400);
+      // The room was deleted while the request was in flight (Room.fence):
+      // it stopped before writing anything, so say that, not 500.
+      if (isGoneError(e)) return json({ error: GONE_MSG, code: "room_deleted" }, 410);
       throw e;
     }
   },

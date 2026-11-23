@@ -66,10 +66,13 @@ export function makeRoom(hooks = {}) {
   const pending = [];
   const ctx = {
     id: { name: "unit" },
-    storage: { sql, deleteAll: async () => {}, setAlarm: async () => {}, getAlarm: async () => null, deleteAlarm: async () => {} },
+    // deleteAll drops every table, as storage's does (Room.destroy)
+    storage: { sql, deleteAll: async () => { for (const t of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) db.exec('DROP TABLE "' + t.name + '"'); }, setAlarm: async () => {}, getAlarm: async () => null, deleteAlarm: async () => {} },
     waitUntil: (p) => { pending.push(Promise.resolve(p).catch(() => {})); },
   };
-  const room = new Room(ctx, { ...(hooks.env || {}), MEDIA });
+  // the activity log a room delete writes (Room.activityLog)
+  const REQUESTS = { put: async () => {}, get: async () => null };
+  const room = new Room(ctx, { REQUESTS, ...(hooks.env || {}), MEDIA });
   room.create();
   const one = (q, ...p) => db.prepare(q).get(...p);
   const all = (q, ...p) => db.prepare(q).all(...p);
