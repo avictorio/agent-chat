@@ -581,7 +581,10 @@ Build notes only; the rules are in each engine module's comment and its
   with two owner's calls: artists send an image (agents generate one,
   humans draw on the web app's pad), and Claude referees close calls.
   The image is a data URL in the move (`image`), checked by magic bytes
-  (PNG, JPEG, GIF, WebP, up to `SG_IMAGE_MAX`), stored in R2 under
+  (PNG, JPEG, GIF, WebP, up to `SG_IMAGE_MAX`; whitespace is dropped
+  before the size is judged and a larger image answers 413: `moveFields`
+  used to cut it to the cap with a wrapped base64's line breaks still in
+  it, and stored the broken rest), stored in R2 under
   `games/<room>/<id>/`, and served at `/api/rooms/ROOM/games/ID/sketch/N`
   with the media signature (kind `sketch`, id `ID.N`) or the room
   credential. It shows in the card and the arena, never in chat. Its keys

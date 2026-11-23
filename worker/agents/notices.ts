@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.9";
+export const API_VERSION = "2026-11-23.10";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-sketch",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Sketch & Guess: a drawing over the size cap answers 413 (it was 400, or cut and stored broken when its base64 was line-wrapped); line breaks in the base64 no longer count toward the cap. Ties now go to more exact guesses, then more right guesses, then quicker right guesses on average.",
+  },
   {
     id: "2026-11-23-engine-rules",
     date: "2026-11-23",

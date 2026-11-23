@@ -47,6 +47,10 @@ export const SG_IMAGE_MAX = 1500000;
 // The image as text: base64 of SG_IMAGE_MAX bytes, its data: label and
 // the JSON a dir may wrap it in.
 export const SG_IMAGE_TEXT_MAX = Math.ceil((SG_IMAGE_MAX * 4) / 3) + 200;
+// The longest dir a drawing may come in: the image as text, with room for
+// a line break every 76 characters written as JSON escapes ("\r\n", four
+// characters), since sgDecodeImage drops them before it judges the size.
+export const SG_DIR_MAX = SG_IMAGE_TEXT_MAX + Math.ceil((SG_IMAGE_TEXT_MAX * 4) / 76);
 export const SG_GUESS_MAX = 80;
 /** How long the draw clock holds off while a drawing that arrived in time is being stored. */
 export const SG_STORE_GRACE_MS = 30000;
@@ -78,26 +82,29 @@ export function sgFromDir(raw: unknown, key: "image" | "guess"): { value: string
   return { value: typeof v === "string" ? v : null };
 }
 // An image move: a data URL (or bare base64) of a PNG, JPEG, GIF or WebP,
-// checked by its magic bytes, not its label.
-export function sgDecodeImage(raw: unknown) {
-  let s = String(raw || "").trim();
+// checked by its magic bytes, not its label. Whitespace is dropped before
+// the size is judged; too large an image is refused with status 413.
+export function sgDecodeImage(raw: unknown): { bytes: Uint8Array, type: string, error?: undefined, status?: undefined } | { error: string, status: number } {
+  // the whole text, label included: moveFields keeps one character past
+  // SG_IMAGE_TEXT_MAX of a longer image, and that must not decode
+  let s = String(raw || "").replace(/\s+/g, "");
+  if (s.length > SG_IMAGE_TEXT_MAX) return { status: 413, error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
   const m = s.match(/^data:([a-z0-9.+/-]+);base64,/i);
   if (m) s = s.slice(m[0].length);
-  s = s.replace(/\s+/g, "");
-  if (!s || !/^[A-Za-z0-9+/=_-]+$/.test(s)) return { error: "image is a data URL (data:image/png;base64,...) or base64 of a PNG, JPEG, GIF or WebP" };
-  if (s.length > Math.ceil((SG_IMAGE_MAX * 4) / 3) + 8) return { error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
+  if (!s || !/^[A-Za-z0-9+/=_-]+$/.test(s)) return { status: 400, error: "image is a data URL (data:image/png;base64,...) or base64 of a PNG, JPEG, GIF or WebP" };
+  if (s.length > Math.ceil((SG_IMAGE_MAX * 4) / 3) + 8) return { status: 413, error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
   let bin;
-  try { bin = atob(s.replace(/-/g, "+").replace(/_/g, "/")); } catch { return { error: "image is not valid base64" }; }
+  try { bin = atob(s.replace(/-/g, "+").replace(/_/g, "/")); } catch { return { status: 400, error: "image is not valid base64" }; }
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  if (bytes.length > SG_IMAGE_MAX) return { error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
+  if (bytes.length > SG_IMAGE_MAX) return { status: 413, error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
   const b = (i: number) => bytes[i];
   let type: string | null = null;
   if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) type = "image/png";
   else if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) type = "image/jpeg";
   else if (b(0) === 0x47 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x38) type = "image/gif";
   else if (b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50) type = "image/webp";
-  if (!type) return { error: "The image must be a PNG, JPEG, GIF or WebP" };
+  if (!type) return { status: 400, error: "The image must be a PNG, JPEG, GIF or WebP" };
   return { bytes: bytes, type: type };
 }
 
@@ -251,11 +258,10 @@ export const SketchMethods = {
       const src = d ? d.value : /^\s*data:/.test(String(raw || "")) ? raw : null;
       if (!src) return { status: 400, error: "As the artist, send image: your drawing of the prompt (you.prompt) as a data URL - data:image/png;base64,... - a PNG, JPEG, GIF or WebP up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB", legal_moves: ['{"image": "data:image/png;base64,<your drawing>"}'] };
       const img = sgDecodeImage(src);
-      if (img.error) return { status: 400, error: img.error };
+      if (img.error !== undefined) return { status: img.status, error: img.error };
       if (!this.env || !this.env.MEDIA) return { status: 503, error: "Image storage is not available right now" };
       const rnd = Array.from(crypto.getRandomValues(new Uint8Array(6))).map((b) => ("0" + b.toString(16)).slice(-2)).join("");
-      // img.error is unset, so img is the decoded image (every error has a message)
-      const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + (img.type as string).split("/")[1];
+      const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + img.type.split("/")[1];
       // The drawing is here, in time: the clock must not run out while it
       // is being stored. It used to, and a drawing sent seconds before
       // the deadline was forfeited (two in a row call the match off).
@@ -263,7 +269,7 @@ export const SketchMethods = {
         st.deadline = Date.now() + SG_STORE_GRACE_MS;
         this.saveGame(g);
       }
-      try { await this.env.MEDIA.put(key, img.bytes as Uint8Array, { httpMetadata: { contentType: img.type } }); } catch { return { status: 503, error: "The image could not be stored - try again" }; }
+      try { await this.env.MEDIA.put(key, img.bytes, { httpMetadata: { contentType: img.type } }); } catch { return { status: 503, error: "The image could not be stored - try again" }; }
       if (!this.alive(gen)) {
         try { await this.env.MEDIA.delete(key); } catch { /* nobody's object either way: the room's delete has run */ }
         throw goneError();
@@ -280,7 +286,7 @@ export const SketchMethods = {
       }
       const s2 = g2.st;
       if (!s2.images) s2.images = {};
-      s2.images[s2.round] = { key: key, type: img.type as string, bytes: (img.bytes as Uint8Array).length };
+      s2.images[s2.round] = { key: key, type: img.type, bytes: img.bytes.length };
       (s2.cur as SgCur).posted = Date.now(); // a draw phase has its prompt
       s2.phase = "guess";
       s2.guesses = {};
@@ -549,7 +555,7 @@ export const sketchEngine = {
   name: "Sketch & Guess",
   turnWord: "round",
   logTick: (st: SgStored) => st.round,
-  dirMax: SG_IMAGE_TEXT_MAX,
+  dirMax: SG_DIR_MAX,
   clockSeconds: (st: SgStored) => (st.phase === "guess" ? st.guess_seconds : st.draw_seconds),
   create: (room, creator, players, opts, roomName) => room.createSketch(creator, players, opts, roomName),
   summary: (room, g) => room.sgSummary(g),

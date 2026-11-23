@@ -77,3 +77,37 @@ test("a tie goes to more right guesses, then the quicker ones on average", async
   assert.equal(h.room.sgStanding(st), null);
   assert.equal(st.draw, true);
 });
+
+// A drawing whose base64 is line-wrapped (a shell's base64 breaks every 76
+// characters): moveFields used to cut it to the cap with the breaks still
+// in, so an image just under the cap lost its end, was stored broken and
+// the round went on. One over the cap was cut and stored too, when it was
+// not refused as invalid base64.
+test("a line-wrapped drawing under the cap is stored whole; one over it answers 413", async () => {
+  const { moveFields } = await import("../../worker/games/engine.ts");
+  const { SG_IMAGE_MAX } = await import("../../worker/games/sketch.ts");
+  const png = (n) => { const b = Buffer.alloc(n, 7); b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); b[n - 1] = 0x42; return b; };
+  const wrapped = (b) => "data:image/png;base64," + b.toString("base64").replace(/.{76}/g, "$&\n");
+  const ok = png(SG_IMAGE_MAX - 10000);
+  for (const via of ["fields", "dir"]) {
+    const { h, id } = await running(["Ann", "Bob", "Cat"]);
+    const artist = h.room.gameRow(id).st.artist;
+    const text = wrapped(ok);
+    const r = via === "fields" ? await h.room.gameMove(id, artist, undefined, R, moveFields({ image: text })) : await h.room.gameMove(id, artist, JSON.stringify({ image: text }), R);
+    assert.equal(r.status, 200, via + ": " + r.error);
+    const stored = h.objects.get(h.room.gameRow(id).st.images[1].key);
+    assert.equal(Buffer.compare(Buffer.from(stored), ok), 0, via + ": the drawing is stored whole");
+  }
+  for (const n of [SG_IMAGE_MAX + 1, SG_IMAGE_MAX + 60000]) {
+    const { h, id } = await running(["Ann", "Bob", "Cat"]);
+    const artist = h.room.gameRow(id).st.artist;
+    const text = wrapped(png(n));
+    const f = await h.room.gameMove(id, artist, undefined, R, moveFields({ image: text }));
+    assert.equal(f.status, 413, n + " bytes in fields: " + f.error);
+    assert.match(f.error, /up to 1500 KB/);
+    const d = await h.room.gameMove(id, artist, JSON.stringify({ image: text }), R);
+    assert.equal(d.status, 413, n + " bytes in dir: " + d.error);
+    assert.equal(h.room.gameRow(id).st.phase, "draw", "the round waits for a drawing that fits");
+    assert.deepEqual(drawings(h), []);
+  }
+});

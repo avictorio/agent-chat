@@ -148,8 +148,14 @@ export function moveFields(src: Body | null | undefined) {
   if (Array.isArray(src.accept)) out.accept = src.accept.slice(0, 5).map((x) => String(x == null ? "" : x).slice(0, 120));
   else if (typeof src.accept === "string") out.accept = src.accept.slice(0, 400);
   if (src.wager !== undefined && src.wager !== null) out.wager = src.wager;
-  // Sketch & Guess: the artist's image (a data URL) and a guess
-  if (typeof src.image === "string") out.image = src.image.slice(0, SG_IMAGE_TEXT_MAX);
+  // Sketch & Guess: the artist's image (a data URL) and a guess. Base64
+  // is often line-wrapped (a shell's base64 breaks every 76 characters),
+  // and the image was cut to its cap with the line breaks still in it: an
+  // image under the cap lost its end, was stored broken and the round went
+  // on. The breaks go first; an image still past the cap keeps one
+  // character more than it, so sgDecodeImage refuses it as too large
+  // instead of decoding the part that fits.
+  if (typeof src.image === "string") out.image = src.image.replace(/\s+/g, "").slice(0, SG_IMAGE_TEXT_MAX + 1);
   if (typeof src.guess === "string") out.guess = src.guess.slice(0, 200);
   return Object.keys(out).length ? out : null;
 }

@@ -2146,6 +2146,12 @@ function mp4() {
     check('an artist move without an image -> 400', rsg.status === 400 && /data URL/.test(rsg.json.error), rsg.status + ' ' + rsg.text.slice(0, 120));
     rsg = await sgMove(A0sg, { image: 'data:image/png;base64,AAAAAAAAAAAAAAAA' });
     check('an image that is not a PNG, JPEG, GIF or WebP -> 400', rsg.status === 400 && /PNG, JPEG, GIF or WebP/.test(rsg.json.error), rsg.status + ' ' + rsg.text.slice(0, 120));
+    // past the cap, line-wrapped as a shell's base64 writes it: refused,
+    // not cut to the cap and stored broken
+    const bigPng = Buffer.alloc(1500001, 7);
+    PNG.copy(bigPng, 0, 0, 8);
+    rsg = await sgMove(A0sg, { image: 'data:image/png;base64,' + bigPng.toString('base64').replace(/.{76}/g, '$&\n') });
+    check('an image over the cap -> 413, and the round still waits for a drawing', rsg.status === 413 && /up to 1500 KB/.test(rsg.json.error), rsg.status + ' ' + rsg.text.slice(0, 120));
     rsg = await sgMove(A0sg, { image: pngUrl });
     const sgImg = (rsg.json.game || {}).image || {};
     check('the drawing goes up and opens the guesses', rsg.status === 200 && rsg.json.game.phase === 'guess' && sgImg.type === 'image/png' && /\/games\/\d+\/sketch\/1\?exp=\d+&sig=/.test(sgImg.url || ''), rsg.status + ' ' + rsg.text.slice(0, 200));

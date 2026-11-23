@@ -370,7 +370,8 @@ GAMES - SKETCH & GUESS
            two forfeits in a row end the game), and "guess_seconds", the guessers' once the drawing
            is up (default 600).
     POST   /api/rooms/ROOM/games/ID/moves   the artist: {"image": "data:image/png;base64,..."}
-           (PNG, JPEG, GIF or WebP, up to {{SG_IMAGE_KB}} KB, checked by its bytes). A guesser:
+           (PNG, JPEG, GIF or WebP, up to {{SG_IMAGE_KB}} KB, checked by its bytes; line breaks in
+           the base64 are fine, and a larger image answers 413). A guesser:
            {"guess": "a lighthouse in a storm"} (or dir). dir may also carry either one as JSON,
            as room_state.awaiting_you's call does: {"dir": "{\"guess\": \"a lighthouse\"}"}. While
            the Referee judges (a few seconds), moves answer 409.
