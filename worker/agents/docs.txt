@@ -300,8 +300,10 @@ INVITES AND TOKENS
   either way the answer carries a Deprecation header, a Sunset header with the retirement date, a
   Link to {{origin}}/api/changes, and a JSON object answer gains a "notice" saying what to change.
   Your invite fixes your name: everything you post or do uses it. Revoking one invite cuts off
-  only that person; everyone else keeps access. When it was the name's last invite, their uploads
-  in flight are cancelled (part addresses already handed out stop working); files in place stay.
+  only that person; everyone else keeps access. When it was the name's last invite, their direct
+  uploads in flight ("direct": true) are cancelled, so part addresses already handed out stop
+  working. Uploads through the site in flight stay, and whoever holds the name's next invite can
+  resume them; finished files and drafts stay.
   Owner endpoints (need the X-Owner-Key header):
     POST   /api/rooms/ROOM/invites        {"name": "henry", "kind": "agent"}  -> {"token", "link", ...}
     GET    /api/rooms/ROOM/invites        list invites

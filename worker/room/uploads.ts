@@ -45,6 +45,8 @@ import { hiddenDraft } from "./media.js";
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
 export type UpSession = Pick<MdRow, "type" | "r2key" | "size" | "upload_id" | "fp" | "part_size" | "name" | "began" | "mode">;
+/** A direct upload in flight, as a removal found it (directUploadsOf). */
+export type DirectSession = { msg: number, kind: string, upload_id: string };
 /** A resumable upload asked for with a ticket (mintUploadTicket's
  *  session): the file's size, type and name, and whether its parts go
  *  straight to storage, all as the request sent them. */
@@ -80,33 +82,40 @@ export const UploadMethods = {
     }
   },
 
-  // The uploads in flight of members who are out (revoke, revokeAll) end:
-  // the session's rows go and storage aborts the upload, which is what
-  // stops a direct upload's part addresses - they are presigned for
-  // UP_SIGN_TTL and cannot be recalled one by one, and they went on
-  // taking parts for an hour after the removal, for a session a name
-  // invited again could resume and publish. A start already in its turn
-  // writes its session as the turn ends, so the turns in progress are
-  // waited out first; that can take as long as a finish, so the removal
-  // runs this after its answer (waitUntil) rather than holding it. A file
-  // already in place stays.
-  async abortUploadsOf(names: string[]) {
-    const gen = this.gen;
+  // The direct uploads in flight of members who are out (revoke,
+  // revokeAll), as the removal finds them: taken in the removal's own
+  // call, so a session the name's next holder starts afterwards is never
+  // among them. Only direct sessions: their part addresses are presigned
+  // for UP_SIGN_TTL and nothing but aborting the upload recalls them. A
+  // session through the site is shut to the removed holder already (its
+  // link went with dropUploadLinks, every step checks the invite), and
+  // cancelling it threw away the next holder's partly sent file on a
+  // plain link rotation.
+  directUploadsOf(names: string[]): DirectSession[] {
     const folds = new Set(names.map((n) => nameFold(n)));
-    const ours = (sender: string) => folds.has(nameFold(sender));
-    await Promise.all(Array.from(this.mediaLocks.values()));
-    // deleted meanwhile: its destroy aborted every upload
-    if (!this.alive(gen)) return;
-    const rows = this.sql.exec<{ msg: number, kind: string, sender: string }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL").toArray().filter((r) => ours(r.sender));
-    for (const r of rows) {
+    return this.sql.exec<DirectSession & { sender: string }>("SELECT md.msg AS msg, md.kind AS kind, md.upload_id AS upload_id, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.mode = 'direct'").toArray()
+      .filter((r) => folds.has(nameFold(r.sender))).map((r) => ({ msg: r.msg, kind: r.kind, upload_id: r.upload_id }));
+  },
+
+  // Those sessions end, each in its message and kind's turn and only
+  // while the row still holds the same upload: the rows go and storage
+  // aborts the upload, which is what makes R2 refuse the addresses. Run
+  // after the removal's answer (waitUntil), since a turn can be a long
+  // finish. This used to pick the sessions only now, by name, and so
+  // cancelled the upload of whoever held the name's new invite. A file
+  // already in place stays.
+  async abortUploads(sessions: DirectSession[]) {
+    const gen = this.gen;
+    for (const r of sessions) {
+      // deleted meanwhile: its destroy aborted every upload
+      if (!this.alive(gen)) return;
       try {
         await this.withMediaLock(r.msg, r.kind, async (live) => {
           const row = this.upSession(r.msg, r.kind);
-          if (!row || !row.upload_id) return;
-          const uploadId = row.upload_id;
-          if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ } }
+          if (!row || row.upload_id !== r.upload_id) return;
+          if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, r.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
           if (!live()) return;
-          this.upDrop(r.msg, r.kind, uploadId);
+          this.upDrop(r.msg, r.kind, r.upload_id);
         });
       } catch (e) {
         // the room was deleted meanwhile: its destroy aborts what is left

@@ -524,14 +524,16 @@ test("a message deleted during a finish leaves no object behind", async () => {
   assert.equal(h.all("SELECT msg FROM md").length, 0);
 });
 
-// A removed member's uploads in flight end with the removal: storage
-// aborts each one, so a part address already handed out (a direct
-// upload's are good for an hour) is refused, and nothing is left for a
-// name invited again to resume. Files already in place stay.
-test("a revoke aborts the member's uploads in flight and keeps their finished files", async () => {
+// A removed member's direct uploads in flight end with the removal:
+// storage aborts each one, so a part address already handed out (good
+// for UP_SIGN_TTL) is refused. Only those the removal found: a session
+// through the site is already shut to them, and one the name's next
+// holder starts after a re-invite (the only way to rotate a leaked link)
+// is that holder's own. Files already in place stay.
+test("a revoke aborts the member's direct uploads in flight and keeps their finished files", async () => {
   const h = makeRoom();
   const id = await draft(h);
-  const up = await imageSession(h, id, 100);
+  const up = await directSession(h, id, 100);
   const done = (await h.room.post("Ada", "a finished picture", R, false, null, null, null, true, false)).id;
   await imageSession(h, done, 100);
   assert.equal((await h.room.uploadFinish(done, "image", "Ada", false, R, null)).status, 200);
@@ -540,6 +542,7 @@ test("a revoke aborts the member's uploads in flight and keeps their finished fi
   const bobDraft = (await h.room.post("Bob", "Bob's", R, false, null, null, null, true, false)).id;
   const bs = await h.room.uploadStart(bobDraft, "image", "Bob", false, R, 100, "image/png", "b.png", "fp-b", false);
   assert.equal(bs.status, 200);
+  h.db.prepare("UPDATE md SET mode = 'direct' WHERE msg = ?").run(bobDraft);
   const bobUp = row(h, bobDraft, "image").upload_id;
 
   assert.equal(h.room.revoke("tok-Ada"), true);
@@ -553,26 +556,67 @@ test("a revoke aborts the member's uploads in flight and keeps their finished fi
   assert.ok(h.multipart.has(bobUp), "another member's upload goes on");
 });
 
-test("a revoke during an upload start aborts the session that start writes", async () => {
-  const st = holder();
-  const h = makeRoom({ after: st.hook });
-  const id = await draft(h);
-  const c = st.hold("create");
-  const s = h.room.uploadStart(id, "image", "Ada", false, R, 100, "image/png", "pic.png", "fp-1", false);
-  await c.reached;
-  assert.equal(h.room.revoke("tok-Ada"), true);
-  await tick();
-  c.release();
-  await s;
-  await h.settled();
-  assert.equal(h.multipart.size, 0, "no upload left in storage");
-  assert.equal(h.all("SELECT msg FROM md WHERE msg = ?", id).length, 0);
-});
-
-test("revoke everyone aborts every member's uploads in flight", async () => {
+test("a revoke leaves an upload through the site in flight, for the name's next invite to resume", async () => {
   const h = makeRoom();
   const id = await draft(h);
   const up = await imageSession(h, id, 100);
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  h.room.invite("Ada", "human", null);
+  await h.settled();
+  assert.ok(h.multipart.has(up), "storage still has the upload and its parts");
+  assert.equal(row(h, id, "image").upload_id, up);
+  const r = await h.room.uploadStart(id, "image", "Ada", false, R, 100, "image/png", "pic.png", "fp-100", false);
+  assert.equal(r.status, 200, r.error);
+  assert.equal(r.resumed, true, "the new holder picks it up where it was");
+});
+
+test("a revoke's cancel, run after another member's media turn, leaves an upload the re-invited name started since", async () => {
+  const st = holder();
+  const h = makeRoom({ before: st.hook });
+  const id = await draft(h);
+  const old = await directSession(h, id, 100);
+  h.member("Bob");
+  const bobDraft = (await h.room.post("Bob", "b", R, false, null, null, null, true, false)).id;
+  // Bob's start holds its media turn open in storage
+  const c = st.hold("create");
+  const bs = h.room.uploadStart(bobDraft, "image", "Bob", false, R, 100, "image/png", "b.png", "fp-b", false);
+  await c.reached;
+  // the owner rotates Ada's link: revoke, then invite the name again
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  assert.ok(h.room.invite("Ada", "human", null).token);
+  // the new holder starts a direct upload on another draft at once
+  const fresh = (await h.room.post("Ada", "new", R, false, null, null, null, true, false)).id;
+  await directSession(h, fresh, 100);
+  const freshUp = row(h, fresh, "image").upload_id;
+  c.release();
+  await bs;
+  await h.settled();
+  assert.equal(h.multipart.has(old), false, "the session from before the revoke is cancelled");
+  assert.ok(h.multipart.has(freshUp), "the one started after the re-invite goes on");
+  assert.equal(row(h, fresh, "image").upload_id, freshUp);
+});
+
+test("a revoke's cancel leaves a session that replaced the one it found", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const old = await directSession(h, id, 100);
+  const found = h.room.directUploadsOf(["ada"]);
+  assert.deepEqual(found.map((r) => r.upload_id), [old]);
+  // before the cancel runs, the session is replaced (another file for the same message and kind)
+  const s = await h.room.uploadStart(id, "image", "Ada", false, R, 50, "image/png", "other.png", "fp-50", false);
+  assert.equal(s.status, 200, s.error);
+  const up = row(h, id, "image").upload_id;
+  h.db.prepare("UPDATE md SET mode = 'direct' WHERE msg = ?").run(id);
+  await h.room.abortUploads(found);
+  assert.notEqual(up, old);
+  assert.ok(h.multipart.has(up), "not the upload the revoke found");
+  assert.equal(row(h, id, "image").upload_id, up);
+});
+
+test("revoke everyone aborts every member's direct uploads in flight", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const up = await directSession(h, id, 100);
   await h.room.revokeAll();
   await h.settled();
   assert.equal(h.multipart.has(up), false);

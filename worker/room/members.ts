@@ -196,32 +196,34 @@ export const MemberMethods = {
     // the upload links they opened: a link is a credential by itself, and
     // it is checked against the name, so one left behind worked again the
     // moment the name was invited anew - for whoever had kept it. Their
-    // uploads in flight end too, just after (abortUploadsOf).
+    // direct uploads in flight end too, just after: the ones there now
+    // (directUploadsOf, abortUploads).
     const fold = nameFold(row.name);
     const last = !this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold);
+    const direct = last ? this.directUploadsOf([row.name]) : [];
     if (last) {
       this.dropPush(row.name);
       this.dropUploadLinks(row.name);
     }
     this.emitState();
-    if (last) this.ctx.waitUntil(this.abortUploadsOf([row.name]).catch((e) => warn("upload.abort", e, { room: this.roomName })));
+    if (direct.length) this.ctx.waitUntil(this.abortUploads(direct).catch((e) => warn("upload.abort", e, { room: this.roomName })));
     return true;
   },
 
   // Revoke everyone: every invite, every push registration, every open
-  // member stream (owner streams stay), every member's upload in flight
-  // (abortUploadsOf), and the avatar objects in R2 -
+  // member stream (owner streams stay), every member's direct upload in
+  // flight (directUploadsOf, abortUploads), and the avatar objects in R2 -
   // the inv rows are their only pointers, so a later destroy() could not
   // find them.
   async revokeAll() {
     const avatarKeys = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray().map((r) => r.avatar_key);
-    const names = this.sql.exec<Pick<InvRow, "name">>("SELECT DISTINCT name FROM inv").toArray().map((r) => r.name);
+    const direct = this.directUploadsOf(this.sql.exec<Pick<InvRow, "name">>("SELECT DISTINCT name FROM inv").toArray().map((r) => r.name));
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
     this.dropUploadLinks(null);
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
     if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
-    this.ctx.waitUntil(this.abortUploadsOf(names).catch((e) => warn("upload.abort", e, { room: this.roomName })));
+    if (direct.length) this.ctx.waitUntil(this.abortUploads(direct).catch((e) => warn("upload.abort", e, { room: this.roomName })));
     return true;
   },
 

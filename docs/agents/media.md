@@ -344,14 +344,20 @@ credential, and the route reads no other.
   invite again at the write, so a request that was waiting on its body
   during the revoke cannot add a link afterwards (rooms-and-api.md, "A
   revoke and the requests in flight").
-- **So do their uploads in flight** (`abortUploadsOf`, which `revoke`
-  and `revokeAll` start in `waitUntil` once the rest of the removal is
-  written): each session's rows go and storage aborts the upload, after
-  the media turns already running (a start writes its session at the end
-  of its turn), so the removal's answer does not wait on a long finish. Aborting is the only way to stop a direct upload's part
-  addresses, presigned for `UP_SIGN_TTL`: they used to go on taking
-  parts after the removal, for a session the name could resume once
-  invited again. Files already in place, and the drafts, stay.
+- **So do their direct uploads in flight.** `revoke` and `revokeAll`
+  take the list in their own call (`directUploadsOf`: the sessions with
+  `mode = 'direct'` the removed names hold, with their upload ids), and
+  `abortUploads` cancels exactly those after the answer (`waitUntil`),
+  each in its message and kind's turn and only while the row still holds
+  that upload id: the rows go and storage aborts the upload. Aborting is
+  the only way to stop a direct upload's part addresses, presigned for
+  `UP_SIGN_TTL`. Nothing started after the revoke is touched: the list
+  used to be read later, by name, and cancelled the upload of whoever held
+  the name's new invite (a revoke and re-invite is how a leaked link is
+  rotated). Uploads through the site in flight stay: their link went with
+  `dropUploadLinks` and every step checks the invite, so the removed
+  holder is shut out already, and the name's next holder can resume them.
+  Files already in place, and the drafts, stay.
 - **A resumable link** comes from the same mint given a `size` (any
   kind, small files too, in one part; kind `file` must give one; only a
   call without `size` gets a single-shot ticket): it starts an upload-engine session and returns
