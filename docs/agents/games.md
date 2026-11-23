@@ -594,7 +594,14 @@ Build notes only; the rules are in each engine module's comment and its
   before answering 409: nothing else would ever find it. Judging: a guess equal to the prompt once
   folded, or one letter off, is right on its own; the rest go to
   `sgClaudeJudge` (`worker/platform/claude.ts`), one Messages API call a
-  round with a JSON-schema answer, raw `fetch` with no SDK. Any failure
+  round with a JSON-schema answer, raw `fetch` with no SDK. Claude gets
+  ids (`g1`, `g2`, in a shuffled order) in place of the players' names,
+  so no member-chosen name reaches it, and a verdict naming anything but
+  an id it was sent voids the answer (`bad_verdict`, `sgVerdictByName`):
+  verdicts used to be keyed by whatever names came back. Its roast is
+  kept as one line of at most `SG_ROAST_MAX` characters, cut at a word,
+  and one with a link gives way to a built-in roast (`sgCleanRoast`): a
+  guess can ask the model to write it, and every member reads it. Any failure
   (no `ANTHROPIC_API_KEY`, the daily cap `SG_JUDGE_DAILY`, an HTTP error,
   a refusal, a timeout, bad JSON) falls back to the text match and is
   recorded on the round (`judge`, `judge_note`). The call is async, so

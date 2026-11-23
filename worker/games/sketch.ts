@@ -108,6 +108,43 @@ export function sgDecodeImage(raw: unknown): { bytes: Uint8Array, type: string, 
   return { bytes: bytes, type: type };
 }
 
+// The Referee's answer keyed by seat name again. Claude is sent opaque ids
+// (g1, g2, ... in a shuffled order) in place of the players' names, so no
+// name a member chose reaches it, and a guess cannot tell it which seat to
+// favour by name. Its verdicts used to be keyed by whatever names came
+// back and were taken unchecked; a verdict naming anything but an id this
+// round sent now voids the whole answer, and the text match decides.
+/** @param ids the ids sent, to the seats' names */
+export function sgVerdictByName(verdict: SgVerdict, ids: Record<string, string>): SgVerdict {
+  if (verdict.error !== undefined) return verdict;
+  const right: Record<string, boolean> = {};
+  for (const id of Object.keys(verdict.right)) {
+    if (!Object.prototype.hasOwnProperty.call(ids, id)) return { error: "bad_verdict" };
+    right[ids[id]] = true;
+  }
+  return { right: right, roast: verdict.roast, model: verdict.model };
+}
+// The longest roast from Claude the round shows: about the 20 words it is
+// asked for, which fits the panel's line and the arena's title.
+export const SG_ROAST_MAX = 140;
+// Claude's roast, as the round shows it: one line of plain text, cut at a
+// word to SG_ROAST_MAX. It is shown to every member and read by agents as
+// the Referee's line, and a guess could ask Claude to write it: one with a
+// link in it, or nothing left once cleaned, gives way to a built-in roast
+// (null).
+export function sgCleanRoast(raw: unknown): string | null {
+  // control and bidi characters, then every run of whitespace (a newline too) as one space
+  // oxlint-disable-next-line no-control-regex -- matching control characters is the point
+  let s = String(raw == null ? "" : raw).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
+  if (!s || /:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|io|ai|co|ly|gg|xyz|cloud|app|dev)\b/i.test(s)) return null;
+  if (s.length > SG_ROAST_MAX) {
+    const cut = s.slice(0, SG_ROAST_MAX - 3);
+    const sp = cut.lastIndexOf(" ");
+    s = (sp > SG_ROAST_MAX / 2 ? cut.slice(0, sp) : cut).replace(/[\s,;:.-]+$/, "") + "...";
+  }
+  return s;
+}
+
 export const SketchMethods = {
   /* ---------- games: Sketch & Guess ----------
      Player rules: rules() below. Prompts come from the deck
@@ -360,17 +397,26 @@ export const SketchMethods = {
       const n = st0.round;
       const auto = this.sgAuto(st0);
       const names = Object.keys(st0.guesses);
-      const pending = names.filter((x) => !auto[x]).map((x) => ({ name: x, guess: st0.guesses[x].guess }));
+      const pending = names.filter((x) => !auto[x]);
+      // shuffled, so an id says nothing about who guessed first
+      for (let i = pending.length - 1; i > 0; i--) {
+        const j = randInt(i + 1);
+        [pending[i], pending[j]] = [pending[j], pending[i]];
+      }
+      /** the ids Claude is sent, to the seats' names (sgVerdictByName) */
+      const ids: Record<string, string> = {};
+      pending.forEach((x, i) => { ids["g" + (i + 1)] = x; });
       const anyRight = names.some((x) => auto[x]);
-      let verdict: Awaited<ReturnType<typeof sgClaudeJudge>> | null = null;
+      let verdict: SgVerdict | null = null;
       if (pending.length) {
         // while Claude thinks, the clock sits past the judge's own timeout,
         // so the alarm does not fire again and again meanwhile
         st0.deadline = Date.now() + 45000;
         this.saveGame(g0);
+        // the test hook's verdict names seats; Claude's names the ids
         const hook = this.sgTestJudge();
         if (hook) verdict = hook;
-        else if (this.sgJudgeBudget()) verdict = await sgClaudeJudge(this.env, (st0.cur as SgCur).prompt, pending, !anyRight); // judging: the drawing is up
+        else if (this.sgJudgeBudget()) verdict = sgVerdictByName(await sgClaudeJudge(this.env, (st0.cur as SgCur).prompt, Object.keys(ids).map((id) => ({ name: id, guess: st0.guesses[ids[id]].guess })), !anyRight), ids); // judging: the drawing is up
         else verdict = { error: "daily_cap" };
       }
       // the round may have moved on while the Referee thought, or the room
@@ -450,7 +496,7 @@ export const SketchMethods = {
       }
     }
     rec.points[st.artist] = Math.min(2, rec.right.length);
-    if (!rec.right.length) rec.roast = (ok && verdict.roast) || SG_ROASTS[st.round % SG_ROASTS.length].replace(/\{p\}/g, st.cur.prompt).replace(/\{a\}/g, st.artist);
+    if (!rec.right.length) rec.roast = (ok && sgCleanRoast(verdict.roast)) || SG_ROASTS[st.round % SG_ROASTS.length].replace(/\{p\}/g, st.cur.prompt).replace(/\{a\}/g, st.artist);
     st.rounds.push(rec);
     st.log.push({ tick: st.round, text: "Round " + st.round + ": it was " + st.cur.prompt + ". " + (rec.right.length ? rec.right.join(", ") + " got it" : "Nobody got it") + "; " + st.artist + " +" + rec.points[st.artist] + "." });
     st.forfeits = 0;

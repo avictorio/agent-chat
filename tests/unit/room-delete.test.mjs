@@ -218,7 +218,8 @@ test("a Sketch & Guess judge in flight across a delete and re-create neither sco
   const asked = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => new Promise((resolve) => { asked.push({ resolve, guesses: JSON.parse(JSON.parse(init.body).messages[0].content).guesses }); });
-  const answer = (call, right) => call.resolve({ ok: true, json: async () => ({ stop_reason: "end_turn", model: "stub", content: [{ type: "text", text: JSON.stringify({ verdicts: Object.keys(right).map((n) => ({ name: n, right: right[n] })), roast: "" }) }] }) });
+  // a verdict for every guess the call was sent (by the ids it carries)
+  const answer = (call, right) => call.resolve({ ok: true, json: async () => ({ stop_reason: "end_turn", model: "stub", content: [{ type: "text", text: JSON.stringify({ verdicts: call.guesses.map((x) => ({ name: x.name, right })), roast: "" }) }] }) });
   try {
     const h = makeRoom({ env: { ANTHROPIC_API_KEY: "stub" } });
     const players = ["Ann", "Bob", "Cy"];
@@ -245,10 +246,10 @@ test("a Sketch & Guess judge in flight across a delete and re-create neither sco
     assert.equal(neu.id, old.id, "the new match has the old one's id");
     await tick();
     assert.equal(asked.length, 2, "the new round's judge starts");
-    answer(asked[0], { [old.g1]: true, [old.g2]: true });
+    answer(asked[0], true);
     await assert.rejects(old.last, (e) => isGoneError(e), "the old move stops");
     assert.equal(h.room.gameRow(neu.id).st.phase, "judging", "the old verdict did not score the new round");
-    answer(asked[1], { [neu.g1]: false, [neu.g2]: false });
+    answer(asked[1], false);
     const r = await neu.last;
     assert.equal(r.status, 200);
     const round = h.room.gameRow(neu.id).st.rounds[0];

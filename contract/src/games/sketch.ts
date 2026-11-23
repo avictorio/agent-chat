@@ -47,7 +47,7 @@ export interface SketchRound {
   points: Record<string, number>;
   /** referee: Claude judged the close calls; match: the text match alone; null on a forfeit. */
   judge: "referee" | "match" | null;
-  /** Why Claude did not judge (daily_cap, stalled, an API error), else null. */
+  /** Why Claude did not judge (daily_cap, stalled, an API error, bad_verdict: an answer naming a guess it was not sent), else null. */
   judge_note: string | null;
   /** When nobody got it: Claude's roast, or a stock one; else null. */
   roast: string | null;
