@@ -279,6 +279,33 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
     out.writes = calls.filter(c => !c.startsWith('GET')).map(c => c.split(' ').slice(0, 2).join(' '));
     return out;
   });
+  // An open edit form holds the board: someone else resolves the question
+  // being answered, the reload is held, and a later unrelated room_state
+  // change must not let it through. Each such change rebuilt the board api,
+  // which ran the hold's cleanup, and the form vanished with its text.
+  await run('board-edit-held', {}, async (page, S, calls) => {
+    S.streamRetry = 150;
+    await page.reload(); await settle(page);
+    await page.click('.tab[data-tab="questions"]'); await settle(page);
+    const card = '#qList .card:has-text("Who books the dinner")';
+    await page.click(card + ' button:has-text("Resolve")'); await settle(page);
+    await page.fill(card + ' textarea', 'Half-written answer');
+    const from = calls.length;
+    const q = S.q.shift(); q.status = 'resolved'; q.resolved_by = 'Henry'; q.resolution = 'Henry booked it.'; S.qr.unshift(q);
+    // the board part of room_state moved: the reload runs and is held
+    for (let i = 0; i < 100 && !calls.slice(from).some((c) => /^GET .*\/questions/.test(c)); i++) await new Promise((r) => setTimeout(r, 50));
+    must(calls.slice(from).some((c) => /^GET .*\/questions/.test(c)), 'the board reloaded after the room_state change');
+    await settle(page);
+    // then room_state changes again (any change rebuilt the api)
+    S.con.version += 1;
+    const seen = calls.length;
+    for (let i = 0; i < 100 && calls.slice(seen).filter((c) => /\/stream/.test(c)).length < 2; i++) await new Promise((r) => setTimeout(r, 50));
+    await settle(page);
+    const typed = await page.$eval('#qList form.edit textarea', (t) => t.value).catch(() => null);
+    must(typed === 'Half-written answer', 'the open form and its text survive: ' + typed);
+    S.streamRetry = 0;
+    return { typed };
+  });
   await run('reactions', {}, async (page, S, calls) => {
     const out = {};
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));

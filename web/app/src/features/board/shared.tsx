@@ -223,13 +223,18 @@ export function EditForm({
 // A card that can swap its content for an edit form; while any card is
 // editing, the board behind it does not re-render (loadAll defers).
 export function useEditing() {
-  const api = useBoardApi();
+  // Only the stable editingDelta, never the whole api: the api object is
+  // rebuilt on every room_state change (a game tick, a reaction), and
+  // each rebuild ran this cleanup, dropped the count to zero and let the
+  // held board through, so a card resolved or deleted by someone else
+  // vanished from under its open form with the typed text.
+  const { editingDelta } = useBoardApi();
   const [edit, setEdit] = useState<EditState | null>(null);
   useEffect(() => {
     if (!edit) return;
-    api.editingDelta(1);
-    return () => api.editingDelta(-1);
-  }, [edit, api]);
+    editingDelta(1);
+    return () => editingDelta(-1);
+  }, [edit, editingDelta]);
   return { edit, setEdit, close: () => setEdit(null) };
 }
 
