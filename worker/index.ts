@@ -268,6 +268,9 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/?$/);
     if (m) { const r = await messagesRoute(rc, m); if (r !== undefined) return r; }
 
-    return new Response("Not found", { status: 404 });
+    // no-store: this is also the answer for a hashed /assets/* file the
+    // serving build lacks (wrangler.toml), and a cached 404 would outlive
+    // the deploy that brings the file back.
+    return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 }

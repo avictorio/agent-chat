@@ -2857,6 +2857,14 @@ function mp4() {
     check('bundle cached for a year, immutable', !!ar && /max-age=31536000/.test(ar.headers.get('cache-control') || '') && /immutable/.test(ar.headers.get('cache-control') || ''), ar && ar.headers.get('cache-control'));
     const miss = await fetch(BASE + '/assets/no-such-file-' + SUF + '.js');
     check('an unknown asset is a 404', miss.status === 404, miss.status);
+    // ...that no browser keeps: a chunk missing during a deploy or a
+    // rollback must load once the file is back under its name.
+    const missCc = miss.headers.get('cache-control') || '';
+    check('an unknown asset\'s 404 is not cached', /no-store/.test(missCc) && !/immutable|max-age/.test(missCc), missCc);
+    const iconMiss = await fetch(BASE + '/icons/no-such-icon-' + SUF + '.png');
+    check('an unknown icon\'s 404 is not cached', iconMiss.status === 404 && /no-store/.test(iconMiss.headers.get('cache-control') || ''), iconMiss.status + ' ' + iconMiss.headers.get('cache-control'));
+    const rawIndex = await fetch(BASE + '/index.html');
+    check('the raw, unstamped index.html is not served', !(await rawIndex.text()).includes('next-dev'), rawIndex.status);
     // The app icons (static files): the manifest's three
     // and the apple-touch-icon, PNGs with a day's cache.
     for (const ic of ['icon-192', 'icon-512', 'icon-512-maskable', 'icon-180']) {

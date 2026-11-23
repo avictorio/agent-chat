@@ -11,8 +11,9 @@ import type { RouteContext } from "../index.js";
 // web/app/public/icons/, served by the asset server (wrangler.toml).
 
 // The web app is served as Workers Static Assets (web/app/dist, uploaded
-// with each deploy): Cloudflare answers /assets/* itself, and the Worker
-// runs first for everything else (wrangler.toml run_worker_first).
+// with each deploy): Cloudflare answers the files that exist under
+// /assets/* and /icons/* itself, and the Worker runs first on its own
+// paths and answers every miss (wrangler.toml run_worker_first).
 //
 // The page shell is the build's index.html, read once per isolate through
 // the ASSETS binding. Its build id is a short hash of that file: the index
