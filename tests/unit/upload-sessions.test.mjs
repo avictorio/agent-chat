@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
-import { MIB, STREAM_PART, UP_PART_MAX } from "../../worker/limits.ts";
+import { MIB, STREAM_PART, UP_PART_MAX, UP_SESSION_MS } from "../../worker/limits.ts";
 
 const R = "unit";
 const PNG_HEAD = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
@@ -621,4 +621,287 @@ test("revoke everyone aborts every member's direct uploads in flight", async () 
   await h.settled();
   assert.equal(h.multipart.has(up), false);
   assert.equal(h.all("SELECT msg FROM md").length, 0);
+});
+
+/** a file session of len bytes (fingerprint fp) with every part in; answers its upload id */
+async function fileSession(h, id, len, fp) {
+  const s = await h.room.uploadStart(id, "file", "Ada", false, R, len, "application/pdf", "report.pdf", fp, false);
+  assert.equal(s.status, 200, s.error);
+  const up = h.one("SELECT upload_id FROM md WHERE msg = ? AND kind = 'file'", id).upload_id;
+  h.multipart.get(up).data = bytes([0x25, 0x50, 0x44, 0x46], len);
+  for (let n = 1; n <= s.parts; n++) assert.equal(h.room.uploadPartDone(id, "file", up, n, "e" + n).status, 200);
+  return up;
+}
+
+// A photo and a file sent together: the photo finished, the file did not.
+// The person removes the photo and sends the file alone. The lookup used
+// to hand back the first draft, and its publish posted the photo too.
+test("the resume lookup does not hand back a draft that holds another kind as well", async () => {
+  const h = makeRoom();
+  const both = await draft(h);
+  await imageSession(h, both, 100);
+  assert.equal((await h.room.uploadFinish(both, "image", "Ada", false, R, null)).status, 200);
+  await fileSession(h, both, 300, "fp-file");
+  const r = await h.room.findResumableUpload("Ada", 300, "fp-file", false, null);
+  assert.equal(r.found, false, "the draft also carries a photo: a resend of the file alone starts afresh");
+  assert.equal((await h.room.findResumableUpload("Ada", 300, "fp-file", false, "file")).found, false, "narrowed to the kind too");
+  const alone = (await h.room.post("Ada", "only the file", R, false, null, null, null, true, false)).id;
+  await fileSession(h, alone, 300, "fp-file");
+  const r2 = await h.room.findResumableUpload("Ada", 300, "fp-file", false, null);
+  assert.equal(r2.found, true, "a draft holding only that file is still found");
+  assert.equal(r2.id, alone);
+});
+
+test("a publish waits for every upload of the draft: 409 while one is in flight", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  await imageSession(h, id, 100);
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).status, 200);
+  const up = await fileSession(h, id, 300, "fp-file");
+  const p = await h.room.publishMessage(id, "Ada", false, R, undefined);
+  assert.equal(p.status, 409, "the file is still on its way");
+  assert.deepEqual(p.uploading, ["file"]);
+  assert.match(p.error, /finish it, or abort it/);
+  assert.ok(h.one("SELECT draft FROM m WHERE id = ?", id).draft, "it stays a draft");
+  assert.ok(h.multipart.has(up), "and its upload goes on");
+  assert.equal((await h.room.uploadAbort(id, "file", "Ada", false)).status, 200);
+  assert.equal((await h.room.publishMessage(id, "Ada", false, R, undefined)).status, 200, "with the upload ended it publishes");
+});
+
+test("a publish_on_complete draft goes live when its last upload finishes, not its first", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const id = (await h.room.post("Ada", "two files", R, false, null, null, null, true, true)).id;
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  const first = await h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  assert.equal(first.status, 200);
+  assert.equal(first.published, false, "the file is still in flight");
+  assert.ok(h.one("SELECT draft FROM m WHERE id = ?", id).draft);
+  const last = await h.room.uploadFinish(id, "file", "Ada", false, R, null);
+  assert.equal(last.status, 200);
+  assert.equal(last.published, true, "the last one publishes it");
+});
+
+// Upload A is replaced by upload B of the same size (another device, the
+// same draft), and A's client sends its finish while B's is running. It
+// used to join B's finish and get B's file as its own; a finish after B's
+// ended was already told apart by size and fingerprint.
+test("a finish that joins one already running is told apart by its fingerprint, as a later one is", async () => {
+  const st = holder();
+  const h = makeRoom({ before: st.hook });
+  const id = await draft(h);
+  assert.equal((await h.room.uploadStart(id, "image", "Ada", false, R, 100, "image/png", "a.png", "fp-a", false)).status, 200);
+  await imageSession(h, id, 100); // B: same size, fingerprint fp-100
+  const status = await h.room.uploadStatus(id, "image", "Ada", false);
+  assert.equal(status.fp, "fp-100", "status names the session's fingerprint, so A's client can see the upload is not its own");
+  assert.equal(status.size, 100);
+  const c = st.hold("complete");
+  const fb = h.room.uploadFinish(id, "image", "Ada", false, R, { size: 100, fp: "fp-100" });
+  await c.reached;
+  const fa = h.room.uploadFinish(id, "image", "Ada", false, R, { size: 100, fp: "fp-a" });
+  const again = h.room.uploadFinish(id, "image", "Ada", false, R, { size: 100, fp: "fp-100" });
+  await tick();
+  c.release();
+  const [rb, ra, rr] = await Promise.all([fb, fa, again]);
+  assert.equal(rb.status, 200, "B finishes");
+  assert.equal(ra.status, 409, "A is not told B's file is its own");
+  assert.deepEqual(rr, rb, "B's own repeat joins its finish");
+  const done = await h.room.uploadStatus(id, "image", "Ada", false);
+  assert.equal(done.complete, true);
+  assert.equal(done.fp, "fp-100", "the finished file still names its fingerprint");
+});
+
+// The routes put ver on the url as v=, as listings do (mediaQuery): the
+// answers used to name no version, so their url never matched a listing's.
+test("an attach and a finish answer with the stored file's version, the listing's v=", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const att = await h.room.attachImage(id, "Ada", bytes(PNG_HEAD, 50).buffer, "image/png", false, R);
+  assert.equal(att.status, 200);
+  assert.equal(att.ver, h.one("SELECT at FROM md WHERE msg = ? AND kind = 'image'", id).at);
+  const up = (await h.room.post("Ada", "uploaded", R, false, null, null, null, true, false)).id;
+  await imageSession(h, up, 100);
+  const fin = await h.room.uploadFinish(up, "image", "Ada", false, R, null);
+  const at = h.one("SELECT at FROM md WHERE msg = ? AND kind = 'image'", up).at;
+  assert.ok(at);
+  assert.equal(fin.ver, at);
+  assert.equal((await h.room.uploadFinish(up, "image", "Ada", false, R, null)).ver, at, "and a repeat after it ended answers the same one");
+  assert.ok(h.room.withKinds([{ id: up, ts: 0, from: "Ada", text: "", image_type: "image/png", image_size: 100 }])[0].image.url.endsWith("&v=" + at), "the version a listing puts on the url");
+});
+
+// A publish_on_complete draft goes live once a file of it is in place and
+// no upload of it is still live, whatever ended the last one. Only a
+// finish used to check, so a draft whose last upload was aborted (or
+// failed to land, or expired) after another file had finished stayed a
+// draft, and the sweep deleted it with that file a day later: the code
+// that published on the first finish had posted it.
+async function autoDraft(h) {
+  h.member("Ada");
+  return (await h.room.post("Ada", "two files", R, false, null, null, null, true, true)).id;
+}
+const isDraft = (h, id) => !!h.one("SELECT draft FROM m WHERE id = ?", id).draft;
+/** makes the draft (and its finished files) old enough for the sweep's day */
+const age = (h, id) => {
+  const old = Date.now() - 2 * 86400000;
+  h.db.prepare("UPDATE m SET ts = ? WHERE id = ?").run(old, id);
+  h.db.prepare("UPDATE md SET at = ? WHERE msg = ? AND at IS NOT NULL").run(old, id);
+};
+
+test("a publish_on_complete draft whose other upload is aborted goes live with the file that finished", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).published, false, "the file is still in flight");
+  const a = await h.room.uploadAbort(id, "file", "Ada", false, R);
+  assert.equal(a.status, 200);
+  assert.equal(a.aborted, true);
+  assert.equal(a.published, true, "the abort says it went live, as a finish does");
+  assert.equal(isDraft(h, id), false);
+  const m = h.room.withKinds([h.one('SELECT id, ts, sender AS "from", text, image_type, image_size, file_type, file_size, file_name FROM m WHERE id = ?', id)])[0];
+  assert.ok(m.image, "with the image");
+  assert.ok(!m.file, "and without the file");
+  age(h, id);
+  await h.sweepNow();
+  assert.ok(h.one("SELECT id FROM m WHERE id = ?", id), "a live message is not the sweep's");
+});
+
+test("a publish_on_complete draft whose every upload is aborted, nothing finished, stays a draft", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  assert.equal((await h.room.uploadAbort(id, "image", "Ada", false, R)).published, false);
+  assert.equal((await h.room.uploadAbort(id, "file", "Ada", false, R)).published, false);
+  assert.equal(isDraft(h, id), true, "its caption alone is not what it waited for");
+  age(h, id);
+  await h.sweepNow();
+  assert.equal(h.one("SELECT id FROM m WHERE id = ?", id), undefined, "and is swept as before");
+});
+
+test("a publish_on_complete draft whose other upload did not land in storage goes live", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  const up = await fileSession(h, id, 300, "fp-file");
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).published, false);
+  h.multipart.delete(up); // storage dropped the file's upload
+  const f = await h.room.uploadFinish(id, "file", "Ada", false, R, null);
+  assert.equal(f.status, 410);
+  assert.equal(isDraft(h, id), false, "the image that finished is posted");
+});
+
+test("a publish_on_complete draft whose other stream fails goes live", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  const s = await h.room.streamBegin(id, "Ada", "video/mp4", 100, false, R);
+  assert.equal(s.status, 200);
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).published, false, "the stream is still in flight");
+  await h.room.streamAbort(id, s.uploadId, R);
+  assert.equal(isDraft(h, id), false);
+});
+
+test("a publish_on_complete draft whose other direct upload a revoke cancels goes live", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await fileSession(h, id, 300, "fp-file");
+  const up = await directSession(h, id, 100);
+  h.db.prepare("UPDATE md SET mode = NULL WHERE msg = ? AND kind = 'file'").run(id);
+  assert.equal((await h.room.uploadFinish(id, "file", "Ada", false, R, null)).published, false, "the image is still in flight");
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  await h.settled();
+  assert.equal(h.multipart.has(up), false);
+  assert.equal(isDraft(h, id), false, "the file that finished is posted");
+});
+
+test("a publish_on_complete draft whose other upload expired unfinished is published by the sweep, not deleted", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).published, false);
+  const key = row(h, id, "image").r2key;
+  // the file's upload began past UP_SESSION_MS ago and nobody aborted it
+  h.db.prepare("UPDATE m SET ts = ? WHERE id = ?").run(Date.now() - UP_SESSION_MS - 86400000, id);
+  h.db.prepare("UPDATE md SET began = ? WHERE msg = ? AND kind = 'file'").run(Date.now() - UP_SESSION_MS - 1000, id);
+  h.db.prepare("UPDATE md SET at = ? WHERE msg = ? AND kind = 'image'").run(Date.now() - 2 * 86400000, id);
+  assert.deepEqual(h.room.upsLive(id), [], "the expired upload no longer counts as in flight");
+  await h.sweepNow();
+  assert.ok(h.one("SELECT id FROM m WHERE id = ?", id), "not swept");
+  assert.equal(isDraft(h, id), false, "published");
+  assert.ok(h.objects.has(key), "with its image");
+});
+
+test("the sweep publishes a publish_on_complete draft left with a finished file and no upload, rather than delete it", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).published, false);
+  // the instance stopped between ending the file's upload and publishing
+  h.db.prepare("DELETE FROM md WHERE msg = ? AND kind = 'file'").run(id);
+  age(h, id);
+  await h.sweepNow();
+  assert.equal(isDraft(h, id), false);
+  assert.ok(h.objects.has(row(h, id, "image").r2key));
+});
+
+// The sweep publishes a publish_on_complete draft only where nothing else
+// would: an upload of it expired, or a day has passed since a file the
+// upload engine finished. It used to publish any such draft holding a
+// file, so a draft posted with an inline thumbnail went live without its
+// video at the sweep inside that video's own start.
+test("a publish_on_complete draft with an inline picture stays a draft through its video's start, and goes live with both", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const id = (await h.room.post("Ada", "thumb and video", R, false, null, { data: bytes(PNG_HEAD, 100).buffer, type: "image/png" }, null, true, true)).id;
+  h.room._sweptAt = 0; // a fresh instance, or no sweep for ten minutes
+  const s = await h.room.uploadStart(id, "video", "Ada", false, R, 400, "video/mp4", "v.mp4", "fp-v", false);
+  assert.equal(s.status, 200, s.error);
+  assert.equal(isDraft(h, id), true, "the start's sweep leaves it a draft");
+  h.room._sweptAt = 0;
+  await h.room.sweepDrafts(R);
+  assert.equal(isDraft(h, id), true, "and so does any later sweep");
+  const up = h.one("SELECT upload_id FROM md WHERE msg = ? AND kind = 'video'", id).upload_id;
+  h.multipart.get(up).data = bytes(MP4_HEAD, 400);
+  for (let n = 1; n <= s.parts; n++) assert.equal(h.room.uploadPartDone(id, "video", up, n, "e" + n).status, 200);
+  const f = await h.room.uploadFinish(id, "video", "Ada", false, R, null);
+  assert.equal(f.status, 200, f.error);
+  assert.equal(f.published, true);
+  const m = h.one("SELECT draft, image_type, video_type FROM m WHERE id = ?", id);
+  assert.ok(!m.draft && m.image_type && m.video_type, "live with the picture and the video: " + JSON.stringify(m));
+});
+
+test("a day-old publish_on_complete draft whose files are only inline or attached is deleted, as before", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const inline = (await h.room.post("Ada", "inline", R, false, null, { data: bytes(PNG_HEAD, 100).buffer, type: "image/png" }, null, true, true)).id;
+  const attached = (await h.room.post("Ada", "attached", R, false, null, null, null, true, true)).id;
+  assert.equal((await h.room.attachImage(attached, "Ada", bytes(PNG_HEAD, 100).buffer, "image/png", false, R)).status, 200);
+  const keys = [row(h, inline, "image").r2key, row(h, attached, "image").r2key];
+  await h.sweepNow();
+  assert.equal(isDraft(h, inline), true, "a fresh draft is not the sweep's");
+  assert.equal(isDraft(h, attached), true);
+  age(h, inline);
+  age(h, attached);
+  await h.sweepNow();
+  assert.equal(h.one("SELECT id FROM m WHERE id IN (?, ?)", inline, attached), undefined, "both swept, not published");
+  for (const k of keys) assert.equal(h.objects.has(k), false);
+});
+
+test("a publish_on_complete draft whose engine upload finished a moment ago is left to its sender, not published by the sweep", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).published, false);
+  // the instance stopped between ending the file's upload and publishing
+  h.db.prepare("DELETE FROM md WHERE msg = ? AND kind = 'file'").run(id);
+  await h.sweepNow();
+  assert.equal(isDraft(h, id), true, "within the day it stays a draft");
+  age(h, id);
+  await h.sweepNow();
+  assert.equal(isDraft(h, id), false, "past it the sweep publishes it rather than delete it");
 });

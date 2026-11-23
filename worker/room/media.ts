@@ -5,6 +5,7 @@ import { mediaSig } from "../lib/media.js";
 import { goneError, isStoreError, storeError } from "../lib/errors.js";
 import { parseRange } from "../lib/http.js";
 import { STORE_MSG } from "../limits.js";
+import { sameName } from "../lib/text.js";
 import type { CfgRow, MdRow, MsgRow, Room } from "./Room.js";
 import type { MediaBytes } from "../lib/media.js";
 import { warn } from "../lib/log.js";
@@ -20,7 +21,7 @@ export type MediaViewer = { name?: string | null, owner?: boolean };
  *  listings skip, and when it appeared, published or went. A live message
  *  is everyone's to see, so it keeps its honest 403. */
 export function hiddenDraft(r: DraftCols, who: string | null | undefined, owner: boolean | undefined) {
-  return !!r.draft && !owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase();
+  return !!r.draft && !owner && !sameName(r.sender, who);
 }
 
 // One stored file's row for serving it. A page's name is on its message
@@ -78,6 +79,14 @@ export const MediaMethods = {
     // md.at existed has no version; any new file stamps one.
     const exp = (Math.floor(Date.now() / 3600000) + 2) * 3600;
     return "?exp=" + exp + "&sig=" + mediaSig(this.mediaSigKeyBytes(), this.roomName, id, kind, exp) + (ver ? "&v=" + ver : "");
+  },
+
+  /** md.at of one stored file: the v= of its url (null for a row from
+   *  before md.at, or none). The attach answers read it right after their
+   *  write, with no await between, so it is the version a listing gives. */
+  mediaVer(id: number, kind: string): number | null {
+    const r = this.sql.exec<Pick<MdRow, "at">>("SELECT at FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
+    return (r && r.at) || null;
   },
 
   /** md.at of these messages' stored files, by "msg:kind": one query for a whole page */
@@ -154,7 +163,7 @@ export const MediaMethods = {
   mediaShown(id: number, viewer?: MediaViewer) {
     const m = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!m) return false;
-    return !(viewer && !viewer.owner && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase());
+    return !(viewer && !viewer.owner && m.draft && !sameName(m.sender, viewer.name));
   },
 
   mediaMeta(id: number, kind: string, viewer?: MediaViewer) {
@@ -188,31 +197,31 @@ export const MediaMethods = {
   async attachAudio(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, transcript: string | null | undefined, room: string) {
     const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach audio to your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach audio to your own messages" };
     try { await this.putMedia(id, "audio", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
     else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, id);
     this.mediaLanded(id, room);
-    return { status: 200, type: type, bytes: data.byteLength };
+    return { status: 200, type: type, bytes: data.byteLength, ver: this.mediaVer(id, "audio") };
   },
 
   async attachImage(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
     const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach an image to your own messages" };
     try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
     this.mediaLanded(id, room);
-    return { status: 200, type: type, bytes: data.byteLength };
+    return { status: 200, type: type, bytes: data.byteLength, ver: this.mediaVer(id, "image") };
   },
 
   async attachVideo(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
     const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach a video to your own messages" };
     try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
     this.mediaLanded(id, room);
-    return { status: 200, type: type, bytes: data.byteLength };
+    return { status: 200, type: type, bytes: data.byteLength, ver: this.mediaVer(id, "video") };
   },
 } satisfies ThisType<Room>;

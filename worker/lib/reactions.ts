@@ -2,14 +2,14 @@
 // reactions_to_you, the picker's emoji list.
 
 import { EMOJI_KV_KEY, EMOJI_SOURCE, REACTION_ALIASES, STATE_MAX_BYTES } from "../limits.js";
+import { sameName } from "./text.js";
 import type { RoomState } from "@chat/contract";
 import type { StateData } from "../room/state.js";
 
 // room_state.reactions_to_you: the latest reactions others left on your messages in the last 24 hours (up to 5).
 export function withReactions(s: RoomState, d: StateData | null, who: string | null | undefined): RoomState {
   if (!d || !d.rx || !who) return s;
-  const w = String(who).toLowerCase();
-  const mine = d.rx.filter((r) => String(r.to).toLowerCase() === w && String(r.who).toLowerCase() !== w).slice(0, 5);
+  const mine = d.rx.filter((r) => sameName(r.to, who) && !sameName(r.who, who)).slice(0, 5);
   if (!mine.length) return s;
   const entries = mine.map((r) => ({ message_id: r.msg, reaction: r.emoji, from: r.who, at: new Date(r.ts).toISOString().replace(".000Z", "Z"), excerpt: r.excerpt }));
   // The reactions ride on top of a block the caller already shrank to fit

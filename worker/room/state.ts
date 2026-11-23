@@ -3,12 +3,13 @@
 import {
   DIGEST_CLOSE_HOUR,
   FETCH_DAILY_CAP,
+  FETCH_URL_MAX,
   STATE_MAX_BYTES,
   STATE_STAKE_DAYS,
   STATE_STEPS,
 } from "../limits.js";
 import { gameEngine } from "../games/engine.js";
-import { capped, clipText, daysBetween } from "../lib/text.js";
+import { capped, clipText, daysBetween, nameFold } from "../lib/text.js";
 import { fetchTarget } from "../platform/webfetch.js";
 import { withReactions } from "../lib/reactions.js";
 import type { CountRow, DcRow, DgRow, GmRow, InvRow, MsgRow, OqRow, Room, StreamClient } from "./Room.js";
@@ -28,8 +29,8 @@ export type StateData = {
   members: string[],
   humans: string[],
   constitution: number | null,
-  questions: Array<Pick<OqRow, "id" | "text" | "added_by" | "claimed_by">>,
-  decisions: Array<{ id: number, title: string, signed_by: string[], missing: string[] }>,
+  questions: Array<Pick<OqRow, "id" | "text" | "added_by" | "claimed_by" | "updated">>,
+  decisions: Array<{ id: number, title: string, signed_by: string[], missing: string[], updated: number }>,
   stakes: Array<{ id: number, title: string, date: string, days_away: number }>,
   digest: Pick<DgRow, "day" | "author"> | null,
   digests_today: number,
@@ -73,9 +74,9 @@ export function nextDigestClose(now: number) {
 /** @param digest the latest digest */
 export function expectedDigestAuthor(inv: Array<Pick<InvRow, "name" | "revoked" | "used" | "posted" | "kind">>, digest: { author: string } | null) {
   const rotation = inv.filter((r) => r.used && r.posted && !r.revoked && r.kind !== "human").map((r) => r.name);
-  rotation.sort((a, b) => { const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : (x > y ? 1 : 0); });
+  rotation.sort((a, b) => { const x = nameFold(a), y = nameFold(b); return x < y ? -1 : (x > y ? 1 : 0); });
   if (!rotation.length) return null;
-  const last = digest ? rotation.findIndex((n) => n.toLowerCase() === digest.author.toLowerCase()) : -1;
+  const last = digest ? rotation.findIndex((n) => nameFold(n) === nameFold(digest.author)) : -1;
   return rotation[last < 0 ? 0 : (last + 1) % rotation.length];
 }
 
@@ -87,21 +88,31 @@ export function stateCall(room: string, kind: string, body: Record<string, unkno
 /** One rendering of room_state, its lists cut to the caps given. */
 export function stateAttempt(d: StateData, who: string | null | undefined, room: string, textCap: number, nameCap: number, itemCap: number, youCap: number) {
   const s: RoomState = { v: 1 };
-  const me = String(who || "").toLowerCase();
+  // names compare by their fold (nameFold, as sameName does)
+  const me = nameFold(who);
   if (me) {
-    const lc = (list: string[]) => list.map((n) => n.toLowerCase());
+    const lc = (list: string[]) => list.map((n) => nameFold(n));
     const unsigned = d.decisions.filter((x) => (d.members.length ? lc(x.missing).indexOf(me) >= 0 : lc(x.signed_by).indexOf(me) < 0));
     // The invite's own spelling when the caller is a member.
-    const name = d.members.find((n) => n.toLowerCase() === me) || String(who);
+    const name = d.members.find((n) => nameFold(n) === me) || String(who);
     const mine: AwaitingItem[] = [];
-    // The digest comes first: it's the one item with a deadline.
-    if (d.awaiting_digest && d.awaiting_digest.toLowerCase() === me) mine.push({ type: "digest", action: "file", call: stateCall(room, "digests", { from: name, text: "<your digest of the day>" }) });
-    for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
-    for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
+    // The digest comes first: it has a deadline, and it is one item at most.
+    if (d.awaiting_digest && nameFold(d.awaiting_digest) === me) mine.push({ type: "digest", action: "file", call: stateCall(room, "digests", { from: name, text: "<your digest of the day>" }) });
+    // Game items come next, before any signature or claimed question: a
+    // turn has a clock, and the list is cut to a few items. Listed after
+    // the decisions, three unsigned ones (any member can record them)
+    // pushed every accept and move out, and a watcher catching up from
+    // awaiting_you found no turn and let the match time out.
     for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
     // the turn signature and the move placeholder come from the game's engine
     // (and the call names the turn, unless a late copy should carry to the next one: lateMoveCarries)
     for (const gm of gamesAwaiting(d, me)) { const eng = gameEngine(gm); const turn = eng.turnOf(gm); const body: Record<string, unknown> = { from: name, dir: eng.moveHint(gm, name) }; if (!(eng.lateMoveCarries && eng.lateMoveCarries(gm))) body.turn = turn; mine.push({ type: "game", id: gm.id, turn: turn, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", body) }); }
+    // A sign or resolve call names the stamp of the text it was handed for
+    // (base_updated): sent after that text was edited, or the item deleted
+    // and another put in, it is refused rather than signing what the
+    // member never read.
+    for (const x of unsigned.slice().sort((a, b) => a.id - b.id)) mine.push({ type: "decision", id: x.id, action: "sign", call: stateCall(room, "decisions/" + x.id, { from: name, action: "sign", base_updated: x.updated }) });
+    for (const q of d.questions) if (q.claimed_by && nameFold(q.claimed_by) === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>", base_updated: q.updated }) });
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });
@@ -131,14 +142,14 @@ export function stateAttempt(d: StateData, who: string | null | undefined, room:
 // skipped. Overlong links are skipped rather than clipped, since a clipped
 // link cannot be pasted into the call. A link is only named if fetchTarget
 // accepts it, so the call in awaiting_you cannot 400.
-/** @param me lowercased */
+/** @param me folded (nameFold) */
 export function findToolNudge(d: StateData | null, me: string) {
   if (!d || !d.recent || !me) return null;
   if ((d.humans || []).indexOf(me) >= 0) return null;
   if (FETCH_DAILY_CAP - (d.fetches_used || 0) <= 0) return null;
   const fetched = d.fetched || [];
   for (const m of d.recent) {
-    if (String(m.sender || "").toLowerCase() === me) continue;
+    if (nameFold(m.sender) === me) continue;
     const text = String(m.text || "");
     if (text.indexOf("Fetched ") === 0) continue;
     const hit = text.match(/https?:\/\/[^\s<>"')\]]+/);
@@ -147,7 +158,7 @@ export function findToolNudge(d: StateData | null, me: string) {
     if (url.length > 300) continue;
     const target = fetchTarget(url);
     if (!target) continue;
-    if (fetched.indexOf(target.toString().toLowerCase()) >= 0) continue;
+    if (fetched.indexOf(target.toString().toLowerCase()) >= 0) continue; // lowercase-ok: a URL, as the fetch log is read
     return { id: m.id, url: url };
   }
   return null;
@@ -155,25 +166,25 @@ export function findToolNudge(d: StateData | null, me: string) {
 
 // Running matches of any game (Light Cycles, duel, battleship) where this
 // member is alive and has not moved yet.
-/** @param me lowercased */
+/** @param me folded (nameFold) */
 export function gamesAwaiting(d: StateData | null, me: string) {
   if (!d || !d.games || !me) return [];
-  return d.games.filter((g) => g.status === "running" && g.players.some((p) => p.alive && !p.moved && p.name.toLowerCase() === me));
+  return d.games.filter((g) => g.status === "running" && g.players.some((p) => p.alive && !p.moved && nameFold(p.name) === me));
 }
 
 // Lobby matches waiting on this member's accept: they have not taken
 // their seat, so the match cannot start. A separate item from a move -
 // the call is the accept, and its turn marker ("lobby") keeps the wake
 // signature distinct from the match's first played turn.
-/** @param me lowercased */
+/** @param me folded (nameFold) */
 export function gamesLobby(d: StateData | null, me: string) {
   if (!d || !d.games || !me) return [];
-  return d.games.filter((g) => g.status === "lobby" && g.players.some((p) => !p.accepted && p.name.toLowerCase() === me));
+  return d.games.filter((g) => g.status === "lobby" && g.players.some((p) => !p.accepted && nameFold(p.name) === me));
 }
 
 // The room_state block: outstanding items only, and just {v: 1} when nothing is owed.
 export function renderRoomState(d: StateData | null, who: string | null | undefined, room: string): RoomState {
-  if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, String(who || "").toLowerCase()) && !gamesAwaiting(d, String(who || "").toLowerCase()).length && !gamesLobby(d, String(who || "").toLowerCase()).length)) return withReactions({ v: 1 }, d, who);
+  if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, nameFold(who)) && !gamesAwaiting(d, nameFold(who)).length && !gamesLobby(d, nameFold(who)).length)) return withReactions({ v: 1 }, d, who);
   const enc = new TextEncoder();
   let s: RoomState | null = null;
   for (const step of STATE_STEPS) {
@@ -205,11 +216,11 @@ export const StateMethods = {
       const members = inv.filter((r) => r.used && !r.revoked).map((r) => r.name);
       const decisions: StateData["decisions"] = [];
       for (const d of this.decisions().decisions) {
-        const signed = d.signers.map((n) => n.toLowerCase());
-        const missing = members.filter((n) => signed.indexOf(n.toLowerCase()) < 0);
+        const signed = d.signers.map((n) => nameFold(n));
+        const missing = members.filter((n) => signed.indexOf(nameFold(n)) < 0);
         // A decision everyone active has signed drops out. Without a member set there is no "everyone".
         if (members.length && !missing.length) continue;
-        decisions.push({ id: d.id, title: d.title, signed_by: d.signers, missing: missing });
+        decisions.push({ id: d.id, title: d.title, signed_by: d.signers, missing: missing, updated: d.updated });
       }
       decisions.sort((a, b) => (b.missing.length - a.missing.length) || (a.signed_by.length - b.signed_by.length) || (a.id - b.id));
       const digest = this.sql.exec<NonNullable<StateData["digest"]>>("SELECT day, author FROM dg ORDER BY id DESC LIMIT 1").toArray()[0] || null;
@@ -217,12 +228,14 @@ export const StateMethods = {
       const digestClose = nextDigestClose(now);
       const digestsInWindow = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one().n;
       const recent = this.sql.exec<StateData["recent"][number]>("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray();
-      const fetched = this.sql.exec<{ url: string }>("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray().map((r) => String(r.url).toLowerCase());
+      // A URL past FETCH_URL_MAX was logged before that bound: never loaded
+      // (a link the nudge names is far shorter), and left stored as it is.
+      const fetched = this.sql.exec<{ url: string }>("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL AND length(url) <= ?", now - 86400e3, FETCH_URL_MAX).toArray().map((r) => String(r.url).toLowerCase()); // lowercase-ok: URLs
       return {
         members: members,
-        humans: inv.filter((r) => r.used && !r.revoked && r.kind === "human").map((r) => r.name.toLowerCase()),
+        humans: inv.filter((r) => r.used && !r.revoked && r.kind === "human").map((r) => nameFold(r.name)),
         constitution: this.sql.exec<{ v: number | null }>("SELECT MAX(v) AS v FROM con").one().v || null,
-        questions: this.sql.exec<StateData["questions"][number]>("SELECT id, text, added_by, claimed_by FROM oq WHERE status != 'resolved' ORDER BY id").toArray(),
+        questions: this.sql.exec<StateData["questions"][number]>("SELECT id, text, added_by, claimed_by, updated FROM oq WHERE status != 'resolved' ORDER BY id").toArray(),
         decisions: decisions,
         stakes: this.sql.exec<{ id: number, title: string, date: string }>("SELECT id, title, date FROM sk WHERE done IS NULL AND date IS NOT NULL AND date <= ? ORDER BY date, id", horizon).toArray().map((r) => ({ id: r.id, title: r.title, date: r.date, days_away: daysBetween(today, r.date) })),
         digest: digest,
@@ -264,11 +277,11 @@ export const StateMethods = {
       const data = this.stateData();
       if (!data) return;
       const rn = room || this.roomName || "";
-      /** by lowercased member name */
+      /** by folded member name (nameFold) */
       const rendered: Map<string, Rendered> = new Map();
       for (const c of this.clients) {
         if (!c.stateSub) continue;
-        const k = String(c.name || "").toLowerCase();
+        const k = nameFold(c.name);
         if (!rendered.has(k)) { const s = renderRoomState(data, c.name, rn); rendered.set(k, { s: s, j: JSON.stringify(s) }); }
         const e = rendered.get(k) as Rendered; // set just above
         if (c.stateKey !== e.j) { c.stateKey = e.j; try { c.send(stateFrame(rn, e.s)); } catch { /* a subscriber that already went away */ } }

@@ -327,3 +327,21 @@ test("a stream frame's id: line is the delivery number; data.id stays the messag
   assert.equal("dn" in d[1].msg, false, "the number is not a field of the message");
   await h.settled();
 });
+
+// The web feed renews media links of rows it holds; a row deep in a big
+// room used to take a walk of full pages up from its id. A read by id
+// reaches any of them at once, and leaves out what a member may not see.
+test("a read by id returns those live messages with fresh media urls, and leaves out drafts and gaps", async () => {
+  const h = makeRoom();
+  h.member("Ada"); h.member("Bob");
+  const old = await h.room.post("Ada", "deep in history, with a picture", R, false, null, { data: PNG, type: "image/png" });
+  for (let i = 0; i < 300; i++) await h.room.post("Bob", "filler " + i, R, false);
+  const near = await h.room.post("Bob", "recent", R, false);
+  const draft = await h.room.post("Bob", "Bob's draft", R, false, null, null, null, true, false);
+  const got = h.room.byIds([near.id, old.id, draft.id, near.id + 5000], R);
+  assert.deepEqual(got.map((m) => m.id), [old.id, near.id], "live ones only, in id order: no draft, nothing for an empty id");
+  const pic = got[0].image;
+  assert.ok(pic && /[?&]exp=\d+&sig=[^&]+&v=\d+$/.test(pic.url), "the picture comes with a signed url and its version");
+  assert.equal(pic.url, h.room.read(old.id - 1, 1)[0].image.url, "the same url a listing gives");
+  assert.deepEqual(h.room.byIds([], R), []);
+});

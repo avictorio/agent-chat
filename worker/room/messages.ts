@@ -1,15 +1,18 @@
 // Room methods: messages - posting, reading and listing, reactions, drafts and publishing, deletion, the attachments shelf.
 
 import { streamWants } from "./state.js";
-import { isStoreError, storeError } from "../lib/errors.js";
-import { KEEP, MAX_TEXT } from "../limits.js";
-import { sseFrame } from "../lib/http.js";
-import { mentionsName } from "../lib/text.js";
+import { isGoneError, isStoreError, storeError } from "../lib/errors.js";
+import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MS, KEEP, MAX_TEXT, UP_SESSION_MS } from "../limits.js";
+import { deleteFrame, gapFrame, sseFrame } from "../lib/http.js";
+import { mentionsName, nameFold, sameName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
-import type { CfgRow, InvRow, MdRow, MsgRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
+import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, PcidRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
 import { warn } from "../lib/log.js";
 import { hiddenDraft } from "./media.js";
+
+/** The columns a message is served from (withKinds turns them into the API's fields). */
+const MSG_COLS = 'id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id';
 
 /** A message as the API serves it (withKinds): the contract's Message,
  *  plus the members its text @-mentions. */
@@ -25,6 +28,9 @@ export type Delivered = { msg: ApiMessage, dn: number };
 /** A listing row while withKinds rewrites it in place into an ApiMessage:
  *  its columns as read (typed), plus the fields it gains on the way. */
 export type MsgBag = MsgListRow & Record<string, unknown>;
+/** post()'s answer to a repeated client_msg_id: the first post's message
+ *  as it is now, and whether it is still a draft (and publishes itself). */
+export type PostRepeat = { repeat: true, msg: ApiMessage, draft: boolean, pubauto: boolean };
 /** Inline media for post(): the bytes and their sniffed type, plus the
  *  audio transcript or the page / document name those kinds carry. */
 export type InlineMedia = { data: ArrayBuffer, type: string, transcript?: string | null, name?: string };
@@ -43,7 +49,7 @@ export const MessageMethods = {
     if (!r) return null;
     // Drafts are invisible to everyone but their sender and the owner, here
     // as everywhere else: a draft answers exactly like a missing message.
-    if (r.draft && !owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return null;
+    if (r.draft && !owner && !sameName(r.sender, who)) return null;
     return this.reactionsFor(id);
   },
 
@@ -51,15 +57,15 @@ export const MessageMethods = {
   react(id: number, who: string, emoji: string | null, room: string, owner: boolean) {
     const msg = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!msg) return null;
-    if (msg.draft && !owner && String(msg.sender).toLowerCase() !== String(who || "").toLowerCase()) return null;
+    if (msg.draft && !owner && !sameName(msg.sender, who)) return null;
     const ts = Date.now();
-    this.sql.exec("DELETE FROM rx WHERE msg = ? AND lower(who) = lower(?)", id, who);
+    for (const x of this.sql.exec<Pick<RxRow, "who">>("SELECT DISTINCT who FROM rx WHERE msg = ?", id).toArray()) if (sameName(x.who, who)) this.sql.exec("DELETE FROM rx WHERE msg = ? AND who = ?", id, x.who);
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
     const reactions = this.reactionsFor(id);
     const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
     // A draft is private to its sender (and the owner): its reactions are
     // not announced to the rest of the room.
-    const sees = (c: StreamClient) => !msg.draft || c.owner || String(c.name || "").toLowerCase() === String(msg.sender).toLowerCase();
+    const sees = (c: StreamClient) => !msg.draft || c.owner || sameName(c.name, msg.sender);
     for (const c of this.clients) { if (streamWants(c, "reaction") && sees(c)) c.send(frame); }
     if (msg.draft) return { reactions: reactions, message_from: msg.sender };
     this.emitState(room);
@@ -70,16 +76,39 @@ export const MessageMethods = {
   },
 
   /**
+   * A post with no client_msg_id (the room's own callers, the fetch
+   * tool's post, MCP begin_upload's draft): postKeyed without one.
    * @param trusted the post carried the owner key (kept as provenance)
    * @param pubauto publish the draft once its upload verifies
    */
-  async post(sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null) {
+  async post(sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null): Promise<ApiMessage | null> {
+    const r = await this.postKeyed(null, sender, text, room, trusted, audio, image, video, draft, pubauto, html, doc);
+    if (r && ("repeat" in r || "status" in r)) throw new Error("a post without a client_msg_id cannot repeat");
+    return r;
+  },
+
+  /**
+   * @param trusted the post carried the owner key (kept as provenance)
+   * @param pubauto publish the draft once its upload verifies
+   * @param cid the client_msg_id the post carried: a repeat of one this
+   *   sender used gets the first post back (repeatPost), not a second post
+   * @returns the message; null when it was deleted while its media was
+   *   stored; a repeat, or a refusal of one
+   */
+  async postKeyed(cid: string | null, sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null): Promise<ApiMessage | PostRepeat | { status: 409, error: string, id: number } | null> {
     // the room the post was sent to: deleted during the sweep, it takes no message (Room.fence)
     const gen = this.gen;
     this.fence(gen);
-    await this.sweepDrafts();
+    await this.sweepDrafts(room);
     this.fence(gen);
     this.roomName = room;
+    // Looked up and recorded with no await between, with the insert
+    // below: a repeat sent while the first is still storing its media
+    // finds it.
+    if (cid) {
+      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft">>("SELECT msg, draft FROM pcid WHERE sender = ? AND cid = ?", this.postIdKey(sender, trusted), cid).toArray()[0];
+      if (seen) return this.repeatPost(seen.msg, !!seen.draft);
+    }
     const ts = Date.now();
     // A post with media inside it is stored as a draft until every file
     // is in storage, then goes live in one step. Stored live from the
@@ -89,10 +118,13 @@ export const MessageMethods = {
     // never got it.
     const held = !draft && !!(audio || image || video || html || doc);
     const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft || held ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
+    if (cid) this.rememberPostId(this.postIdKey(sender, trusted), cid, id, draft, ts);
     // Inline media is all or nothing: every put lands in R2 before the
     // message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
     // already written - no message, no frame, no push survives a failed post.
+    // Nothing publishes or sweeps it until every file is in (Room.storing).
+    if (audio || image || video || html || doc) this.storing.add(id);
     try {
       if (audio) {
         await this.putMedia(id, "audio", audio.data, audio.type, room);
@@ -115,14 +147,22 @@ export const MessageMethods = {
         this.sql.exec("UPDATE m SET doc_type = ?, doc_size = ?, doc_name = ? WHERE id = ?", doc.type, doc.data.byteLength, doc.name || null, id);
       }
     } catch (e) {
-      if (isStoreError(e)) {
-        const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
-        this.sql.exec("DELETE FROM md WHERE msg = ?", id);
-        this.sql.exec("DELETE FROM m WHERE id = ?", id);
-        if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
-        throw storeError();
-      }
+      // a deleted room took these rows with it (and a new one is not this room's)
+      if (isGoneError(e)) throw e;
+      // Any failure, not only storage's: nothing was posted, so the rows
+      // go and the same client_msg_id sent again posts it. Only a store
+      // error used to clean up; anything else left the held message and
+      // its pcid row, and every retry with that id was told "still storing
+      // its files" until the draft sweep, then "no longer in the room".
+      const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
+      this.sql.exec("DELETE FROM md WHERE msg = ?", id);
+      this.sql.exec("DELETE FROM m WHERE id = ?", id);
+      this.sql.exec("DELETE FROM pcid WHERE msg = ?", id);
+      if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
+      if (isStoreError(e)) throw storeError();
       throw e;
+    } finally {
+      this.storing.delete(id);
     }
     // The message was deleted while its media was being stored (its
     // sender, or the owner, got there first): nothing is announced, and
@@ -141,7 +181,7 @@ export const MessageMethods = {
     // invisible, and stamping it put the drafter into the digest rotation
     // that room_state shows every member (awaiting_digest_from), even
     // after the draft was deleted. publishMessage stamps a draft's sender.
-    if (!draft) this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
+    if (!draft) { const [who, ...names] = this.invMatch(sender); this.sql.exec("UPDATE inv SET posted = ? WHERE " + who + " AND posted IS NULL", ts, ...names); }
     const row: MsgListRow = { id, ts, from: sender, text };
     if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; row.audio_transcript = audio.transcript || null; }
     if (image) { row.image_type = image.type; row.image_size = image.data.byteLength; }
@@ -154,6 +194,40 @@ export const MessageMethods = {
     // finish before the message officially posts.
     if (!draft) this.announce(msg, room, dn);
     return msg;
+  },
+
+  /** Whose client_msg_ids a post is filed under (pcid.sender): the
+   *  sender's fold, or for a post made with the owner key, that fold
+   *  behind a control character, which no member name can hold. The owner
+   *  posts under any name, and filed with the member's own posts, an
+   *  owner post as "Ada" and Ada's own with the same id answered each
+   *  other as repeats. */
+  postIdKey(sender: string, trusted: boolean) {
+    return (trusted ? "\u0001" : "") + nameFold(sender);
+  },
+
+  /** Records a post's client_msg_id under key (postIdKey), and lets go of
+   *  that key's ids past the newest CLIENT_MSG_ID_KEEP or older than
+   *  CLIENT_MSG_ID_MS. */
+  rememberPostId(key: string, cid: string, id: number, draft: boolean, ts: number) {
+    this.sql.exec("INSERT INTO pcid (sender, cid, msg, ts, draft) VALUES (?, ?, ?, ?, ?)", key, cid, id, ts, draft ? 1 : null);
+    this.sql.exec("DELETE FROM pcid WHERE sender = ? AND (ts < ? OR rowid NOT IN (SELECT rowid FROM pcid WHERE sender = ? ORDER BY ts DESC, rowid DESC LIMIT ?))", key, ts - CLIENT_MSG_ID_MS, key, CLIENT_MSG_ID_KEEP);
+  },
+
+  /**
+   * The answer to a post that repeats a client_msg_id: the message the
+   * first one made, as it is now (a draft since published is live). A
+   * first post still storing its media, or one whose message is gone,
+   * is a 409: answered as posted, the first could still fail, and
+   * posting again would bring back a message its sender deleted.
+   * @param asDraft the first post asked to be a draft
+   */
+  repeatPost(id: number, asDraft: boolean): PostRepeat | { status: 409, error: string, id: number } {
+    const r = this.sql.exec<MsgListRow & Pick<MsgRow, "draft" | "pubauto">>("SELECT " + MSG_COLS + ", draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 409, error: "This client_msg_id already posted message " + id + ", which is no longer in the room; nothing was posted. Send a new client_msg_id to post it again.", id };
+    if (r.draft && !asDraft) return { status: 409, error: "This client_msg_id's first post (message " + id + ") is still storing its files; nothing was posted. Ask again in a moment.", id };
+    const { draft, pubauto, ...row } = r;
+    return { repeat: true, msg: this.withKinds([row])[0], draft: !!draft, pubauto: !!(draft && pubauto) };
   },
 
   // The room keeps its newest KEEP live messages - newest by when they
@@ -169,6 +243,8 @@ export const MessageMethods = {
     if (!cut) return;
     const old = "SELECT id FROM m WHERE (draft IS NULL OR draft = 0) AND (COALESCE(pub_ts, ts) < ? OR (COALESCE(pub_ts, ts) = ? AND id <= ?))";
     const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE r2key IS NOT NULL AND msg IN (" + old + ")", cut.t, cut.t, cut.id).toArray().map((r) => r.r2key);
+    // a stream resuming from below these numbers can no longer be given them
+    this.forget(this.sql.exec<{ n: number | null }>("SELECT MAX(COALESCE(seq, id)) AS n FROM m WHERE id IN (" + old + ")", cut.t, cut.t, cut.id).one().n || 0);
     for (const table of ["rx", "md", "upp"]) this.sql.exec("DELETE FROM " + table + " WHERE msg IN (" + old + ")", cut.t, cut.t, cut.id);
     this.sql.exec("DELETE FROM m WHERE (draft IS NULL OR draft = 0) AND (COALESCE(pub_ts, ts) < ? OR (COALESCE(pub_ts, ts) = ? AND id <= ?))", cut.t, cut.t, cut.id);
     if (!keys.length || !this.env || !this.env.MEDIA) return;
@@ -265,12 +341,31 @@ export const MessageMethods = {
     return msg;
   },
 
+  /** The kinds of the message's uploads still in flight: begun less than
+   *  UP_SESSION_MS ago (sweepDrafts counts them the same way). */
+  upsLive(id: number): string[] {
+    return this.sql.exec<Pick<MdRow, "kind">>("SELECT md.kind AS kind FROM md JOIN m ON m.id = md.msg WHERE md.msg = ? AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ? ORDER BY md.kind", id, Date.now() - UP_SESSION_MS).toArray().map((x) => x.kind);
+  },
+
   /** @param text a caption to publish with (undefined or null keeps the draft's) */
   async publishMessage(id: number, who: string | null | undefined, owner: boolean, room: string, text: unknown) {
     const r = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
+    // Its post is still storing its files (Room.storing): published now it
+    // went out with half of them, and a later file's failure then deleted
+    // the live message without telling anyone.
+    if (this.storing.has(id)) return { status: 409, error: "Message " + id + " is still storing its files; nothing was published. Publish it once its post has answered." };
+    // Not while one of its files is still on its way: published then, the
+    // message went live with that file missing and its upload dangling,
+    // or with a file from another send the author had dropped since (a
+    // resend that adopted the draft, another device). Whatever ends the
+    // last upload publishes a publish_on_complete draft (maybeAutoPublish).
+    // An upload past UP_SESSION_MS from its start is no longer on its way
+    // (storage has dropped it) and holds nothing back.
+    const flying = this.upsLive(id);
+    if (flying.length) return { status: 409, error: "An upload for this message is still in flight (" + flying.join(", ") + "): finish it, or abort it (POST /messages/" + id + "/KIND/abort), then publish", uploading: flying };
     // An over-long caption is refused, as a post with it is: cutting it to
     // MAX_TEXT here published a shortened message and told no one, when
     // the author could have split it.
@@ -282,7 +377,8 @@ export const MessageMethods = {
     if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type && !r.file_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
     if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text), id);
     const dn = this.goLive(id);
-    this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", Date.now(), r.sender);
+    const [poster, ...names] = this.invMatch(r.sender);
+    this.sql.exec("UPDATE inv SET posted = ? WHERE " + poster + " AND posted IS NULL", Date.now(), ...names);
     const f = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size, html_type: f.html_type, html_size: f.html_size, html_name: f.html_name, doc_type: f.doc_type, doc_size: f.doc_size, doc_name: f.doc_name, file_type: f.file_type, file_size: f.file_size, file_name: f.file_name };
     const msg = this.withKinds([row])[0];
@@ -298,9 +394,19 @@ export const MessageMethods = {
   // push) is identical to a manual publish. The owner flag stays false:
   // this server-side path acts with the member's own standing, never the
   // owner's.
+  // It runs wherever an upload of the draft ends - a finish, an abort, a
+  // finish or stream whose file did not land, a revoke's cancel - and in
+  // the draft sweep, which is where an upload that expired unfinished is
+  // noticed. It ran on a finish only, so a draft whose last upload was
+  // aborted after another file had finished stayed a draft, and the sweep
+  // deleted it with that file a day later. It goes live once one file is
+  // in place and no upload is still live; a draft with nothing finished
+  // stays a draft.
   async maybeAutoPublish(id: number, room: string) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "pubauto">>("SELECT sender, draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || !r.draft || !r.pubauto) return null;
+    if (!r || !r.draft || !r.pubauto || this.storing.has(id)) return null;
+    if (!this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND upload_id IS NULL LIMIT 1", id).toArray().length) return null;
+    if (this.upsLive(id).length) return null;
     const res = await this.publishMessage(id, r.sender, false, room, undefined);
     return res && res.status === 200 ? res.msg : null;
   },
@@ -321,7 +427,7 @@ export const MessageMethods = {
   async deleteMessage(id: number, who: string | null | undefined, owner: boolean, draftOnly = false) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only delete your own messages" };
     // A client throwing away an upload it thinks never finished asks for
     // this: the draft may have been published meanwhile (another tab or
     // device picked it up, or this one's publish answer was lost), and a
@@ -335,8 +441,77 @@ export const MessageMethods = {
     this.sql.exec("DELETE FROM md WHERE msg = ?", id);
     this.sql.exec("DELETE FROM rx WHERE msg = ?", id);
     this.sql.exec("DELETE FROM m WHERE id = ?", id);
+    // A live message's delete is announced, and kept for a replay; a
+    // draft was never shown to anyone else.
+    if (!r.draft) this.announceDelete(id, owner ? null : (who || null));
     await this.dropStored(media);
     return { status: 200, deleted: id };
+  },
+
+  // A delete goes out as a "delete" frame under a delivery number of its
+  // own (from the id counter, like a message), and is kept in mdel so a
+  // stream resuming from below that number gets it in order with the
+  // messages. Without it every open page kept the deleted message, and
+  // links to its media that no longer worked, until a reload.
+  announceDelete(id: number, who: string | null) {
+    const d: MdelRow = { dn: this.nextMsgId(), id, ts: Date.now(), who };
+    this.sql.exec("INSERT INTO mdel (dn, id, ts, who) VALUES (?, ?, ?, ?)", d.dn, d.id, d.ts, d.who);
+    this.trimDeletes();
+    if (!this.clients.size) return;
+    const frame = this.deleteFrameOf(d);
+    for (const c of this.clients) { if (streamWants(c, "delete")) c.send(frame); }
+  },
+
+  deleteFrameOf(d: MdelRow) {
+    return deleteFrame(d.dn, { type: "delete", room: this.roomName || null, from: d.who, kind: this.memberKind(d.who), targets: [], id: d.id });
+  },
+
+  // The newest KEEP deletes are kept, as the newest KEEP messages are; a
+  // stream resuming from below the ones dropped gets a gap frame instead.
+  trimDeletes() {
+    const cut = this.sql.exec<Pick<MdelRow, "dn">>("SELECT dn FROM mdel ORDER BY dn DESC LIMIT 1 OFFSET ?", KEEP).toArray()[0];
+    if (!cut) return;
+    this.forget(cut.dn);
+    this.sql.exec("DELETE FROM mdel WHERE dn <= ?", cut.dn);
+  },
+
+  /** Records that deliveries up to dn may no longer be held (cfg msg_forgot only rises). */
+  forget(dn: number) {
+    if (dn > this.forgotten()) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_forgot', ?)", String(dn));
+  },
+
+  /** The highest delivery number the room no longer holds everything up to (0: it holds all). */
+  forgotten(): number {
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'msg_forgot'").toArray()[0];
+    return r ? parseInt(r.v, 10) || 0 : 0;
+  },
+
+  // What a stream opened with after=N is owed before it goes live: a gap
+  // frame when deliveries past N are no longer held (the room keeps KEEP
+  // messages and KEEP deletes), then every message and delete numbered past
+  // N, in delivery order. A reconnect after more messages than the room
+  // keeps used to be shown its old rows joined straight onto the new ones,
+  // with nothing to say some were missing in between; and the replay
+  // stopped at KEEP messages, which a room holds more of for a while when
+  // drafts publish (only a post trims).
+  replay(c: StreamClient, room: string, after: number) {
+    const through = this.forgotten();
+    if (streamWants(c, "gap") && through > after) c.send(gapFrame({ type: "gap", room, from: null, kind: null, targets: [], after, through }));
+    const out: Array<{ dn: number, frame: string }> = [];
+    if (streamWants(c, "message")) {
+      // one page at a time, all of it: no await runs in between, so nothing changes under it
+      for (let from = after; ;) {
+        const page = this.delivered(from, KEEP);
+        for (const d of page) out.push({ dn: d.dn, frame: sseFrame(room, d.msg, d.dn) });
+        if (page.length < KEEP) break;
+        from = page[page.length - 1]!.dn;
+      }
+    }
+    if (streamWants(c, "delete")) {
+      for (const d of this.sql.exec<MdelRow>("SELECT dn, id, ts, who FROM mdel WHERE dn > ? ORDER BY dn", after).toArray()) out.push({ dn: d.dn, frame: this.deleteFrameOf(d) });
+    }
+    out.sort((a, b) => a.dn - b.dn);
+    for (const o of out) c.send(o.frame);
   },
 
   // The members @-mentioned in a text: canonical names, in the order they
@@ -346,14 +521,13 @@ export const MessageMethods = {
   mentionTargets(text: string | null | undefined, selfName: string | null | undefined, names?: string[]): string[] {
     const t = String(text || "");
     if (!t || t.indexOf("@") < 0) return [];
-    const self = String(selfName || "").toLowerCase();
     const list = names || this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
-    const low = t.toLowerCase();
+    const low = t.toLowerCase(); // lowercase-ok: where the mention sits in the text, as mentionsName finds it
     const hits = [];
     for (const name of list) {
-      if (name.toLowerCase() === self) continue;
+      if (sameName(name, selfName)) continue;
       if (!mentionsName(t, name)) continue;
-      const needle = "@" + name.toLowerCase();
+      const needle = "@" + name.toLowerCase(); // lowercase-ok: as above
       let at = -1;
       let i = low.indexOf(needle);
       while (i >= 0) {
@@ -378,12 +552,15 @@ export const MessageMethods = {
    */
   withKinds(rows: MsgListRow[]): ApiMessage[] {
     if (!rows.length) return rows as ApiMessage[];
-    /** kind by lowercased name */
-    const map: Map<string, string> = new Map(this.sql.exec<{ n: string, kind: string | null }>("SELECT lower(name) AS n, kind FROM inv").toArray().map((r) => [r.n, r.kind === "human" ? "human" : "agent"]));
+    // kind by folded name (nameFold), the newest invite's (as memberKind).
+    // Both sides were lowercased apart - JS on the sender, SQL lower() on
+    // the invite, which folds ASCII only - so every sender with a capital
+    // outside ASCII ("Émile", "Иван") matched no invite and read as a
+    // system actor, the Referee's kind.
+    const map: Map<string, string> = new Map(this.sql.exec<Pick<InvRow, "name" | "kind">>("SELECT name, kind FROM inv ORDER BY revoked IS NOT NULL DESC, created").toArray().map((r) => [nameFold(r.name), r.kind === "human" ? "human" : "agent"]));
     const names = this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
     for (const r of rows as MsgBag[]) {
-      const n = String(r.from || "").toLowerCase();
-      r.kind = !r.from ? null : (map.get(n) || "non_interactive");
+      r.kind = !r.from ? null : (map.get(nameFold(r.from)) || "non_interactive");
       r.targets = this.mentionTargets(r.text, r.from, names);
     }
     // Reactions: { "👍": ["Henry", ...], ... } in the order they were first used.
@@ -459,7 +636,7 @@ export const MessageMethods = {
   // once to each of them and a cursor at its number never sees it again.
   /** @param after the cursor, or null for the latest */
   delivered(after: number | null, limit: number): Delivered[] {
-    const cols = 'id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id, COALESCE(seq, id) AS dn';
+    const cols = MSG_COLS + ", COALESCE(seq, id) AS dn";
     const rows = after === null
       ? this.sql.exec<MsgListRow & { dn: number }>("SELECT " + cols + " FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id", limit).toArray()
       : this.sql.exec<MsgListRow & { dn: number }>("SELECT " + cols + " FROM m WHERE (draft IS NULL OR draft = 0) AND COALESCE(seq, id) > ? ORDER BY dn LIMIT ?", after, limit).toArray();
@@ -467,6 +644,20 @@ export const MessageMethods = {
     // the delivery number is a cursor, not a field of the message
     for (const r of rows as MsgBag[]) delete r.dn;
     return this.withKinds(rows).map((msg, i) => ({ msg, dn: dns[i]! }));
+  },
+
+  // These live messages, by id, in id order (GET /messages?ids=): how a
+  // client renews the media links of rows it already holds in one read.
+  // A row deep in a big room used to need a walk of pages from its id to
+  // the newest. A draft is never in it, as in every listing, its sender's
+  // own included, and an id that holds nothing is left out, so what is
+  // missing is gone.
+  /** @param ids at most MESSAGES_IDS_MAX (the route checks) */
+  byIds(ids: number[], room: string): ApiMessage[] {
+    this.roomName = room;
+    if (!ids.length) return [];
+    const rows = this.sql.exec<MsgListRow>("SELECT " + MSG_COLS + " FROM m WHERE (draft IS NULL OR draft = 0) AND id IN (" + ids.map(() => "?").join(",") + ") ORDER BY id", ...ids).toArray();
+    return this.withKinds(rows);
   },
 
   lastId(): number {
@@ -492,7 +683,7 @@ export const MessageMethods = {
     const KINDS = ["image", "video", "audio", "speak", "html", "doc", "file"];
     let kinds = KINDS;
     if (opts.kind) {
-      kinds = String(opts.kind).split(",").map((k) => k.trim().toLowerCase()).filter((k) => KINDS.indexOf(k) >= 0);
+      kinds = String(opts.kind).split(",").map((k) => k.trim().toLowerCase()).filter((k) => KINDS.indexOf(k) >= 0); // lowercase-ok: media kinds
       if (!kinds.length) return { error: "kind must name one or more of: " + KINDS.join(", "), status: 400 };
     }
     const limit = Math.max(1, Math.min(200, parseInt(opts.limit, 10) || 60));
@@ -506,14 +697,16 @@ export const MessageMethods = {
     }
     const inList = kinds.map(() => "?").join(",");
     const base = "FROM md JOIN m ON m.id = md.msg WHERE (m.draft IS NULL OR m.draft = 0) AND md.upload_id IS NULL";
-    const fromSql = from ? " AND lower(m.sender) = lower(?)" : "";
+    // the senders whose name is this one (sameName), as each is stored
+    const senders = from ? this.sql.exec<{ s: string }>("SELECT DISTINCT m.sender AS s " + base).toArray().map((r) => r.s).filter((n) => sameName(n, from)) : [];
+    const fromSql = from ? " AND m.sender IN (" + senders.map(() => "?").join(", ") + ")" : "";
     const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0, file: 0 };
-    const cArgs = from ? [from] : [];
+    const cArgs = senders;
     for (const r of this.sql.exec<{ kind: string, n: number }>("SELECT md.kind AS kind, COUNT(*) AS n " + base + fromSql + " GROUP BY md.kind", ...cArgs).toArray()) {
       if (r.kind in counts) { (counts as Record<string, number>)[r.kind] = r.n; counts.all += r.n; }
     }
     let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes, md.at AS at " + base + fromSql + " AND md.kind IN (" + inList + ")";
-    const args: Array<string | number> = from ? [from, ...kinds] : [...kinds];
+    const args: Array<string | number> = [...senders, ...kinds];
     // curKind is set together with curMsg
     if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind as string); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";

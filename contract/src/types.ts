@@ -98,6 +98,9 @@ export interface Decision {
   title: string;
   note: string | null;
   signers: string[];
+  /** When the title or note last changed (a signature leaves it): the
+   *  base_updated an edit or a sign sends back, refused with 409 when stale. */
+  updated: number;
 }
 
 export type QuestionStatus = "open" | "claimed" | "resolved";
@@ -111,6 +114,8 @@ export interface Question {
   claimed_by: string | null;
   resolved_by?: string | null;
   resolution?: string | null;
+  /** The last write: the base_updated an edit or an action sends back. */
+  updated: number;
 }
 
 export interface Stake {
@@ -121,6 +126,8 @@ export interface Stake {
   date: string | null;
   note: string | null;
   done_by?: string | null;
+  /** The last write: the base_updated an edit or an action sends back. */
+  updated: number;
 }
 
 export interface Digest {
@@ -129,6 +136,8 @@ export interface Digest {
   day: string;
   author: string;
   text: string;
+  /** The last write: the base_updated an edit sends back. */
+  updated: number;
 }
 
 export interface VoiceState {
@@ -215,6 +224,82 @@ export interface RoomState {
   reactions_to_you?: Array<{ message_id: number; reaction: string; from: string; at: string; excerpt: string }>;
 }
 
+/** The stream's "delete" frame (event: delete): a live message was
+ *  deleted. Its id: line is a delivery number of its own, so a reconnect
+ *  from below it replays the delete in order with the messages. */
+export interface StreamDeleteFrame {
+  type: "delete";
+  room: string | null;
+  /** who deleted it, or null for the owner key */
+  from: string | null;
+  kind: MemberKind | "non_interactive" | null;
+  targets: string[];
+  /** the deleted message's id */
+  id: number;
+}
+
+/** The stream's "gap" frame (event: gap), sent before a replay that
+ *  cannot be complete: some deliveries numbered after the cursor, up to
+ *  through, are no longer held (messages past the room's history, deletes
+ *  no longer on record). Everything numbered past through follows. */
+export interface StreamGapFrame {
+  type: "gap";
+  room: string | null;
+  from: null;
+  kind: null;
+  targets: string[];
+  /** the cursor the stream was opened from */
+  after: number;
+  /** the highest delivery number the room no longer holds */
+  through: number;
+}
+
+/** POST /messages: the JSON body (worker/agents/docs.txt SEND A MESSAGE).
+ *  Media fields are base64 or data: URLs; html and doc may be raw text. */
+export interface PostMessageRequest {
+  text?: string;
+  /** owner-key posts only: the name posted under */
+  from?: string;
+  draft?: boolean;
+  publish_on_complete?: boolean;
+  /** A fresh id for this message (up to CLIENT_MSG_ID_MAX characters),
+   *  sent again unchanged with every retry of it: a repeat answers with
+   *  the first post (`repeat: true`) instead of posting twice. */
+  client_msg_id?: string;
+  image?: string;
+  audio?: string;
+  transcript?: string;
+  video?: string;
+  html?: string;
+  html_name?: string;
+  doc?: string;
+  doc_name?: string;
+}
+
+/** POST /messages: 201 with the stored message, or 200 with `repeat: true`
+ *  and the message an earlier post with the same client_msg_id made, as it
+ *  is now. room_state is left out when it could not be read: the post is
+ *  saved all the same. */
+export interface PostMessageResponse extends Message {
+  room: string;
+  publish_on_complete?: boolean;
+  repeat?: true;
+  room_state?: RoomState;
+}
+
+/** POST /messages/ID/KIND/abort (and an upload link's abort). aborted is
+ *  false when nothing was in flight (a finish ran first). published: a
+ *  publish_on_complete draft went live, as a finish answers it, because
+ *  this was the last upload it waited on and another of its files had
+ *  finished. */
+export interface UploadAbortResponse {
+  room: string;
+  id: number;
+  kind: string;
+  aborted: boolean;
+  published: boolean;
+}
+
 export interface MessagesResponse {
   room: string;
   messages: Message[];
@@ -229,6 +314,17 @@ export interface MessagesResponse {
   you_kind?: MemberKind;
   agent_onboarding?: string;
   room_state?: RoomState;
+}
+
+/** GET /messages?ids=: those of the ids that are live messages, in id order.
+ *  A draft (anyone's) or an id that holds nothing is left out: a row a
+ *  client holds that is missing here was deleted. No cursor: it is not a
+ *  read of the stream. */
+export interface MessagesByIdResponse {
+  room: string;
+  messages: Message[];
+  you?: string;
+  you_kind?: MemberKind;
 }
 
 export type AttachmentKind = "image" | "video" | "audio" | "speak" | "html" | "doc" | "file";

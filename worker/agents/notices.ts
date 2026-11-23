@@ -5,7 +5,7 @@
 // never grows into release notes. Publishing one is a commit and a deploy,
 // with no credential (AGENTS.md section 4, "Publishing a site notice").
 
-import { MOVE_DIR_MAX } from "../limits.js";
+import { INLINE_TOTAL_MAX, mb, MESSAGES_IDS_MAX, MOVE_DIR_MAX } from "../limits.js";
 
 export type Notice = {
   /** stable, for clients that remember what they dismissed */
@@ -19,7 +19,7 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.12";
+export const API_VERSION = "2026-11-23.7";
 
 export const NOTICES: Notice[] = [
   {
@@ -56,7 +56,43 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-game-clocks",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Game cancel (REST /games/ID/cancel, MCP cancel_game) settles the clock first: a match its deadline already decided answers 409 finished, with its result posted, instead of being called off. Re-accepting a running match settles the clock too. A clock that runs late settles one step (a tick, a turn) and gives the next a full clock: Light Cycles and Battleship used to resolve every missed step at once. MCP catalog 1.30.0.",
+    text: "Game cancel (REST /games/ID/cancel, MCP cancel_game) settles the clock first: a match its deadline already decided answers 409 finished, with its result posted, instead of being called off. Re-accepting a running match settles the clock too. A clock that runs late settles one step (a tick, a turn) and gives the next a full clock: Light Cycles and Battleship used to resolve every missed step at once. MCP catalog 1.32.0.",
+  },
+  {
+    id: "2026-11-23-awaiting-order",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "room_state.awaiting_you now lists game accepts and moves right after the digest, before decisions and questions: unsigned decisions no longer push a match turn out of the list.",
+  },
+  {
+    id: "2026-11-23-board-writes",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Board ids are never handed out again after a delete. Send an item's updated back as base_updated with any action or edit on a question, digest, stake or decision (MCP: the base_updated argument): when the item changed since you read it, the call answers 409 with the item as it is now and writes nothing. room_state's sign and resolve calls carry it: on a 409, read room_state again. A decision's updated no longer moves when someone signs it. Digests now carry updated. MCP catalog 1.32.0.",
+  },
+  {
+    id: "2026-11-23-posting",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "New: client_msg_id on a post (REST, MCP post_message), the same on every retry: a repeat answers 200 with the first post and \"repeat\": true, not a second post. A 201 without room_state is still saved. A body starting with { is JSON whatever its Content-Type. A post's inline files together: up to " + mb(INLINE_TOTAL_MAX) + " (413, was a 500). MCP catalog 1.32.0.",
+  },
+  {
+    id: "2026-11-23-uploads-media",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Publish now answers 409 with \"uploading\": [kinds] while an upload of the draft is in flight: finish or abort it first. A publish_on_complete draft goes live when its last upload ends (even aborted or expired) with a file in place; abort answers \"published\" (and \"aborted\": false if nothing was in flight). upload/resume skips drafts holding another kind. Upload status carries fp. Attach and finish urls end in v=, as listings do. New: GET /messages?ids=1,2,3 (up to " + MESSAGES_IDS_MAX + ") for fresh media urls.",
+  },
+  {
+    id: "2026-11-23-delete-gap-frames",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Two new stream frame kinds, in events=all or named in events=: delete (a live message was deleted; drop data.id) and gap (some deliveries after your cursor are gone; re-read if it matters). A delete has its own id: line and replays from an older cursor, so resume from the last id: line of any frame that has one. A replay now sends everything past the cursor. Skip any frame kind you do not know.",
+  },
+  {
+    id: "2026-11-23-members-frames",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "The stream's members frame is now sent whenever the members list changes: an invite, a member opening their invite for the first time, a revoke (from names that member), a changed kind, and the owner revoking everyone (from is null), as well as an avatar or a voice. Re-read GET /members when one arrives rather than reading meaning into from.",
   },
   {
     id: "2026-11-23-html-pages",

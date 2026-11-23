@@ -35,7 +35,13 @@ and the draft goes live only once its media is in (see Drafts).
 API: docs.txt AVATARS. `setAvatar` puts the object first, under
 `avatars/<room>/<lowercased name>/<ver>`; a failed put is the same 503.
 The `inv` row keeps only the pointer (`avatar_key`, `avatar_type`,
-`avatar_ver`), and the GET route streams from R2. Revoking everyone
+`avatar_ver`), and the GET route streams from R2. The picture a set
+replaces is read after its put, with no await before the write: read
+before it, two sets for one name both deleted the same old picture and
+the first one's object stayed in storage with nothing pointing at it.
+The set that began later (`avatar_ver`) wins; one that finds a later
+picture already recorded deletes its own object and answers that
+picture's version. Revoking everyone
 deletes the avatar objects too, because the `inv` rows are their only
 pointers and a later `destroy()` could not find them.
 
@@ -69,8 +75,11 @@ API: docs.txt MEDIA LINKS.
   before `md.at` existed carry no `v=` until a new file lands. `withKinds`
   reads the versions of a whole page in one query (`mediaVersions`); the
   attachments listing selects `md.at` with its rows. Attach and finish
-  answers (built in the Worker by `mediaSigParams`) carry no `v=`: the
-  message frame that follows does. A stream reconnect does not renew them: it resumes after
+  answers are built in the Worker (`mediaSigParams`) from the version the
+  write answers (`ver`: the attaches read it with `mediaVer`,
+  `upFinishNow` and `streamFinish` keep the stamp they wrote), so their url is the one the next listing carries: without
+  `v=` they never matched, and a client comparing urls to spot a new file
+  saw one that was not there. A stream reconnect does not renew them: it resumes after
   the last delivery number, so rows already on screen come again only
   when media landed on them. The web feed renews its own
   (`features/feed/useMediaRenewal.ts`): every minute, when the tab
@@ -87,7 +96,9 @@ API: docs.txt MEDIA LINKS.
   page are walked for forward at full pages from just under their ids,
   following `last_id` (a forward read is in delivery order, and a row
   delivered late sits past every message sent while it uploaded), for at
-  most `MAX_PAGES`. A row the walk does not reach is not walked for again
+  most `MAX_PAGES`. The Worker also answers a read by id (`GET /messages?ids=`,
+  `rooms-and-api.md`, Read by id), one request for every due row however
+  deep: the web feed does not use it yet. A row the walk does not reach is not walked for again
   for `RENEW_AFTER`, unless a page reads it meanwhile. The check sends
   nothing while the browser says it is offline, and after a failed
   re-read it waits twice as long as before, up to ten minutes
@@ -110,7 +121,19 @@ API: docs.txt MEDIA LINKS.
 Small media goes in the message request itself. The caps are the
 `*_MAX` constants in `worker/limits.ts` (`IMAGE_MAX`, `AUDIO_MAX`,
 `VIDEO_MAX`, `HTML_MAX`, `DOC_MAX`); anything larger, and every `file`,
-goes through the upload engine. Inline media is refused on drafts. In
+goes through the upload engine. A post's inline files together are
+capped too, at `INLINE_TOTAL_MAX` in `worker/limits.ts` (413 with the
+upload path, REST and MCP): the route hands them to the room in one
+call, a Durable Object call carries at most 32 MiB, and three files
+each under its own cap used to fail there with a bare 500. The web
+composer keeps its own, lower `INLINE_TOTAL_MAX` (`useAttachments.ts`)
+and sends a bigger set through the engine. Every inline field is
+measured against its cap from its length before it is decoded:
+`inlineBytes` for base64 media (REST, attach, voice samples, MCP) and
+`decodeTextPayload` for pages and documents (`worker/lib/sniff.ts`); the
+old decode built a list with one entry per byte, a 24 MB video grew the
+Worker by about 600 MB, and a field far over its cap was decoded in full
+before it was refused. Inline media is refused on drafts. In
 the web feed, images over `INLINE_IMAGE_MAX` (`features/feed/media.tsx`)
 show as a card instead of an inline `<img>`.
 
@@ -127,7 +150,11 @@ way; the routes are in docs.txt UPLOADING FILES.
   in (409 with `missing`), completes the R2 multipart upload, checks the
   size and, for typed kinds, the magic bytes, and attaches; `abort`
   cancels. `upload/resume {size, fingerprint}` finds a draft with that
-  file in flight, and starting again with the same size resumes.
+  file in flight, and starting again with the same size resumes. It
+  finds only a draft that holds no other kind (`findResumableUpload`):
+  a draft from a send of a photo and a file, the photo finished, was
+  handed to a resend of the file alone, and its publish posted the photo
+  the author had removed.
 - The Worker streams each part's body straight into `uploadPart`, never
   buffered and never through the DO. Part 1 of a typed kind is sniffed
   through a `FixedLengthStream` before anything is stored, so a wrong kind
@@ -173,7 +200,12 @@ way; the routes are in docs.txt UPLOADING FILES.
   restart too. Another engine upload that replaced the caller's and
   finished leaves a row just as engine-made, so the finish takes two
   optional fields, `size` (bytes) and `fp` (the start's fingerprint):
-  either one differing from the row's answers 409. An upload link's
+  either one differing from the row's answers 409 (`upOtherFile`). A
+  finish sent while another runs is held to the same test against the
+  session being finished before it joins it: it used to join any running
+  finish, so a replaced upload of the same size was told the other file
+  was its own. `status` carries the session's `fp` too, so a client can
+  tell its own upload from another of the same size. An upload link's
   finish also compares the link's expiry, which is its session's start
   plus `UP_SESSION_MS` (`upBegan`), so a link opened for a replaced
   upload gets 409 without sending either. Storage answering NoSuchUpload
@@ -391,7 +423,19 @@ credential, and the route reads no other.
 
 - `POST /messages {draft: true}` creates an invisible draft; uploads
   attach to it, and `/publish` makes it live. Until then its media is
-  visible only to its sender and the owner. A caption sent with the
+  visible only to its sender and the owner. A publish while any of the
+  draft's `md` rows still holds an upload answers 409 with `uploading`
+  (its kinds): it went live with that file missing and its upload
+  dangling, or with a file from a send the author had since changed.
+  `publish_on_complete` waits for the last upload the same way, since
+  its publish is the same call. An upload begun more than `UP_SESSION_MS`
+  ago no longer counts (`upsLive`): storage has dropped it. Until then
+  every session counts as in flight, a stream's too: a streamed upload
+  whose connection died without the Worker's cleanup running holds a
+  `publish_on_complete` draft back for `UP_SESSION_MS` from its start
+  before the sweep publishes it. Start treats a session as expired an
+  hour earlier than publish does (`upExpired`), so a retry in that last
+  hour begins a fresh session rather than resuming one about to die. A caption sent with the
   publish replaces the draft's and is held to `MAX_TEXT` like a post
   (413): it used to be cut to the limit, silently.
 - To anyone else a draft does not exist (`hiddenDraft` in
@@ -414,7 +458,13 @@ credential, and the route reads no other.
   (`post()`, `held`), then goes live in one step. Stored live from the
   start it could be read before it was announced - without its media,
   and even when the post then failed - and a reader whose cursor passed
-  its id meanwhile never got it.
+  its id meanwhile never got it. While its files are being stored the
+  message id is in `Room.storing`: `maybeAutoPublish` skips it,
+  `publishMessage` answers 409 ("still storing its files") and
+  `sweepDrafts` neither publishes nor deletes it. A draft published
+  between two puts went out with half its files, and when a later put
+  failed the post's cleanup deleted the live message with no delete
+  frame.
 - **Rows first, storage after.** `deleteMessage` and the sweep delete
   the rows in one step and only then call R2, so nothing can change the
   message between the look and the delete. A write that was under way
@@ -435,9 +485,26 @@ credential, and the route reads no other.
   and missed the reader whose cursor was that message. A draft is left
   to its publish.
 - `publish_on_complete: true` (the `m.pubauto` column) has the server
-  publish the draft the moment its upload verifies (the stream endpoint,
-  or the engine's finish), for uploads that finish with no client alive
-  to call `/publish`. The server publishes as the member, never with
+  publish the draft once at least one of its files is in place and no
+  upload of it is still in flight (`maybeAutoPublish`), for uploads that
+  finish with no client alive to call `/publish`. Every path that ends an
+  upload runs the check: a finish (engine, stream, ticket), an abort
+  (which answers `published` as a finish does), a finish or stream whose
+  file did not land, a revoke's cancel of a direct upload, and the draft
+  sweep. The sweep publishes only in the two states nothing else
+  notices: an upload of the draft expired unfinished, or the draft is as
+  old as its deletes take and holds a file the upload engine finished
+  (`md.began` set: only the engine writes it), so the instance stopped
+  between ending that upload and publishing. It once published any such
+  draft holding a file, so one posted a moment ago with an inline
+  thumbnail went live without its video at the sweep inside that video's
+  own start. A draft whose files were all sent inline, attached or put through
+  a single-shot upload link (none of those writes `began`) is
+  never published by the sweep and is deleted after a day. Only the
+  finish used to check once the publish began waiting for the last
+  upload, so a draft whose last upload was aborted after another file
+  had finished stayed a draft and the sweep deleted it with that file.
+  A draft with nothing finished stays a draft. The server publishes as the member, never with
   owner trust (`AGENTS.md` section 13, Trust).
   It and the one-PUT stream endpoint were built for the removed Android
   app's background uploads (`AGENTS.md` section 8) and stay as API

@@ -561,8 +561,12 @@ async function takenPortRefused() {
     const b1 = Buffer.from(await (await fetch(BASE + u1)).arrayBuffer());
     r = await req('PUT', R + '/messages/' + vId + '/image', { token: TA, headers: { 'Content-Type': 'image/gif' }, body: GIF });
     check('media version: PUT a different image -> 200', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    const putUrl = r.json && r.json.image && r.json.image.url;
     const v2 = await vRead();
     const u2 = v2.image && v2.image.url;
+    // The attach answer's url used to carry no v=, so it never matched the
+    // listing's while the file was the same one.
+    check('media version: the attach answer carries the url the listing has, v= included', !!putUrl && /&v=\d+$/.test(putUrl) && new URL(putUrl).pathname + new URL(putUrl).search === u2, putUrl + ' / ' + u2);
     const qs = (u) => new URL(u, BASE).searchParams;
     check('media version: the replaced image has a new url, the same signature', !!u2 && u2 !== u1 && (qs(u2).get('exp') !== qs(u1).get('exp') || qs(u2).get('sig') === qs(u1).get('sig')) && qs(u2).get('v') !== qs(u1).get('v'), u1 + ' -> ' + u2);
     check('media version: the untouched page keeps its url', v2.html && v2.html.url === v1.html.url, v1.html && v1.html.url);
@@ -2374,6 +2378,60 @@ async function takenPortRefused() {
     check('stream: board change pushes a state frame', await waitFor(() => s.frames.some(f => f.includes('event: state') && f.includes('"open_questions"') && f.includes('State event probe question?')), 4000), JSON.stringify(s.frames).slice(-400));
     if (probeQid) await req('DELETE', R2 + '/questions/' + probeQid, { token: TP });
     s.close();
+
+    // Board writes from what the caller read. A deleted decision's id went
+    // to the next one, so a sign call held for it signed other text; ids
+    // are never handed out again now, and a call that carries the item's
+    // updated (base_updated) is refused with 409 once it changed. An edit
+    // from a stale copy is refused the same way instead of saving over
+    // the newer text; without base_updated a write goes ahead as before.
+    r = await req('POST', R2 + '/decisions', { token: TP, json: { title: 'Adopt two-space indentation' } });
+    const bwA = r.json.decision;
+    await req('DELETE', R2 + '/decisions/' + bwA.id, { token: TP });
+    r = await req('POST', R2 + '/decisions', { token: TP, json: { title: 'Poc speaks for the room' } });
+    const bwB = r.json.decision;
+    check('board: a deleted decision\'s id is not handed out again', bwB.id > bwA.id, bwA.id + ' then ' + bwB.id);
+    r = await req('POST', R2 + '/decisions/' + bwA.id, { token: TRex, json: { action: 'sign', base_updated: bwA.updated } });
+    check('board: a sign call for a deleted decision answers 404', r.status === 404, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TP, json: { action: 'edit', title: 'Poc speaks for the room in all outside dealings', base_updated: bwB.updated } });
+    check('board: an edit with the current base_updated saves', r.status === 200 && r.json.decision.updated > bwB.updated, r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TRex, json: { action: 'sign', base_updated: bwB.updated } });
+    check('board: a sign carrying the stamp of the text before an edit answers 409 with the decision now', r.status === 409 && r.json.decision && /outside dealings/.test(r.json.decision.title) && r.json.decision.signers.length === 0, r.status + ' ' + r.text.slice(0, 200));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TRex, json: { action: 'edit', title: 'Rex rewrites it', base_updated: bwB.updated } });
+    check('board: an edit from a stale copy answers 409 and saves nothing', r.status === 409 && /outside dealings/.test(((await req('GET', R2 + '/decisions', { token: TP })).json.decisions.find((x) => x.id === bwB.id) || {}).title), r.status + ' ' + r.text.slice(0, 200));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TRex, json: { action: 'sign', base_updated: 'soon' } });
+    check('board: a base_updated that is not a number answers 400', r.status === 400, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/questions', { token: TP, json: { text: 'Which database?' } });
+    const bwQ = r.json.question;
+    r = await req('POST', R2 + '/questions/' + bwQ.id, { token: TP, json: { action: 'edit', text: 'Which database, really?' } });
+    check('board: an edit without base_updated saves as before', r.status === 200 && r.json.question.text === 'Which database, really?', r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/questions/' + bwQ.id, { token: TRex, json: { action: 'claim', base_updated: bwQ.updated } });
+    check('board: a question action with a stale base_updated answers 409', r.status === 409 && r.json.question && r.json.question.status === 'open', r.status + ' ' + r.text.slice(0, 160));
+    await req('DELETE', R2 + '/questions/' + bwQ.id, { token: TP });
+    await req('DELETE', R2 + '/decisions/' + bwB.id, { token: TP });
+
+    // Unsigned decisions must not push a game turn out of awaiting_you: it
+    // is cut to a few items, and decisions were listed first, so three of
+    // them (any member can record them) hid the accept and every move, and
+    // a watcher catching up from awaiting_you let the match time out.
+    {
+      const RA = '/api/rooms/apitest-await-' + SUF;
+      await req('POST', RA, { owner: true });
+      const tMal = (await req('POST', RA + '/invites', { owner: true, json: { name: 'Mal', kind: 'agent' } })).json.token;
+      const tBob = (await req('POST', RA + '/invites', { owner: true, json: { name: 'Bob', kind: 'agent' } })).json.token;
+      await req('GET', RA + '/members', { token: tMal });
+      await req('GET', RA + '/members', { token: tBob });
+      r = await req('POST', RA + '/games', { token: tMal, json: { players: ['Mal', 'Bob'], tick_seconds: 3600 } });
+      const awG = r.json.game;
+      for (let i = 1; i <= 3; i++) await req('POST', RA + '/decisions', { token: tMal, json: { title: 'Decision ' + i } });
+      const bobItems = async () => (((await req('GET', RA + '/messages?limit=1', { token: tBob })).json.room_state || {}).awaiting_you || []).map((x) => x.type + ':' + x.action + ':' + x.id);
+      let items = await bobItems();
+      check('awaiting_you: three unsigned decisions leave the game accept in', items.includes('game:accept:' + awG.id), JSON.stringify(items));
+      await req('POST', RA + '/games/' + awG.id + '/accept', { token: tBob });
+      items = await bobItems();
+      check('awaiting_you: three unsigned decisions leave the owed move in', items.includes('game:move:' + awG.id), JSON.stringify(items));
+      await req('DELETE', RA + '?confirm=apitest-await-' + SUF, { owner: true });
+    }
     // Envelope: every frame kind carries from + kind + targets, and
     // message objects carry targets on reads and post responses too.
     function frameData(f) { const i = f.indexOf('data: '); if (i < 0) return null; try { return JSON.parse(f.slice(i + 6)); } catch { return null; } }
@@ -2407,6 +2465,34 @@ async function takenPortRefused() {
     await req('POST', R2 + '/games/' + envLC + '/moves', { token: TRex, json: { dir: 'up' } });
     check('frames: the tick-opening frame speaks as the Referee', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envLC && d.from === 'Referee' && d.kind === 'non_interactive' && JSON.stringify(d.targets) === '["Poc","Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
     await req('POST', R2 + '/games/' + envLC + '/cancel', { token: TP, json: {} });
+    s.close();
+    // Members frames: every change GET /members shows - an invite, its
+    // first open, a revoke - reaches an open stream, naming the member.
+    // Only an avatar or a voice used to send one.
+    s = await openStream(R2 + '/stream?events=members&after=latest', TP);
+    const mfName = 'Mf' + Math.random().toString(36).slice(2, 7);
+    const mfFrames = () => s.frames.map(frameData).filter(d => d && d.type === 'members' && d.from === mfName);
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: mfName, kind: 'agent' } });
+    const mfTok = r.json && r.json.token;
+    check('members frame: an invite', await waitFor(() => mfFrames().length === 1, 4000), JSON.stringify(s.frames).slice(-300));
+    await req('GET', R2 + '/me', { token: mfTok });
+    check('members frame: the first open of an invite', await waitFor(() => mfFrames().length === 2, 4000), JSON.stringify(s.frames).slice(-300));
+    await req('GET', R2 + '/me', { token: mfTok });
+    await req('DELETE', R2 + '/invites/' + encodeURIComponent(mfTok), { owner: true });
+    check('members frame: a revoke, and no frame for a later read', await waitFor(() => mfFrames().length === 3, 4000) && mfFrames().length === 3, JSON.stringify(mfFrames()));
+    s.close();
+    // Delete frames: a live message's delete reaches an open stream, under
+    // an id: line of its own, and a reconnect from below that number gets
+    // it in its replay. A delete used to be sent nowhere.
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'delete frame probe' } });
+    const dfId = r.json.id;
+    s = await openStream(R2 + '/stream?events=message,delete&after=latest', TP);
+    r = await req('DELETE', R2 + '/messages/' + dfId, { token: TP });
+    const dfFrame = () => s.frames.find(f => { const d = frameData(f); return d && d.type === 'delete' && d.id === dfId; });
+    check('delete frame: sent live, with from, kind and its own id: line', await waitFor(() => !!dfFrame(), 4000) && /^id: \d+\nevent: delete\n/.test(dfFrame()) && Number(dfFrame().slice(4, dfFrame().indexOf('\n'))) > dfId && frameData(dfFrame()).from === 'Poc' && frameData(dfFrame()).kind === 'human', JSON.stringify(s.frames).slice(-300));
+    s.close();
+    s = await openStream(R2 + '/stream?events=message,delete,gap&after=' + (dfId - 1), TP);
+    check('delete frame: replayed to a reconnect from below it', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'delete' && d.id === dfId; }), 4000) && !s.frames.some(f => { const d = frameData(f); return d && d.type === 'message' && d.id === dfId; }) && !s.frames.some(f => f.includes('event: gap')), JSON.stringify(s.frames).slice(-300));
     s.close();
 
     // Park the stream match: with a real alarm armed it would otherwise
@@ -2810,6 +2896,24 @@ async function takenPortRefused() {
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Spacy Name', kind: 'agent' } });
     check('...so the single-spaced spelling is taken', r.status === 409, r.status);
     await req('DELETE', R2 + '/invites/' + spacyTok, { owner: true });
+    // Names compare one way (sameName): a capital outside ASCII used to
+    // match no invite in SQL, so the member's posts read as a system
+    // actor's. And the name is composed (NFC) before it is checked:
+    // U+1FEF became a stored backtick.
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Émile ' + SUF.slice(-4), kind: 'human' } });
+    const emileTok = r.json && r.json.token;
+    r = await req('POST', R2 + '/messages', { token: emileTok, json: { text: 'bonjour' } });
+    check('a member named with a non-ASCII capital posts with their own kind', r.status === 201 && r.json.kind === 'human', r.status + ' ' + JSON.stringify(r.json && r.json.kind));
+    await req('DELETE', R2 + '/invites/' + emileTok, { owner: true });
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'x`id', kind: 'agent' } });
+    check('a name that composes to a backtick -> 400', r.status === 400, r.status + ' ' + r.text.slice(0, 120));
+    // The fetch log keeps every URL for a day and room_state loads it on
+    // every read: a URL past FETCH_URL_MAX is refused before it is logged.
+    const longUrl = 'http://x.y../' + 'A'.repeat(3000);
+    r = await req('POST', R2 + '/tools/fetch', { token: TP, json: { url: longUrl } });
+    check('the fetch tool refuses a URL over 2,048 characters -> 400', r.status === 400 && /at most 2048 characters/.test(r.json && r.json.error), r.status + ' ' + r.text.slice(0, 160));
+    r = await mcp(R2, 'tools/call', { name: 'fetch_url', arguments: { url: longUrl } }, { token: TP });
+    check('...and so does MCP fetch_url', !!(r.json && r.json.result && r.json.result.isError && /at most 2048 characters/.test(JSON.stringify(r.json.result))), JSON.stringify(r.json).slice(0, 200));
 
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.
@@ -2861,6 +2965,7 @@ async function takenPortRefused() {
     r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
     check('finish with a part missing -> 409 naming it', r.status === 409 && JSON.stringify(r.json && r.json.missing) === '[2]', r.status + ' ' + r.text.slice(0, 160));
     r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TU });
+    check('status names the fingerprint the start gave', !!(r.json && r.json.fp === FP), JSON.stringify(r.json));
     check('status lists the parts received', !!(r.json && r.json.uploading === true && JSON.stringify(r.json.received) === '[1,3]' && r.json.parts === 3 && r.json.name === 'résumé data.bin'), JSON.stringify(r.json));
     r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TP });
     check('status shows nothing to another member', !!(r.json && r.json.uploading === false && r.json.received.length === 0), JSON.stringify(r.json));
@@ -2903,6 +3008,8 @@ async function takenPortRefused() {
     const fmsg = ((r.json && r.json.messages) || []).find(x => x.id === fid);
     check('listings carry the file', !!(fmsg && fmsg.file && fmsg.file.bytes === BIG.length && fmsg.file.type === 'application/x-probe' && /sig=/.test(fmsg.file.url)), JSON.stringify(fmsg && fmsg.file));
     const fURL = BASE + new URL(fmsg.file.url, BASE).pathname + new URL(fmsg.file.url, BASE).search;
+    const pathOf = (u) => new URL(u, BASE).pathname + new URL(u, BASE).search;
+    check('the finish answers carry the url the listing has, v= included', /&v=\d+$/.test(fmsg.file.url) && pathOf(r2nd.json.file.url) === pathOf(fmsg.file.url) && pathOf(r3rd.json.file.url) === pathOf(fmsg.file.url), r2nd.json.file.url + ' / ' + fmsg.file.url);
     let ff = await fetch(fURL);
     const fbuf = Buffer.from(await ff.arrayBuffer());
     check('the file downloads with a signed url, byte for byte', ff.status === 200 && fbuf.length === BIG.length && sha(fbuf) === sha(BIG), ff.status + ' ' + fbuf.length);
@@ -2927,6 +3034,18 @@ async function takenPortRefused() {
     r = await req('PUT', R2 + '/messages/' + idr.json.id + '/image/part?n=1', { token: TU, body: PNG });
     r = await req('POST', R2 + '/messages/' + idr.json.id + '/image/finish', { token: TU });
     check('a one-part image finishes as an image', r.status === 200 && !!(r.json && r.json.image && r.json.image.type === 'image/png'), r.status + ' ' + r.text.slice(0, 160));
+    // A read by id: the rows a client holds, for fresh media urls, in one
+    // request. Another member's draft is no more there than an empty id.
+    r = await req('GET', R2 + '/messages?ids=' + [idr.json.id, fid, 99999999].join(','), { token: TP });
+    check('a read by id returns the live ones, not another member\'s draft or an empty id', r.status === 200 && JSON.stringify((r.json.messages || []).map((x) => x.id)) === JSON.stringify([fid]) && /&v=\d+$/.test(r.json.messages[0].file.url) && r.json.you === 'Poc' && !('last_id' in r.json), r.status + ' ' + r.text.slice(0, 200));
+    r = await req('GET', R2 + '/messages?ids=' + idr.json.id, { token: TU });
+    check('a read by id leaves out its reader\'s own draft too', r.status === 200 && Array.isArray(r.json.messages) && r.json.messages.length === 0, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/messages?ids=' + Array.from({ length: 101 }, (_, i) => i + 1).join(','), { token: TP });
+    check('a read by id of more than 100 ids -> 400', r.status === 400 && /at most 100/.test(r.json && r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/messages?ids=1,x', { token: TP });
+    check('a read by id with something not an id -> 400', r.status === 400, r.status);
+    r = await req('GET', R2 + '/messages?ids=1&after=0', { token: TP });
+    check('a read by id takes no cursor -> 400', r.status === 400, r.status);
     // The first chunked flow's addresses are the engine's (kind video), and
     // publish_on_complete fires on finish.
     const vdr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'engine video', draft: true, publish_on_complete: true } });
@@ -2938,9 +3057,22 @@ async function takenPortRefused() {
     const adr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'aborted audio', draft: true } });
     await req('POST', R2 + '/messages/' + adr.json.id + '/audio/start', { token: TU, json: { size: 20 * MiB } });
     r = await req('POST', R2 + '/messages/' + adr.json.id + '/audio/abort', { token: TU });
-    check('abort cancels an upload', r.status === 200 && !!(r.json && r.json.aborted === true), r.status);
+    check('abort cancels an upload', r.status === 200 && !!(r.json && r.json.aborted === true && r.json.published === false), r.status + ' ' + r.text.slice(0, 120));
     r = await req('GET', R2 + '/messages/' + adr.json.id + '/audio/status', { token: TU });
     check('nothing is left after abort', !!(r.json && r.json.uploading === false), JSON.stringify(r.json));
+    // A publish_on_complete draft whose image finished while its audio was
+    // on its way goes live when the audio is aborted (it waited only on it).
+    const pdr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'image kept, audio dropped', draft: true, publish_on_complete: true } });
+    await req('POST', R2 + '/messages/' + pdr.json.id + '/audio/start', { token: TU, json: { size: 20 * MiB } });
+    await req('POST', R2 + '/messages/' + pdr.json.id + '/image/start', { token: TU, json: { size: PNG.length } });
+    await req('PUT', R2 + '/messages/' + pdr.json.id + '/image/part?n=1', { token: TU, body: PNG });
+    r = await req('POST', R2 + '/messages/' + pdr.json.id + '/image/finish', { token: TU });
+    check('a publish_on_complete finish with another upload in flight stays a draft', r.status === 200 && !!(r.json && r.json.published === false), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/messages/' + pdr.json.id + '/audio/abort', { token: TU });
+    check('aborting the last upload in flight publishes it: published true', r.status === 200 && !!(r.json && r.json.aborted === true && r.json.published === true), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('GET', R2 + '/messages?limit=5', { token: TP });
+    const pmsg = ((r.json && r.json.messages) || []).find(x => x.id === pdr.json.id);
+    check('and it is live with the image only', !!(pmsg && pmsg.image && !pmsg.audio), JSON.stringify(pmsg).slice(0, 200));
     // Agents: begin_upload with a size opens a resumable link set that needs
     // no credential; a file needs a size.
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'file', name: 'notes.txt' } }, { token: TU });

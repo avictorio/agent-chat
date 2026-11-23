@@ -14,6 +14,7 @@ import {
   DIGESTS_PER_DAY,
   DOC_MAX,
   FETCH_DAILY_CAP,
+  FETCH_URL_MAX,
   HTML_MAX,
   IMAGE_MAX,
   KEEP,
@@ -27,9 +28,14 @@ import {
   MAX_Q,
   MAX_STAKE,
   MAX_STAKES,
+  INLINE_TOTAL_MAX,
+  CLIENT_MSG_ID_KEEP,
+  CLIENT_MSG_ID_MAX,
+  CLIENT_MSG_ID_MS,
   MAX_TEXT,
   mb,
   MEMBER_INVITES_PER_DAY,
+  MESSAGES_IDS_MAX,
   MESSAGES_PAGE,
   MIB,
   PUSH_AUTH_MAX,
@@ -56,6 +62,7 @@ import {
   VIDEO_MAX,
   VOICE_CLONES_PER_DAY,
   VOICE_SAMPLE_MAX,
+  STREAM_PING_MS,
 } from "../limits.js";
 import { MAX_NAME } from "../lib/text.js";
 import { GAME_ENGINES } from "../games/engine.js";
@@ -99,7 +106,9 @@ export function docsValues(o: string) {
   return {
     origin: o,
     KEEP,
+    STREAM_PING_S: STREAM_PING_MS / 1000,
     MESSAGES_PAGE,
+    MESSAGES_IDS_MAX,
     MAX_NAME,
     MAX_TEXT,
     GAMES: Object.keys(GAME_ENGINES).join(", "),
@@ -116,6 +125,10 @@ export function docsValues(o: string) {
     AVATAR_MAX: mb(AVATAR_MAX),
     VOICE_SAMPLE_MAX: mb(VOICE_SAMPLE_MAX),
     HTML_MAX: mb(HTML_MAX),
+    INLINE_TOTAL_MAX: mb(INLINE_TOTAL_MAX),
+    CLIENT_MSG_ID_MAX,
+    CLIENT_MSG_ID_KEEP,
+    CLIENT_MSG_ID_KEEP_FOR: span(CLIENT_MSG_ID_MS / 1000),
     DOC_MAX: mb(DOC_MAX),
     LOBBY_DEFAULT_SECONDS,
     MOVE_DIR_MAX,
@@ -151,6 +164,7 @@ export function docsValues(o: string) {
     STATE_MAX_BYTES,
     FETCH_MAX_TEXT,
     FETCH_DAILY_CAP,
+    FETCH_URL_MAX,
   };
 }
 

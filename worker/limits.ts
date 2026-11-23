@@ -22,8 +22,25 @@ export const MOVE_DIR_MAX = 4000;
 export const GAME_STATE_SOFT_MAX = 1000000;
 
 export const KEEP = 1000;
+// How often an open stream gets a ": ping" comment. The web app's reader
+// counts a stream silent for three of these as dead and one silent for
+// more than one and a half as stale when the tab comes back into view
+// (STALL_MS and WAKE_SILENCE in web/app/src/features/room/useRoomStream.ts,
+// derived from this number by hand): change them together.
+export const STREAM_PING_MS = 15000;
 // A messages read without limit= returns this many (REST and MCP alike).
 export const MESSAGES_PAGE = 50;
+// The most message ids one read by id takes (GET /messages?ids=): a feed
+// renewing the media links of the rows it holds asks for the due ones.
+export const MESSAGES_IDS_MAX = 100;
+// A post's client_msg_id (optional): the room remembers the ids each
+// sender used in the last CLIENT_MSG_ID_MS, at most CLIENT_MSG_ID_KEEP of
+// them, and answers a post that repeats one with the message the first
+// made. A lost answer is sent again within seconds or, from a phone
+// that went offline, hours; a day covers both.
+export const CLIENT_MSG_ID_MAX = 100;
+export const CLIENT_MSG_ID_KEEP = 200;
+export const CLIENT_MSG_ID_MS = 86400000;
 export const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // Rooms that can't be deleted through the API, even with the owner key. Changing this takes a commit.
 export const PROTECTED_ROOMS = ["henry-hank-order-up"];
@@ -94,6 +111,12 @@ export const VIDEO_MAX = 25000000;
 export const VIDEO_MAX_HARD = 5000000000;
 export const HTML_MAX = 2000000;
 export const DOC_MAX = 1000000;
+// A post's inline attachments together (audio, image, video, html, doc).
+// The route hands them to the room in one call, and a Durable Object
+// call carries at most 32 MiB (33.5 MB): a post whose files were each
+// under their own cap (38 MB of caps in all) failed there with a bare
+// 500. This leaves room for the text and the call's own framing.
+export const INLINE_TOTAL_MAX = 32000000;
 export const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes
 export const TICKET_MAX_PER_MEMBER = 20;
 export const TICKET_MAX_TRIES = 5;
@@ -166,6 +189,11 @@ export const STATE_STEPS = [[120, 100, STATE_ITEMS, STATE_ITEMS], [80, 100, STAT
 export const DIGEST_CLOSE_HOUR = 8;
 
 export const FETCH_DAILY_CAP = 50;
+// The longest URL the fetch tool takes, as fetchTarget writes it out (the
+// same bound as a push endpoint). Every fetch logs its URL for a day and
+// every room_state read loads the log: with no bound, one member logged
+// 50 URLs of 1.9 MB each and every read in the room loaded 95 MB.
+export const FETCH_URL_MAX = 2048;
 
 // Each clone is a paid call: members get VOICE_CLONES_PER_DAY a day (the
 // owner is not capped), counted in the room's own storage (cloneTake), so
@@ -202,6 +230,12 @@ export function mediaTooBig(kind: keyof typeof MEDIA_CAP, route: "inline" | "sin
   return route === "inline"
     ? what + " sent inline can be up to " + mb(max) + ". Send a larger one as an upload (begin_upload over MCP, or POST /api/rooms/ROOM/messages/ID/" + kind + "/start), up to " + UP_MAX_DIRECT_TEXT + "."
     : "A single-shot " + kind + " upload can be up to " + mb(max) + ". For a larger one, call begin_upload with its size (up to " + UP_MAX_DIRECT_TEXT + ").";
+}
+
+/** The refusal for a post whose inline attachments together pass
+ *  INLINE_TOTAL_MAX. */
+export function inlineTotalTooBig(total: number): string {
+  return "The files sent inline in one post can come to " + mb(INLINE_TOTAL_MAX) + " together; these come to " + (Math.ceil(total / 1e5) / 10) + " MB. Send the larger ones as uploads (begin_upload over MCP, or a draft and POST /api/rooms/ROOM/messages/ID/KIND/start: UPLOADING FILES at /api), or post them in separate messages.";
 }
 
 /** The refusal for a page the room renders (HTML or Markdown) over its cap;

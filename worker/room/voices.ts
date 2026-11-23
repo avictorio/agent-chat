@@ -1,7 +1,7 @@
 // Voices: the speak requests in flight, and the Room methods for members'
 // voice samples, clones, their daily clone allowance and speaking.
 
-import { nameFold } from "../lib/text.js";
+import { nameFold, nameKey, sameName } from "../lib/text.js";
 import { goneError } from "../lib/errors.js";
 import { VOICE_CLONES_PER_DAY } from "../limits.js";
 import type { CfgRow, MsgRow, MvRow, Room } from "./Room.js";
@@ -31,7 +31,7 @@ export const VoiceMethods = {
   // provider voice id the server saved when it cloned the sample. Streams get a "members"
   // event on change, like avatars.
   voiceRow(name: string): MvRow | null {
-    const r = this.sql.exec<MvRow>("SELECT name, provider, voice_id, sample_key, sample_type, sample_ts, ts FROM mv WHERE name = ?", String(name).toLowerCase()).toArray()[0];
+    const r = this.sql.exec<MvRow>("SELECT name, provider, voice_id, sample_key, sample_type, sample_ts, ts FROM mv WHERE name = ?", nameKey(name)).toArray()[0];
     return r || null;
   },
 
@@ -57,7 +57,7 @@ export const VoiceMethods = {
 
   async putVoiceSample(name: string, data: ArrayBuffer, type: string, room: string) {
     const gen = this.gen;
-    if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
+    if (!this.invNames(name).length) return null;
     const key = await this.voiceSampleKey(room, name);
     // Storage failure is its own answer: the route turns STORE_FAIL
     // into a 503, distinct from the no-such-member null.
@@ -72,7 +72,7 @@ export const VoiceMethods = {
     // the row first, the old object after: a delete awaited in between let
     // the room go before the row was written
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      String(name).toLowerCase(), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
+      nameKey(name), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
     if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.notifyMembers(name);
     // the room this sample went into, for the clone made from it (setVoiceId)
@@ -112,12 +112,12 @@ export const VoiceMethods = {
    *  @param sampleKey the sample key putVoiceSample or getVoiceSample answered */
   async setVoiceId(name: string, provider: string, voiceId: string, gen: number, sampleKey: string) {
     this.fence(gen);
-    if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
+    if (!this.invNames(name).length) return null;
     const prev = this.voiceRow(name);
     if (!prev || !sampleKey || prev.sample_key !== sampleKey) return "changed" as const;
     const replaced = prev.voice_id && prev.voice_id !== voiceId && (prev.provider || "cartesia") === "cartesia" ? prev.voice_id : null;
     if (replaced) this.voiceDelPend([replaced]);
-    this.sql.exec("UPDATE mv SET provider = ?, voice_id = ?, ts = ? WHERE name = ?", provider, voiceId, Date.now(), String(name).toLowerCase());
+    this.sql.exec("UPDATE mv SET provider = ?, voice_id = ?, ts = ? WHERE name = ?", provider, voiceId, Date.now(), nameKey(name));
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
     return { voice: this.voiceOf(name), replaced };
@@ -126,7 +126,7 @@ export const VoiceMethods = {
   // A voice change makes every cached speak rendering of that member's messages
   // stale: drop them so the next play re-synthesizes in the new voice.
   async invalidateSpeakCache(name: string) {
-    const ids = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray();
+    const ids = this.sql.exec<Pick<MsgRow, "id" | "sender">>("SELECT m.id AS id, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.kind = 'speak'").toArray().filter((r) => sameName(r.sender, name));
     for (const r of ids) {
       const meta = this.mediaMeta(r.id, "speak");
       if (!meta) continue;
@@ -182,13 +182,13 @@ export const VoiceMethods = {
       try { await this.env.MEDIA.delete(r.sample_key); }
       catch (e) {
         warn("media.delete", e, { room: this.roomName });
-        this.sql.exec("UPDATE mv SET voice_id = NULL, ts = ? WHERE name = ?", Date.now(), String(name).toLowerCase());
+        this.sql.exec("UPDATE mv SET voice_id = NULL, ts = ? WHERE name = ?", Date.now(), nameKey(name));
         this.notifyMembers(name);
         await this.invalidateSpeakCache(name);
         return "STORE_FAIL";
       }
     }
-    this.sql.exec("DELETE FROM mv WHERE name = ?", String(name).toLowerCase());
+    this.sql.exec("DELETE FROM mv WHERE name = ?", nameKey(name));
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
     return "cleared";

@@ -66,9 +66,14 @@ export async function mediaSigner(env: Env, room: string): Promise<((id: number 
   return (id, kind) => "exp=" + exp + "&sig=" + mediaSig(key, room, id, kind, exp);
 }
 
-export async function mediaSigParams(env: Env, room: string, id: number | string, kind: string) {
+/** @param ver the stored file's version (md.at), put after the signature
+ *  as listings put it (Room.mediaQuery), so an attach or finish answer's
+ *  url is the one the next listing carries. Without it the two differed
+ *  while the file was the same, and a client comparing urls to spot a new
+ *  file saw one that was not there. */
+export async function mediaSigParams(env: Env, room: string, id: number | string, kind: string, ver?: number | null) {
   const sign = await mediaSigner(env, room);
-  return sign ? sign(id, kind) : "";
+  return sign ? sign(id, kind) + (ver ? "&v=" + ver : "") : "";
 }
 
 // The CSP served with a media object. Ordinary media is fully locked down.

@@ -5,9 +5,9 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { gameEngine } from "../games/engine.js";
-import { renderRoomState, stateFrame, streamWants } from "./state.js";
-import { KEEP } from "../limits.js";
-import { SSE_HEADERS, json, sseFrame } from "../lib/http.js";
+import { renderRoomState, stateFrame } from "./state.js";
+import { STREAM_PING_MS } from "../limits.js";
+import { SSE_HEADERS, json } from "../lib/http.js";
 import { GONE_MSG, goneError } from "../lib/errors.js";
 import { FourInARowMethods } from "../games/fourinarow.js";
 import { TrustMethods } from "../games/trust.js";
@@ -30,7 +30,7 @@ import { VoiceMethods } from "./voices.js";
 import { MediaMethods } from "./media.js";
 import { UploadMethods } from "./uploads.js";
 import { PushMethods } from "./push.js";
-import { BoardMethods } from "./board.js";
+import { BOARD_TABLES, BoardMethods } from "./board.js";
 import { StateMethods } from "./state.js";
 import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
@@ -53,6 +53,11 @@ export type MsgRow = { id: number, ts: number, sender: string, text: string, dra
   video_type: string | null, video_size: number | null, html_type: string | null, html_size: number | null, html_name: string | null,
   doc_type: string | null, doc_size: number | null, doc_name: string | null, file_type: string | null, file_size: number | null, file_name: string | null,
   game_id: number | null };
+/** mdel: a live message's delete, under its own delivery number (schema step 5). */
+export type MdelRow = { dn: number, id: number, ts: number, who: string | null };
+/** pcid: a post's client_msg_id (sender lowercased), the message it made,
+ *  and whether that post asked to be a draft. */
+export type PcidRow = { sender: string, cid: string, msg: number, ts: number, draft: number | null };
 /** rx: one member's reaction to a message. */
 export type RxRow = { msg: number, emoji: string, who: string, ts: number };
 /** inv: an invite, and the member it names. */
@@ -112,7 +117,8 @@ export type ConRow = { v: number, ts: number, editor: string, text: string };
 export type OqRow = { id: number, ts: number, added_by: string, text: string, status: QuestionStatus, claimed_by: string | null,
   resolved_by: string | null, resolution: string | null, updated: number };
 /** dg: a digest. */
-export type DgRow = { id: number, ts: number, day: string, author: string, text: string };
+/** updated: the last write (schema step 5; null on a digest from before it, read as ts). */
+export type DgRow = { id: number, ts: number, day: string, author: string, text: string, updated: number | null };
 /** sk: a stake. */
 export type SkRow = { id: number, ts: number, added_by: string, title: string, date: string | null, note: string | null, done: number | null,
   done_by: string | null, updated: number };
@@ -244,7 +250,7 @@ function schemaBaseline(sql: SqlStorage): void {
   addColumn(sql, "inv", "used", "INTEGER");
   // When each member first posted as a member: the column, then a
   // backfill from the kept history, once (when the column is new).
-  if (addColumn(sql, "inv", "posted", "INTEGER")) sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)");
+  if (addColumn(sql, "inv", "posted", "INTEGER")) sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)"); // lowercase-ok: a step that has run, kept as it ran
 }
 
 // Step 2. md.at: when a media row was last written (an attach, a
@@ -285,8 +291,34 @@ function schemaPushFailures(sql: SqlStorage) {
   addColumn(sql, "push", "rest_ts", "INTEGER");
 }
 
+// Step 5. mdel, pcid and dg.updated. mdel: a live message that was deleted, under a delivery number
+// of its own from the id counter, so the stream can replay the delete to
+// a reader whose cursor is below it (a "delete" frame), in order with the
+// messages. A delete used to reach nobody: every open feed kept the
+// message, and its dead media, until a reload. The newest KEEP are kept
+// (trimDeletes); cfg msg_forgot is the highest delivery number of
+// anything the room no longer holds, a trimmed message or a dropped
+// delete, and a replay from below it starts with a "gap" frame. Nothing
+// is backfilled: deletes from before this step were never recorded.
+//
+// And pcid: the client_msg_id a post carried, per sender, and the message
+// it made (CLIENT_MSG_ID_KEEP and CLIENT_MSG_ID_MS bound it), so a post
+// sent again after its answer was lost gets the first one back instead
+// of posting twice. It is stored, not held in memory, so a restart of the
+// room between the two sends does not forget it. Starts empty.
+//
+// And dg.updated: when a digest was last written, the stamp an edit
+// names (base_updated) so it cannot save over a newer edit unseen, as the
+// other board tables' updated already allowed. Left null on older
+// digests; reads take ts in its place (DG_COLS in room/board.ts).
+function schemaDeletesAndPostIds(sql: SqlStorage) {
+  sql.exec("CREATE TABLE IF NOT EXISTS mdel (dn INTEGER PRIMARY KEY, id INTEGER NOT NULL, ts INTEGER NOT NULL, who TEXT)");
+  sql.exec("CREATE TABLE IF NOT EXISTS pcid (sender TEXT NOT NULL, cid TEXT NOT NULL, msg INTEGER NOT NULL, ts INTEGER NOT NULL, draft INTEGER, PRIMARY KEY (sender, cid))");
+  addColumn(sql, "dg", "updated", "INTEGER");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
@@ -317,6 +349,9 @@ export class Room extends DurableObject {
   mediaLocks: Map<string, Promise<void>> = new Map();
   /** The finish in flight per upload session ("msg:kind"), whose answer a finish sent again shares (room/uploads.ts, uploadFinish). */
   _finishing: Map<string, Promise<UpFinish>> = new Map();
+  /** Messages whose post is still storing its inline files (room/messages.ts, postKeyed). Nothing publishes or sweeps one of these: published
+   *  between two puts, it went out with half its files, and a later put's failure then deleted a live message with no delete frame. */
+  storing: Set<number> = new Set();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -451,6 +486,10 @@ export class Room extends DurableObject {
     // and nothing of the room's content.
     let hwm = 0;
     try { hwm = this.msgHwm(); } catch (e) { warn("room.destroy.hwm", e, { room }); }
+    // The board's id marks too (nextBoardId): a sign call held from the old
+    // room must not land on the new room's decision of that id.
+    const boardMarks: CfgRow[] = [];
+    for (const t of BOARD_TABLES) { try { const n = this.boardHwm(t); if (n) boardMarks.push({ k: t + "_hwm", v: String(n) }); } catch (e) { warn("room.destroy.boardhwm", e, { room, table: t }); } }
     // Kept too: the ids of clones members asked to delete that Cartesia
     // has not confirmed (room/voices.ts, voiceDelPend). The room delete
     // tries them (routes/rooms.ts); one Cartesia refused then would be
@@ -458,9 +497,12 @@ export class Room extends DurableObject {
     let voiceDels: CfgRow[] = [];
     try { voiceDels = this.sql.exec<CfgRow>("SELECT k, v FROM cfg WHERE substr(k, 1, 10) = 'voice-del:'").toArray(); } catch (e) { warn("room.destroy.voicedel", e, { room }); }
     await this.ctx.storage.deleteAll();
-    if (hwm || voiceDels.length) this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+    if (hwm || voiceDels.length || boardMarks.length) this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
     if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(hwm));
-    for (const d of voiceDels) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", d.k, d.v);
+    // every number up to it belonged to the old room: a stream resuming
+    // from one of them is told its history is gone (a "gap" frame)
+    if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_forgot', ?)", String(hwm));
+    for (const d of voiceDels.concat(boardMarks)) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", d.k, d.v);
     // A stream or long poll that slipped in during the awaits above
     // (fetch refuses one now, but this is the last word) goes too.
     for (const c of Array.from(this.clients)) c.close();
@@ -535,6 +577,8 @@ export class Room extends DurableObject {
     const now = Date.now();
     if (!row.used) this.sql.exec("UPDATE inv SET used = ? WHERE token = ?", now, token);
     if (!row.seen || now - row.seen > 60000) this.sql.exec("UPDATE inv SET seen = ? WHERE token = ?", now, token);
+    // first open: the member's status goes from unused to active for everyone
+    if (!row.used) this.notifyMembers(row.name);
     // who invited them and when, and when they joined (this call, the first time)
     return { ok: true, name: row.name, kind: row.kind === "human" ? "human" : "agent", invited_by: row.invited_by || null, invited: row.created, joined: row.used || now, posted: !!row.posted };
   }
@@ -596,9 +640,9 @@ export class Room extends DurableObject {
     // kinds; ?game=1,2 restricts game frames to those matches. Both are
     // validated here, before the stream opens, so a bad subscription fails
     // fast instead of silently starving.
-    const STREAM_KINDS = ["message", "reaction", "game", "members", "state"];
+    const STREAM_KINDS = ["message", "reaction", "game", "members", "state", "delete", "gap"];
     let kinds: Set<string> | null = null;
-    const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase();
+    const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase(); // lowercase-ok: event names
     // state is opt-in only: naming it anywhere in events= subscribes, and
     // "all" (or no events= at all) does not - see the note at streamWants.
     const wantsState = evRaw.split(",").map((x) => x.trim()).indexOf("state") >= 0;
@@ -608,7 +652,7 @@ export class Room extends DurableObject {
         const k = part.trim();
         if (!k) continue;
         if (k === "all") { kinds = null; break; }
-        if (STREAM_KINDS.indexOf(k) < 0) return new Response(JSON.stringify({ error: "unknown stream event kind: " + k + " (valid: message, reaction, game, members, state, all)" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        if (STREAM_KINDS.indexOf(k) < 0) return new Response(JSON.stringify({ error: "unknown stream event kind: " + k + " (valid: " + STREAM_KINDS.join(", ") + ", all)" }), { status: 400, headers: { "Content-Type": "application/json" } });
         kinds.add(k);
       }
       if (kinds && !kinds.size) kinds = null;
@@ -652,9 +696,7 @@ export class Room extends DurableObject {
       writer.close().catch(() => {}); // the stream may have closed already
     };
     client.send("retry: 2000\n\n");
-    if (after !== null && streamWants(client, "message")) {
-      for (const d of this.delivered(after, KEEP)) client.send(sseFrame(room, d.msg, d.dn));
-    }
+    if (after !== null) this.replay(client, room, after);
     this.clients.add(client);
     if (client.stateSub) {
       // One initial snapshot, so a fresh subscriber starts current without
@@ -678,7 +720,7 @@ export class Room extends DurableObject {
         try { this.emitState(); } catch (e) { warn("state.emit", e, { room: this.roomName }); }
         // this runs only while its interval is set, so pinger holds its id
         if (!this.clients.size) { clearInterval(this.pinger as number); this.pinger = null; }
-      }, 15000);
+      }, STREAM_PING_MS);
     }
     return new Response(readable, { headers: SSE_HEADERS });
   }

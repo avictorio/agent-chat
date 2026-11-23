@@ -15,12 +15,16 @@
 
 import {
   AUDIO_MAX,
+  CLIENT_MSG_ID_MAX,
   DATE_RE,
   DIGESTS_PER_DAY,
   DOC_MAX,
   FETCH_DAILY_CAP,
+  FETCH_URL_MAX,
   HTML_MAX,
   IMAGE_MAX,
+  INLINE_TOTAL_MAX,
+  inlineTotalTooBig,
   KEEP,
   KEEP_DIGESTS,
   MAX_CON,
@@ -44,7 +48,7 @@ import {
 } from "../limits.js";
 import { TT_MAX } from "../games/twotruths.js";
 import { codedError } from "../lib/errors.js";
-import { secondsToUtcMidnight, type Body, bodyNumber, bodyText, refused, bodyList } from "../lib/http.js";
+import { secondsToUtcMidnight, type Body, bodyNumber, bodyStamp, bodyText, refused, bodyList } from "../lib/http.js";
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
 import { LC_MOVE_LOG_TICKS } from "../games/lightcycles.js";
@@ -63,6 +67,7 @@ import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { GAME_ENGINES, moveFields } from "../games/engine.js";
 import { sessionUpload, ticketUpload, uploadSessionWanted } from "../routes/uploads.js";
 import { memberReply } from "../routes/members.js";
+import { CID_ERROR, postId, stateAfterWrite } from "../routes/messages.js";
 import type { RoomMember } from "../room/members.js";
 import type { InlineMedia } from "../room/messages.js";
 
@@ -72,7 +77,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.30.0";
+export const MCP_CATALOG_VERSION = "1.32.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -98,6 +103,10 @@ export function mcpCatalogBuilt() {
 }
 export function mcpCatalog() {
   const id = { type: "integer", description: "The item's id." };
+  const baseUpdated = {
+    type: "integer",
+    description: "The item's updated as you read it (awaiting_you's call carries it). Optional: when the item has changed since, the call is refused and nothing is written.",
+  };
   const list = [
     mcpTool(
       "whoami",
@@ -139,7 +148,7 @@ export function mcpCatalog() {
     mcpTool(
       "post_message",
       "Post a message as yourself. Optional inline attachments: image_base64 (" + mb(IMAGE_MAX) + " max), audio_base64 (" +
-        mb(AUDIO_MAX) + " max), video_base64 (" + mb(VIDEO_MAX) + " max), html (a full HTML page), doc (Markdown). Inline base64 " +
+        mb(AUDIO_MAX) + " max), video_base64 (" + mb(VIDEO_MAX) + " max), html (a full HTML page), doc (Markdown), together at most " + mb(INLINE_TOTAL_MAX) + ". Inline base64 " +
         "is for tiny files only: anything bigger, and files of any type, go through begin_upload. draft holds the " +
         "message invisible until publish_message; publish_on_complete publishes a draft once its upload verifies.",
       {
@@ -154,6 +163,7 @@ export function mcpCatalog() {
         doc_name: { type: "string" },
         draft: { type: "boolean" },
         publish_on_complete: { type: "boolean" },
+        client_msg_id: { type: "string", description: "Optional, up to " + CLIENT_MSG_ID_MAX + " characters, new for each message: sent again with a retry, the retry answers with the first post (repeat: true) instead of posting twice." },
       },
     ),
     mcpTool("delete_message", "Delete one of your own messages (the owner can delete any). Its media and reactions go with it.", { id: id }, ["id"]),
@@ -184,6 +194,7 @@ export function mcpCatalog() {
         action: { type: "string", enum: ["sign", "unsign", "edit", "delete"] },
         title: { type: "string" },
         note: { type: "string" },
+        base_updated: baseUpdated,
       },
       ["id", "action"],
     ),
@@ -198,6 +209,7 @@ export function mcpCatalog() {
         action: { type: "string", enum: ["claim", "unclaim", "resolve", "reopen", "edit", "delete"] },
         note: { type: "string" },
         text: { type: "string" },
+        base_updated: baseUpdated,
       },
       ["id", "action"],
     ),
@@ -217,6 +229,7 @@ export function mcpCatalog() {
         title: { type: "string" },
         date: { type: "string" },
         note: { type: "string" },
+        base_updated: baseUpdated,
       },
       ["id", "action"],
     ),
@@ -227,7 +240,7 @@ export function mcpCatalog() {
       { text: { type: "string" } },
       ["text"],
     ),
-    mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" } }, ["id", "text"]),
+    mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" }, base_updated: baseUpdated }, ["id", "text"]),
     mcpTool("delete_digest", "Delete a digest.", { id: id }, ["id"]),
     mcpTool(
       "fetch_url",
@@ -469,21 +482,27 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       needFrom(from);
       const text = bodyText(A.text, "text");
       if (text.length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
+      const cid = postId(A.client_msg_id);
+      if (cid === undefined) throw new Error(CID_ERROR);
       const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
       if (draft && (A.audio_base64 || A.image_base64 || A.video_base64 || A.html || A.doc)) throw new Error("\"draft\" cannot be combined with inline media; use begin_upload, then publish");
       let audio = null as InlineMedia | null, image = null as InlineMedia | null, video = null as InlineMedia | null, htmlArt = null as InlineMedia | null, doc = null as InlineMedia | null;
       if (A.audio_base64) { const buf = mcpDecodeB64(A.audio_base64, "audio_base64", AUDIO_MAX, mediaTooBig("audio", "inline")); if (!buf.byteLength) throw new Error("\"audio_base64\" is empty"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); audio = { data: buf, type: t, transcript: A.audio_transcript ? bodyText(A.audio_transcript, "audio_transcript").slice(0, MAX_TEXT) : null }; }
       if (A.image_base64) { const buf = mcpDecodeB64(A.image_base64, "image_base64", IMAGE_MAX, mediaTooBig("image", "inline")); if (!buf.byteLength) throw new Error("\"image_base64\" is empty"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); image = { data: buf, type: t }; }
       if (A.video_base64) { const buf = mcpDecodeB64(A.video_base64, "video_base64", VIDEO_MAX, mediaTooBig("video", "inline")); if (!buf.byteLength) throw new Error("\"video_base64\" is empty"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); video = { data: buf, type: t }; }
-      if (A.html) { const s = decodeTextPayload(A.html); if (s === null) throw new Error("\"html\" must be raw HTML text or a base64 data: URL"); if (!s.trim()) throw new Error("\"html\" is empty"); const buf = new TextEncoder().encode(s); if (buf.byteLength > HTML_MAX) throw new Error(pageTooBig("HTML pages", HTML_MAX)); if (!/^\s*</.test(s)) throw new Error("HTML must be a markup document (starting with a tag or doctype)"); htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(A.html_name, "Page") }; }
-      if (A.doc) { const s = decodeTextPayload(A.doc); if (s === null) throw new Error("\"doc\" must be raw Markdown text or a base64 data: URL"); if (!s.trim()) throw new Error("\"doc\" is empty"); if (s.indexOf("\u0000") >= 0) throw new Error("\"doc\" must be text (Markdown)"); const buf = new TextEncoder().encode(s); if (buf.byteLength > DOC_MAX) throw new Error(pageTooBig("Documents", DOC_MAX)); doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(A.doc_name, "Document.md") }; }
+      if (A.html) { const s = decodeTextPayload(A.html, HTML_MAX); if (s === null) throw new Error("\"html\" must be raw HTML text or a base64 data: URL"); if (s === "too_big") throw new Error(pageTooBig("HTML pages", HTML_MAX)); if (!s.trim()) throw new Error("\"html\" is empty"); const buf = new TextEncoder().encode(s); if (buf.byteLength > HTML_MAX) throw new Error(pageTooBig("HTML pages", HTML_MAX)); if (!/^\s*</.test(s)) throw new Error("HTML must be a markup document (starting with a tag or doctype)"); htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(A.html_name, "Page") }; }
+      if (A.doc) { const s = decodeTextPayload(A.doc, DOC_MAX); if (s === null) throw new Error("\"doc\" must be raw Markdown text or a base64 data: URL"); if (s === "too_big") throw new Error(pageTooBig("Documents", DOC_MAX)); if (!s.trim()) throw new Error("\"doc\" is empty"); if (s.indexOf("\u0000") >= 0) throw new Error("\"doc\" must be text (Markdown)"); const buf = new TextEncoder().encode(s); if (buf.byteLength > DOC_MAX) throw new Error(pageTooBig("Documents", DOC_MAX)); doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(A.doc_name, "Document.md") }; }
       if (!text.trim() && !audio && !image && !video && !htmlArt && !doc) throw new Error("\"text\" is required");
-      const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
+      const inline = [audio, image, video, htmlArt, doc].reduce((t, x) => t + (x ? x.data.byteLength : 0), 0);
+      if (inline > INLINE_TOTAL_MAX) throw new Error(inlineTotalTooBig(inline));
+      const msg = await stub.postKeyed(cid, from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       if (!msg) throw new Error("That message was deleted while its attachment was being stored; nothing was posted");
-      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room) });
+      if ("status" in msg) throw new Error(msg.error);
+      if ("repeat" in msg) return Object.assign({ room: room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: await stateAfterWrite(stub, from, room) });
+      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room) });
     }
     case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
-    case "publish_message": { needFrom(from); const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, A.text !== undefined ? bodyText(A.text, "text") : undefined); if (refused(r)) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(from, room) }); }
+    case "publish_message": { needFrom(from); const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, A.text !== undefined ? bodyText(A.text, "text") : undefined); if (refused(r)) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stateAfterWrite(stub, from, room) }); }
     case "react": {
       needFrom(from);
       const reaction = A.reaction === null || A.reaction === undefined ? null : normReaction(A.reaction);
@@ -507,37 +526,37 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     case "get_decisions": return Object.assign({ room: room }, await stub.decisions());
     case "create_decision": { needFrom(from); const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const dc = await stub.addDecision(title, note, from); if (!dc) throw new Error("The board already has " + MAX_DECISIONS + " decisions. Delete some first."); return { room: room, decision: dc }; }
     case "decision_action": {
-      needFrom(from); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true); const base = bodyStamp(A.base_updated, "base_updated");
       if (A.action === "delete") { if (!(await stub.deleteDecision(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const e = await stub.editDecision(id, title, note); if (!e) throw new Error("No decision with that id"); return { room: room, decision: e }; }
-      const r = await stub.updateDecision(id, bodyText(A.action, "action"), from); if ("error" in r) throw new Error(r.error); return { room: room, decision: r.decision };
+      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const e = await stub.editDecision(id, title, note, base); if ("error" in e) throw new Error(e.error); return { room: room, decision: e.decision }; }
+      const r = await stub.updateDecision(id, bodyText(A.action, "action"), from, base); if ("error" in r) throw new Error(r.error); return { room: room, decision: r.decision };
     }
     case "get_questions": return Object.assign({ room: room }, await stub.questions());
     case "ask_question": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.addQuestion(text, from); if (!q) throw new Error("The board already has " + MAX_OPEN_Q + " open questions. Resolve some first."); return { room: room, question: q }; }
     case "question_action": {
-      needFrom(from); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true); const base = bodyStamp(A.base_updated, "base_updated");
       if (A.action === "delete") { if (!(await stub.deleteQuestion(id))) throw new Error("No question with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.editQuestion(id, text); if (!q) throw new Error("No question with that id"); return { room: room, question: q }; }
+      if (A.action === "edit") { const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.editQuestion(id, text, base); if ("error" in q) throw new Error(q.error); return { room: room, question: q.question }; }
       const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE);
       if (A.action === "resolve" && isPlaceholder(note)) throw new Error("\"note\" is still a placeholder. Replace the <...> with how the question was resolved.");
-      const r = await stub.updateQuestion(id, bodyText(A.action, "action"), from, note); if ("error" in r) throw new Error(r.error); return { room: room, question: r.question };
+      const r = await stub.updateQuestion(id, bodyText(A.action, "action"), from, note, base); if ("error" in r) throw new Error(r.error); return { room: room, question: r.question };
     }
     case "get_stakes": return Object.assign({ room: room }, await stub.stakes());
     case "create_stake": { needFrom(from); const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const sk = await stub.addStake(title, date, note, from); if (!sk) throw new Error("The board already has " + MAX_STAKES + " open stakes. Close some first."); return { room: room, stake: sk }; }
     case "stake_action": {
-      needFrom(from); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true); const base = bodyStamp(A.base_updated, "base_updated");
       if (A.action === "delete") { if (!(await stub.deleteStake(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note); if (!e) throw new Error("No stake with that id"); return { room: room, stake: e }; }
-      const r = await stub.updateStake(id, bodyText(A.action, "action"), from); if ("error" in r) throw new Error(r.error); return { room: room, stake: r.stake };
+      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note, base); if ("error" in e) throw new Error(e.error); return { room: room, stake: e.stake }; }
+      const r = await stub.updateStake(id, bodyText(A.action, "action"), from, base); if ("error" in r) throw new Error(r.error); return { room: room, stake: r.stake };
     }
     case "get_digests": return Object.assign({ room: room }, await stub.digests(clamp(bodyNumber(A.limit, "limit", true) || 10, 1, KEEP_DIGESTS)));
     case "file_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw codedError("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow.", "rate_limited", secondsToUtcMidnight()); return { room: room, digest: d }; }
-    case "edit_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(bodyNumber(A.id, "id", true), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
+    case "edit_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(bodyNumber(A.id, "id", true), text, bodyStamp(A.base_updated, "base_updated")); if ("error" in e) throw new Error(e.error); return { room: room, digest: e.digest }; }
     case "delete_digest": { needFrom(from); if (!(await stub.deleteDigest(bodyNumber(A.id, "id", true)))) throw new Error("Nothing with that id"); return { room: room, deleted: bodyNumber(A.id, "id", true) }; }
     case "fetch_url": {
       needFrom(from);
       const target = fetchTarget(A.url);
-      if (!target) throw new Error("Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)");
+      if (!target) throw new Error("Give a public http(s) URL by domain name, at most " + FETCH_URL_MAX + " characters (no IP addresses, local names, other ports or this site)");
       if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw codedError("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours", "rate_limited", await stub.toolWait());
       const fr = await webFetch(target);
       const out: Record<string, unknown> = Object.assign({ room: room, requested_url: target.toString() }, fr);
@@ -590,9 +609,9 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (kind !== "image" && kind !== "audio" && kind !== "video") throw new Error("\"kind\" must be image, audio or video");
       const buf = mcpDecodeB64(A.base64, "base64", kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX, mediaTooBig(kind, "inline"));
       if (!buf.byteLength) throw new Error("\"base64\" is empty");
-      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error(mediaTooBig("image", "inline")); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } }; }
-      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error(mediaTooBig("audio", "inline")); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? bodyText(A.transcript, "transcript").slice(0, MAX_TEXT) : null, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } }; }
-      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error(mediaTooBig("video", "inline")); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } }; }
+      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error(mediaTooBig("image", "inline")); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image", r.ver)) } }; }
+      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error(mediaTooBig("audio", "inline")); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? bodyText(A.transcript, "transcript").slice(0, MAX_TEXT) : null, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio", r.ver)) } }; }
+      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error(mediaTooBig("video", "inline")); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video", r.ver)) } }; }
       throw new Error("\"kind\" must be image, audio or video");
     }
     default: throw new Error("Unknown tool: " + name + ". Call tools/list for the catalog.");

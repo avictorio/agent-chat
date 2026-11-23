@@ -37,14 +37,14 @@ import {
 } from "../uploads/plan.js";
 import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
-import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
+import type { MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 import { warn } from "../lib/log.js";
-import { nameFold, stripControlChars } from "../lib/text.js";
+import { nameFold, sameName, stripControlChars } from "../lib/text.js";
 import { hiddenDraft } from "./media.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
-export type UpSession = Pick<MdRow, "type" | "r2key" | "size" | "upload_id" | "fp" | "part_size" | "name" | "began" | "mode">;
+export type UpSession = Pick<MdRow, "type" | "r2key" | "size" | "upload_id" | "fp" | "part_size" | "name" | "began" | "mode" | "at">;
 /** A direct upload in flight, as a removal found it (directUploadsOf). */
 export type DirectSession = { msg: number, kind: string, upload_id: string };
 /** A resumable upload asked for with a ticket (mintUploadTicket's
@@ -58,7 +58,7 @@ export type UpPlan = { status: 200, part_size: number, parts: number, resumed: b
 /** uploadFinish's answer: the stored file, or { status, error } (with
  *  the missing part numbers on a 409 for parts). Shared by a finish sent
  *  again while the first runs. */
-export type UpFinish = { status: 200, type: string, bytes: number, name: string | null, published: boolean } | { status: number, error: string, missing?: number[] };
+export type UpFinish = { status: 200, type: string, bytes: number, name: string | null, published: boolean, ver: number | null } | { status: number, error: string, missing?: number[] };
 /** What a finish may say about the file it means (all optional): the
  *  size and fingerprint (fp) the client gave at start, and for an upload
  *  link its expiry, which is its session's start plus UP_SESSION_MS. */
@@ -116,6 +116,8 @@ export const UploadMethods = {
           if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, r.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
           if (!live()) return;
           this.upDrop(r.msg, r.kind, r.upload_id);
+          // a file of the draft that finished before goes live, as it would have on a last finish
+          if (this.roomName) await this.maybeAutoPublish(r.msg, this.roomName);
         });
       } catch (e) {
         // the room was deleted meanwhile: its destroy aborts what is left
@@ -138,17 +140,17 @@ export const UploadMethods = {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
     if (!r || hiddenDraft(r, member, byOwner)) return { status: 404, error: "No message with that id" };
     if (!r.draft) return { status: 409, error: "Upload tickets are minted for drafts; that message is already published" };
-    if (String(r.sender).toLowerCase() !== String(member || "").toLowerCase()) return { status: 403, error: "You can only open an upload for your own draft" };
+    if (!sameName(r.sender, member)) return { status: 403, error: "You can only open an upload for your own draft" };
     const now = Date.now();
     this.sql.exec("DELETE FROM ut WHERE expires < ?", now);
     // A resumable link counts while its upload is in flight.
-    const open = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray()[0];
+    const open = this.sql.exec<Pick<UtRow, "member">>("SELECT member FROM ut WHERE used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", now).toArray().filter((u) => sameName(u.member, member)).length;
     // Links being minted right now count too: the row is written only
     // after the awaits below, so without this a burst of calls arriving
     // together would each see the same count and all pass the cap.
     const who = nameFold(String(member || ""));
     const minting = this.utMinting.get(who) || 0;
-    if (((open && open.n) || 0) + minting >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    if (open + minting >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
     this.utMinting.set(who, minting + 1);
     let plan: UpStart | null = null;
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
@@ -171,7 +173,7 @@ export const UploadMethods = {
       // awaits above leave room) would be the one link it missed.
       const revoked = byOwner ? null : this.inviteStill(token, member);
       if (revoked) {
-        if (plan) { try { await this.uploadAbort(msgId, kind, member, false); } catch (e) { warn("upload.abort", e, { room }); } }
+        if (plan) { try { await this.uploadAbort(msgId, kind, member, false, room); } catch (e) { warn("upload.abort", e, { room }); } }
         return revoked;
       }
       this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
@@ -194,10 +196,10 @@ export const UploadMethods = {
     const t = this.sql.exec<Pick<UtRow, "msg" | "kind" | "member" | "expires" | "owner" | "sess">>("SELECT msg, kind, member, expires, owner, sess FROM ut WHERE h = ?", await sha256hex(String(rawTicket || ""))).toArray()[0];
     if (!t || !t.sess) return { status: 404, error: "Unknown upload link" };
     if (Date.now() > t.expires) return { status: 410, error: "This upload link has expired" };
-    if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
+    if (!t.owner && !this.invNames(t.member, true).length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
     const m = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The message this upload was opened for is gone" };
-    if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The message changed hands; open a fresh upload" };
+    if (!sameName(m.sender, t.member)) return { status: 409, error: "The message changed hands; open a fresh upload" };
     return { status: 200, msg: t.msg, kind: t.kind, member: t.member, expires: t.expires };
   },
 
@@ -236,11 +238,11 @@ export const UploadMethods = {
     // Any active invite under the name counts: a member whose invite was
     // rotated has a revoked row and a live one. Owner-minted tickets carry
     // no member check (the owner posts under any name).
-    if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
+    if (!t.owner && !this.invNames(t.member, true).length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
     const m = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The draft this upload was opened for is gone" };
     if (!m.draft) return { status: 409, error: "The draft this upload was opened for is already published" };
-    if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The draft changed hands; open a fresh upload" };
+    if (!sameName(m.sender, t.member)) return { status: 409, error: "The draft changed hands; open a fresh upload" };
     const kind = t.kind;
     if (!data.byteLength) return { status: 400, error: "The upload body is empty" };
     if (data.byteLength > t.max_bytes) return { status: 413, error: mediaTooBig(kind as "image" | "audio" | "video", "single-shot") };
@@ -270,13 +272,31 @@ export const UploadMethods = {
   },
 
   // ---- Drafts: a long upload finishes before its message goes live ----
-  async sweepDrafts() {
+  /** @param room the room's name, for a draft this sweep publishes */
+  async sweepDrafts(room?: string | null) {
     if (this._sweptAt && Date.now() - this._sweptAt < 600000) return;
     // a room deleted during one of the storage calls below has no rows
     // left to sweep, and one created since is not this room
     const gen = this.gen;
     const now = Date.now();
     this._sweptAt = now;
+    // A publish_on_complete draft with a file in place and no upload still
+    // live goes live here, before the deletes below can reach it, in the
+    // two cases nothing else notices: (i) an upload of it expired
+    // unfinished, or (ii) it is as old as the deletes below take and holds
+    // a file the upload engine finished (only the engine sets md.began):
+    // the instance stopped between ending that upload and publishing.
+    // Left a draft, it was deleted with its finished file, where the code
+    // that published on the first finish had posted it. Any draft with a
+    // file used to be published here, so one posted a moment ago with an
+    // inline thumbnail went live without its video, at the sweep inside
+    // the very start of that video. A draft whose files are only inline
+    // or attached keeps its old fate: deleted after a day.
+    const due = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND pubauto IS NOT NULL AND pubauto != 0 AND EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NULL) AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?) AND (EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) <= ?) OR (m.ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.at > ?) AND EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NULL AND md.began IS NOT NULL)))", now - UP_SESSION_MS, now - UP_SESSION_MS, now - 86400000, now - 86400000).toArray();
+    for (const d of due) {
+      await this.maybeAutoPublish(d.id, room || this.roomName || "");
+      if (!this.alive(gen)) return;
+    }
     // A draft lives a day - or, while an upload for it is in flight, as
     // long as that upload can (UP_SESSION_MS from its start: R2 drops an
     // unfinished multipart upload after 7 days).
@@ -286,6 +306,8 @@ export const UploadMethods = {
     // publish, or before the message's second file could start.
     const stale = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND ((md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?) OR md.at > ?))", now - 86400000, now - UP_SESSION_MS, now - 86400000).toArray();
     for (const d of stale) {
+      // a post still storing its files is not done with its rows (Room.storing)
+      if (this.storing.has(d.id)) continue;
       // rows first, storage after (see deleteMessage)
       const media = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray();
       this.sql.exec("DELETE FROM upp WHERE msg = ?", d.id);
@@ -316,12 +338,12 @@ export const UploadMethods = {
   upAuth(id: number, who: string | null | undefined, owner: boolean | undefined, kind: string): { status: 404 | 403, error: string } | { status: 200, msg: Pick<MsgRow, "sender" | "ts" | "draft"> } {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "ts" | "draft">>("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
     return { status: 200, msg: r };
   },
 
   upSession(id: number, kind: string): UpSession | null {
-    return this.sql.exec<UpSession>("SELECT type, r2key, size, upload_id, fp, part_size, name, began, mode FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
+    return this.sql.exec<UpSession>("SELECT type, r2key, size, upload_id, fp, part_size, name, began, mode, at FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
   },
 
   // The plan a session runs on, pinned at its start (streamed ones
@@ -399,7 +421,7 @@ export const UploadMethods = {
     const gen = this.gen;
     this.fence(gen);
     // the sweep runs before the message is looked at, never between the look and the write
-    await this.sweepDrafts();
+    await this.sweepDrafts(room);
     this.fence(gen);
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
@@ -552,12 +574,15 @@ export const UploadMethods = {
     } else msg = this.sql.exec<Pick<MsgRow, "ts">>("SELECT ts FROM m WHERE id = ?", id).toArray()[0];
     const row = this.upSession(id, kind);
     if (!row) return { status: 200, uploading: false, received: [] };
-    if (!row.upload_id) return { status: 200, uploading: false, complete: true, size: row.size, type: row.type, name: row.name || null, received: [] };
+    // fp is the fingerprint the session's start gave: with size it tells
+    // a client its own upload from another of the same size that replaced
+    // it (another device, the same draft).
+    if (!row.upload_id) return { status: 200, uploading: false, complete: true, size: row.size, type: row.type, name: row.name || null, fp: row.fp || null, received: [] };
     const plan = this.upPlan(row);
     let received;
     try { received = Array.from((await this.upReceived(id, kind, row)).keys()).sort((x, y) => x - y); }
     catch (e) { return { status: 502, error: "Storage didn't list this upload's parts (" + String((e && (e as Error).message) || e) + "); ask again" }; }
-    return { status: 200, uploading: true, direct: row.mode === "direct" && !this.upDirectOff(owner), size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
+    return { status: 200, uploading: true, direct: row.mode === "direct" && !this.upDirectOff(owner), size: row.size, type: row.type, name: row.name || null, fp: row.fp || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
   },
 
   /** @param room publishes a publish-on-complete draft when given */
@@ -568,12 +593,31 @@ export const UploadMethods = {
     // after a blip lost the first answer) gets that finish's answer. It
     // used to get 409 "already finishing", and an uploader reading that
     // as a failure gave up on an upload that succeeded.
+    // Only a finish of the same file, though: a client whose upload
+    // another of the same size replaced (a second device, a link opened
+    // for the old session) joined the new one's finish and was told the
+    // other file was its own. It is compared the way a finish after the
+    // fact is (upOtherFile), against the session being finished.
     const k = id + ":" + kind;
     const running = this._finishing.get(k);
-    if (running) return running;
+    if (running) {
+      const row = this.upSession(id, kind);
+      if (row && this.upOtherFile(row, a.msg, opts)) return { status: 409, error: "No upload in progress for that message" };
+      return running;
+    }
     const p = this.withMediaLock(id, kind, (live) => this.upFinishNow(id, kind, who, owner, room, opts, live));
     this._finishing.set(k, p);
     try { return await p; } finally { if (this._finishing.get(k) === p) this._finishing.delete(k); }
+  },
+
+  // Whether a finish names another file than the session in this row: by
+  // its size, the fingerprint its start gave (stored cut to 200
+  // characters), or an upload link's expiry, which is its session's start
+  // plus UP_SESSION_MS. A finish that names none of them takes the row's.
+  upOtherFile(row: UpSession, msg: { ts: number } | null | undefined, opts: UpFinishAsk | null | undefined) {
+    return !!opts && ((opts.size != null && opts.size !== row.size)
+      || (!!opts.fp && !!row.fp && opts.fp.slice(0, 200) !== row.fp)
+      || (opts.expires != null && this.upBegan(row, msg) + UP_SESSION_MS !== opts.expires));
   },
 
   // Whether this upload still owns its message's row: anything written
@@ -616,11 +660,9 @@ export const UploadMethods = {
       // that says which file it means (size, the fingerprint it gave at
       // start, or a link minted for another session) is told it is not
       // this one.
-      if (opts && ((opts.size != null && opts.size !== row.size)
-        || (opts.fp && row.fp && opts.fp.slice(0, 200) !== row.fp)
-        || (opts.expires != null && this.upBegan(row, a.msg) + UP_SESSION_MS !== opts.expires))) return { status: 409, error: "No upload in progress for that message" };
+      if (this.upOtherFile(row, a.msg, opts)) return { status: 409, error: "No upload in progress for that message" };
       const m = this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
-      return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft) };
+      return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft), ver: row.at || null };
     }
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const media = this.env.MEDIA;
@@ -634,6 +676,11 @@ export const UploadMethods = {
       try { const hd = await media.head(row.r2key); return !!hd && hd.size === row.size; } catch (e) { warn("upload.head", e, { room, id, kind }); return false; }
     };
     const gone = { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
+    // The upload ends here without a file, and the draft's other files,
+    // finished before, may be all that a publish_on_complete draft waited
+    // on, as on an abort.
+    const ended = async () => { if (room) await this.maybeAutoPublish(id, room); };
+    const upGone = async () => { this.upDrop(id, kind, uploadId); await ended(); return gone; };
     // The room was deleted during a storage call: its delete has run, so
     // an object this finish completed is nobody's (the key is never used
     // again), and no row is written.
@@ -646,7 +693,7 @@ export const UploadMethods = {
     catch (e) {
       const em = String((e && (e as Error).message) || e);
       if (!/NoSuchUpload/i.test(em)) return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); finish again" };
-      if (!(await landed())) { if (!live()) return roomGone(); this.upDrop(id, kind, uploadId); return gone; }
+      if (!(await landed())) { if (!live()) return roomGone(); return upGone(); }
     }
     if (!live()) return roomGone();
     if (got) {
@@ -660,7 +707,7 @@ export const UploadMethods = {
       catch (e) {
         const em = String((e && (e as Error).message) || e);
         if (!/NoSuchUpload|upload does not exist|10024/i.test(em)) { if (!live()) return roomGone(); return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." }; }
-        if (!(await landed())) { if (!live()) return roomGone(); this.upDrop(id, kind, uploadId); return gone; }
+        if (!(await landed())) { if (!live()) return roomGone(); return upGone(); }
       }
     }
     /** the R2 object's head */
@@ -689,10 +736,12 @@ export const UploadMethods = {
       try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
       if (!live()) throw goneError();
       this.upDrop(id, kind, uploadId);
+      await ended();
       return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
     }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-    this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = ? AND upload_id = ?", type, Date.now(), id, kind, uploadId);
+    const at = Date.now();
+    this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = ? AND upload_id = ?", type, at, id, kind, uploadId);
     const transcript = opts && opts.transcript !== undefined && opts.transcript !== null ? String(opts.transcript).slice(0, MAX_TEXT) : undefined;
     if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, row.size, id);
     if (kind === "audio") {
@@ -704,10 +753,11 @@ export const UploadMethods = {
     // a live message is sent again with its file; a draft waits for its publish
     this.mediaLanded(id, room);
     const published = room ? !!(await this.maybeAutoPublish(id, room)) : false;
-    return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published };
+    return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published, ver: at };
   },
 
-  async uploadAbort(id: number, kind: string, who: string | null | undefined, owner: boolean) {
+  /** @param room publishes a publish-on-complete draft that waited only on this upload */
+  async uploadAbort(id: number, kind: string, who: string | null | undefined, owner: boolean, room?: string | null) {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     // In the message and kind's turn: an abort sent while a finish runs
@@ -715,24 +765,34 @@ export const UploadMethods = {
     // the row the finish was completing.
     return this.withMediaLock(id, kind, async (live) => {
       const row = this.upSession(id, kind);
-      if (!row || !row.upload_id) return { status: 200, aborted: false };
+      if (!row || !row.upload_id) return { status: 200, aborted: false, published: false };
       const uploadId = row.upload_id;
       if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ } }
       if (!live()) throw goneError();
       this.upDrop(id, kind, uploadId);
-      return { status: 200, aborted: true };
+      // A publish_on_complete draft whose other files finished while this
+      // one was on its way waited only on it: it goes live now. Only a
+      // finish used to publish, so the draft stayed one and the sweep
+      // deleted it with those files.
+      const published = room ? !!(await this.maybeAutoPublish(id, room)) : false;
+      return { status: 200, aborted: true, published: published };
     });
   },
 
   // One of your drafts with an upload in flight for the same file (size
   // and fingerprint), of any kind unless kind narrows it: how a client
   // that lost its place - a reload, another device - picks it back up.
+  // Only a draft that holds nothing but that file: one from a send of a
+  // photo and this file, the photo done and the file not, was handed back
+  // to a resend of the file alone, and its publish posted the photo the
+  // author had removed meanwhile.
   async findResumableUpload(who: string | null | undefined, size: unknown, fp: unknown, owner: boolean, kind: string | null | undefined) {
     if (!fp || !size) return { status: 200, found: false };
     const rows = this.sql.exec<{ msg: number, kind: string, sender: string }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
     for (const r of rows) {
       if (kind && r.kind !== kind) continue;
-      if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
+      if (!owner && !sameName(r.sender, who)) continue;
+      if (this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND kind != ? LIMIT 1", r.msg, r.kind).toArray().length) continue;
       const st = await this.uploadStatus(r.msg, r.kind);
       if (st.status !== 200 || !st.uploading) continue;
       return { status: 200, found: true, id: r.msg, kind: r.kind, received: st.received, part_size: st.part_size, parts: st.parts, direct: !!st.direct };
@@ -748,7 +808,7 @@ export const UploadMethods = {
   async streamBegin(id: number, who: string | null | undefined, type: string, size: number, owner: boolean, room: string) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach a video to your own messages" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
     if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: VIDEO_STREAM_TOO_BIG };
@@ -808,6 +868,7 @@ export const UploadMethods = {
         try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
         if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
+        if (room) await this.maybeAutoPublish(id, room);
         return { status: gone.status, error: gone.error };
       }
       // the room was deleted during a storage call (see upFinishNow)
@@ -819,6 +880,7 @@ export const UploadMethods = {
         if (this.upStill(id, "video", uploadId) || !this.upSession(id, "video")) { try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
         if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
+        if (room) await this.maybeAutoPublish(id, room);
         return { status: status, error: error };
       };
       try { await media.resumeMultipartUpload(row.r2key, uploadId).complete(parts); }
@@ -826,6 +888,7 @@ export const UploadMethods = {
         try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
         if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
+        if (room) await this.maybeAutoPublish(id, room);
         return { status: 502, error: "Upload stream failed: " + String((e && (e as Error).message) || e) };
       }
       let head: { size: number } | null = null, sniffed: string | null = null;
@@ -843,18 +906,20 @@ export const UploadMethods = {
       const left = sender ? this.inviteStill(sender.token, sender.member) : null;
       if (left) return discard(left.status, left.error);
       this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
-      this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video' AND upload_id = ?", sniffed, size, Date.now(), id, uploadId);
+      const at = Date.now();
+      this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video' AND upload_id = ?", sniffed, size, at, id, uploadId);
       this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
       this.mediaLanded(id, room);
       const published = room ? await this.maybeAutoPublish(id, room) : null;
-      return { status: 200, type: sniffed, bytes: size, published: !!published };
+      return { status: 200, type: sniffed, bytes: size, published: !!published, ver: at };
     });
   },
 
   // Takes the multipart upload id streamBegin answered: a newer upload for
   // the same message replaces the row, and a late abort of the old one must
   // not delete the new one.
-  async streamAbort(id: number, uploadId: string | null | undefined) {
+  /** @param room publishes a publish-on-complete draft that waited only on this stream */
+  async streamAbort(id: number, uploadId: string | null | undefined, room?: string | null) {
     // Discard means the R2 multipart dies too, as in uploadAbort: the
     // one current caller aborts it first, but the upload id is deleted here,
     // so a caller that trusted this method alone would orphan the session.
@@ -865,6 +930,7 @@ export const UploadMethods = {
       if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, own).abort(); } catch { /* already completed, aborted or expired */ } }
       if (!live()) throw goneError();
       this.upDrop(id, "video", own);
+      if (room) await this.maybeAutoPublish(id, room);
       return { status: 200 };
     });
   },

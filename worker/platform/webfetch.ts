@@ -1,12 +1,14 @@
 // The room fetch tool: fetch a public page and return it as text.
 
 import { htmlToText } from "../lib/text.js";
+import { FETCH_URL_MAX } from "../limits.js";
 
 export const FETCH_MAX_BYTES = 1000000;
 
 export const FETCH_MAX_TEXT = 20000;
 
-// Room tools: only public http(s) URLs by domain name. No IP addresses, local names, other ports or this site.
+// Room tools: only public http(s) URLs by domain name, at most FETCH_URL_MAX
+// characters. No IP addresses, local names, other ports or this site.
 export function fetchTarget(s: unknown) {
   let u;
   try { u = new URL(String(s || "")); } catch { return null; }
@@ -18,6 +20,9 @@ export function fetchTarget(s: unknown) {
   if (/(^|\.)(localhost|local|internal|lan|home|test|invalid|arpa)$/.test(h)) return null;
   if (h === "victorio.cloud" || /\.victorio\.cloud$/.test(h)) return null;
   if (u.port && u.port !== "80" && u.port !== "443") return null;
+  // measured as written out, which is what the fetch log stores: escaping
+  // can make it longer than what was sent
+  if (u.toString().length > FETCH_URL_MAX) return null;
   return u;
 }
 
@@ -52,7 +57,7 @@ export async function webFetch(target: URL) {
       let off = 0;
       for (const c of chunks) { buf.set(c, off); off += c.length; }
       const body = new TextDecoder().decode(buf);
-      const conv = /html/.test(type) ? htmlToText(body) : { title: "", text: body };
+      const conv = /html/.test(type) ? htmlToText(body, FETCH_MAX_BYTES) : { title: "", text: body };
       return { url: u.toString(), status: res.status, content_type: type, title: conv.title, text: conv.text.slice(0, FETCH_MAX_TEXT), truncated: cut || conv.text.length > FETCH_MAX_TEXT };
     }
     return { url: u.toString(), error: "Too many redirects" };

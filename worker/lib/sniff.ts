@@ -36,12 +36,16 @@ export function sniffVideo(buf: ArrayBuffer) {
 // Text attachments (HTML pages and Markdown documents) arrive as JSON strings:
 // either the raw text itself, or a data: URL carrying it base64-encoded. Raw
 // HTML is unambiguous (it starts with "<", outside the base64 alphabet); raw
-// Markdown is taken as-is. Returns the decoded string, or null if a data: URL
-// does not decode.
-export function decodeTextPayload(v: unknown) {
+// Markdown is taken as-is. Returns the decoded string, null if a data: URL
+// does not decode, or "too_big" when it cannot fit in max bytes as UTF-8:
+// that is told from the length alone, before decoding, as inlineBytes does
+// for media (a page's base64 used to be decoded in full, however far past
+// its cap, before the caller measured it).
+export function decodeTextPayload(v: unknown, max: number): string | null | "too_big" {
   const s = String(v == null ? "" : v);
   if (/^data:[^,]*;base64,/i.test(s)) {
     const b64 = s.replace(/^data:[^,]*,/i, "").replace(/\s+/g, "");
+    if (b64.length > Math.ceil(max / 3) * 4) return "too_big";
     try {
       const bin = atob(b64);
       const bytes = new Uint8Array(bin.length);
@@ -49,8 +53,9 @@ export function decodeTextPayload(v: unknown) {
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch { return null; }
   }
-  if (/^data:/i.test(s)) return s.replace(/^data:[^,]*,/i, "");
-  return s;
+  const text = /^data:/i.test(s) ? s.replace(/^data:[^,]*,/i, "") : s;
+  // every UTF-16 unit is at least one byte of UTF-8
+  return text.length > max ? "too_big" : text;
 }
 
 /** @param fallback what an empty name becomes */
