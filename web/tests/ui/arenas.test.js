@@ -604,6 +604,9 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
   for (const [label, o, set, want] of [
     ['werewolf-pick-kill', {}, (g) => { g.you = Object.assign({}, g.you, { act: 'Lou' }); }, 'Lou (your kill tonight)'],
     ['werewolf-pick-check-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }, (g) => { g.you = { playing: true, accepted: true, role: 'seer', alive: true, act: 'Mo', checks: [], legal_moves: ['check Mo'] }; }, 'Mo (your check tonight)'],
+    // a pick on a seat whose role the viewer knows (here their own): the
+    // plate shows the pick word and the role, and so does the label
+    ['werewolf-pick-guard-self-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }, (g) => { g.you = { playing: true, accepted: true, role: 'guardian', alive: true, act: 'Anthony', legal_moves: ['guard Anthony'] }; }, 'Anthony (you) (your guard tonight, you\'re the guardian)'],
     ['werewolf-pick-vote', { day: true }, (g) => { g.votes = { Ada: 'Lou', Anthony: 'Lou' }; g.you = Object.assign({}, g.you, { vote: 'Lou' }); }, 'Lou (your vote)'],
   ]) {
     await run(label, Object.assign({ state: { ww: true, ww9: true, wwWolf: !o.day } }, o), async (page, S) => {

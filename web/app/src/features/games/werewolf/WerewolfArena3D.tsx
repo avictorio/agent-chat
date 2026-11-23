@@ -558,7 +558,7 @@ export default function WerewolfArena3D({
   const label =
     "Werewolf, 3D view: " +
     (running ? (g.phase === "night" ? "night " + g.night + ", the village sleeps. " : "day " + g.day + ", " + alive + " alive, " + Object.keys(g.votes || {}).length + " voted. ") : finished ? (g.side === "wolves" ? "the wolves won. " : "the village won. ") : "") +
-    seats.map((s) => s.name + (s.you ? " (you)" : "") + (deadNow.has(s.name) || !((players.find((p) => p.name === s.name) || {}) as Partial<WerewolfPlayer>).alive ? " (dead" + (roleOf(s.name) ? ", " + roleOf(s.name) : "") + ")" : "") + (pickTarget === s.name ? " (" + PICK_WORD[pickKind].replace(/^\S+ /, "") + " tonight)" : myVote === s.name ? " (your vote)" : "")).join(", ") +
+    seats.map((s) => s.name + (s.you ? " (you)" : "") + (deadNow.has(s.name) || !((players.find((p) => p.name === s.name) || {}) as Partial<WerewolfPlayer>).alive ? " (dead" + (roleOf(s.name) ? ", " + roleOf(s.name) : "") + ")" : "") + (pickTarget === s.name ? " (" + PICK_WORD[pickKind].replace(/^\S+ /, "") + " tonight" + (s.you && myRole ? ", you're the " + myRole : "") + ")" : myVote === s.name ? " (your vote)" : "")).join(", ") +
     ".";
   const intro = firstVisit ? { title: "Werewolf", sub: seats.map((s) => s.name).join(" · ") || "Night falls", color: "#93c5fd" } : null;
   return (
@@ -623,6 +623,9 @@ export default function WerewolfArena3D({
             const fall = isVictim ? smooth(fallAt, fallAt + 0.7, rt) : dead ? 1 : 0;
             const role = dead ? roleOf(s.name) : null;
             const mineRole = s.you && myRole && !dead ? roleInfo(myRole) : null;
+            const picked = pickTarget === s.name;
+            // the role the viewer knows for this seat: a dead one's, or their own
+            const known = role ? roleInfo(role) : mineRole;
             const packEyes = myRole === "werewolf" && (p.name === meName || (you.pack || []).indexOf(s.name) >= 0);
             const ox = Math.cos(s.a);
             const oz = Math.sin(s.a);
@@ -635,10 +638,10 @@ export default function WerewolfArena3D({
                     map={textTex([
                       { text: s.name + (s.you ? " (you)" : ""), color: dead ? "#a1a1aa" : s.hex, size: 42 },
                       {
-                        text: role
-                          ? roleInfo(role).icon + " " + roleInfo(role).name
-                          : pickTarget === s.name
-                            ? PICK_WORD[pickKind]
+                        text: picked
+                          ? PICK_WORD[pickKind]
+                          : role
+                            ? roleInfo(role).icon + " " + roleInfo(role).name
                             : mineRole
                               ? mineRole.icon + " you're the " + mineRole.name.toLowerCase()
                               : tally[s.name]
@@ -646,10 +649,17 @@ export default function WerewolfArena3D({
                                 : running && g.phase === "day" && p.voted
                                   ? "voted"
                                   : "",
-                        color: role ? roleInfo(role).hex : pickTarget === s.name ? PICK_TEXT[pickKind] : mineRole ? mineRole.hex : "#fde68a",
+                        color: picked ? PICK_TEXT[pickKind] : role ? roleInfo(role).hex : mineRole ? mineRole.hex : "#fde68a",
                         // the pick word is the plate's news: a size up
-                        size: pickTarget === s.name && !role ? 36 : 30,
+                        size: picked ? 36 : 30,
                       },
+                      // A pick on a seat whose role the viewer knows (a
+                      // guardian guarding themselves) showed the role and
+                      // dropped the pick word, leaving only the ring's
+                      // shape, small on a phone. Both show: the pick word,
+                      // then the role on its own line, which is the one
+                      // cut short if a line runs long.
+                      ...(picked && known ? [{ text: known.icon + " " + known.name, color: known.hex, size: 28 }] : []),
                     ])}
                     transparent
                     depthWrite={false}
