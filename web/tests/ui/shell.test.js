@@ -689,10 +689,11 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
 
   }
   // The create form's refusals in plain words: an address with a name or
-  // angle brackets around it is stopped before any request, the server's
-  // email_invalid 400 says the same, and a 503 room_pending (another
-  // creator's room still waiting on its mail) says to wait or pick another
-  // name, not that creation is down.
+  // angle brackets around it is stopped before any request (so is one the
+  // server's plainAddress refuses for its local part's length or a last
+  // label with no letter), the server's email_invalid 400 says the same,
+  // and a 503 room_pending (another creator's room still waiting on its
+  // mail) says to wait or pick another name, not that creation is down.
   async function runCreateRefusals(name, w, h) {
     if (process.env.ONLY && !process.env.ONLY.split(',').includes(name)) return;
     const b = await chromium.launch({});
@@ -712,7 +713,8 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
       if (pth === '/api/build') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ build: 'next-dev' }) });
       if (pth === '/api/create-room') {
         sent.push(route.request().postDataJSON());
-        const a = answers.shift();
+        // a request the form should not have sent finds no answer left
+        const a = answers.shift() || { status: 500, body: {} };
         return route.fulfill({ status: a.status, contentType: 'application/json', headers: a.headers || {}, body: JSON.stringify(a.body) });
       }
       if (pth.startsWith('/assets/')) { try { const b2 = require('fs').readFileSync(DIST + pth); return route.fulfill({ status: 200, contentType: pth.endsWith('.css') ? 'text/css' : 'text/javascript', body: b2 }); } catch { return route.fulfill({ status: 404, body: 'nf' }); } }
@@ -731,6 +733,17 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
       await page.click('#cGo');
       out.local = await page.$eval('#cMsg', (e) => e.textContent);
       out.sentAfterLocal = sent.length;
+      // the server's two other rules, mirrored: a last label with a letter, a local part of at most 64
+      out.mirror = [];
+      for (const bad of ['ada@example.123', 'a'.repeat(65) + '@example.com']) {
+        // another message first, so the one read below is this address's
+        await page.fill('#cEmail', 'ada');
+        await page.click('#cGo');
+        await page.fill('#cEmail', bad);
+        await page.click('#cGo');
+        out.mirror.push(await page.$eval('#cMsg', (e) => e.textContent));
+      }
+      out.sentAfterMirror = sent.length;
       await page.fill('#cEmail', 'ada@example.com');
       await page.click('#cGo');
       await page.waitForFunction(() => /creating a room with that name/.test(document.getElementById('cMsg').textContent), null, { timeout: 5000 });
@@ -750,6 +763,7 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     }
     await b.close();
     const ok = /on its own, like name@example.com/.test(out.local || '') && out.sentAfterLocal === 0
+      && out.mirror && out.mirror.length === 2 && out.mirror.every((t) => /before the @, an ordinary domain after it/.test(t)) && out.sentAfterMirror === 0
       && /Try again in a few minutes, or pick another name/.test(out.pending || '') && !/unavailable/.test(out.pending || '')
       && /on its own, like name@example.com/.test(out.server400 || '') && out.focused === 'cEmail'
       && out.msgBox && out.msgBox.bad && out.msgBox.right <= w;

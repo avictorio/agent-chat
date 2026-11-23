@@ -26,7 +26,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-create-room",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "POST /api/create-room: email must be a plain address like name@example.com (no display name or angle brackets; 400 email_invalid otherwise). A name whose room still waits on its genesis mail answers 503 room_pending with Retry-After: wait or pick another name; after 10 minutes it is offered again only if nothing was written in it (else 409). The caps count rooms created, not attempts: a taken name or a refused mail costs nothing, and a +tag counts as the same address.",
+    text: "POST /api/create-room: email must be a plain ASCII address like name@example.com (no display name or angle brackets; 400 email_invalid otherwise). A name whose room still waits on its genesis mail answers 503 room_pending with Retry-After: wait or pick another name; after 10 minutes it is offered again only if nothing was written in it (else 409). The caps count rooms created, not attempts: a taken name or a refused mail costs nothing, and a +tag counts as the same address.",
   },
   {
     id: "2026-11-23-draft-owner",

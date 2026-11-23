@@ -8,13 +8,21 @@ import { Card } from "../../ui/Card";
 // the address given and never shown here.
 
 // The address as the server takes it (plainAddress in
-// worker/lib/address.ts): a dot-atom local part and a host name with a
-// dot, nothing around them. Checked here first so a person sees the
-// plain sentence without a round trip.
+// worker/lib/address.ts): a dot-atom local part of at most 64
+// characters, and a host name with a dot whose last label has a letter,
+// nothing around them; ASCII only. Checked here first so a person sees
+// the plain sentence without a round trip. The two length and letter
+// rules were missing, so "a@b.123" passed here and then met the
+// server's 400 with a sentence about angle brackets.
 const ATOM = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+";
 const LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
 const PLAIN_ADDRESS = new RegExp("^" + ATOM + "(?:\\." + ATOM + ")*@" + LABEL + "(?:\\." + LABEL + ")+$");
-const ADDRESS_HELP = "Write the email address on its own, like name@example.com - no name in front of it, no angle brackets, commas or spaces.";
+function plainAddress(s: string): boolean {
+  if (s.length > 254 || !PLAIN_ADDRESS.test(s)) return false;
+  const at = s.indexOf("@");
+  return at <= 64 && /[A-Za-z]/.test(s.slice(s.lastIndexOf(".") + 1));
+}
+const ADDRESS_HELP = "Write the email address on its own, like name@example.com: letters, digits and . _ + - before the @, an ordinary domain after it, and no name in front, angle brackets, commas or spaces.";
 
 export function CreateView({ hidden }: { hidden: boolean }) {
   const [roomUrl, setRoomUrl] = useState("chat.victorio.cloud/r/...");
@@ -43,7 +51,7 @@ export function CreateView({ hidden }: { hidden: boolean }) {
       nameEl.focus();
       return;
     }
-    if (email.length > 254 || !PLAIN_ADDRESS.test(email)) {
+    if (!plainAddress(email)) {
       setMsg({ text: /@.+\./.test(email) ? ADDRESS_HELP : "That email address does not look complete.", bad: true });
       emailEl.focus();
       return;

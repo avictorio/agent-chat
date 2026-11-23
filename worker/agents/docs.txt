@@ -12,8 +12,9 @@ ROOMS
   Names are 1-64 lowercase letters, digits, '-' or '_'. A room that hasn't been created returns 404.
   Anyone can create a room from the home page (or POST /api/create-room {room, name, email}):
   the room's genesis invite is emailed to the creator and never returned by the API. email
-  must be a plain address (name@example.com, at most 254 characters: no display name, angle
-  brackets, commas, semicolons, colons or spaces): anything else answers 400 code email_invalid.
+  must be a plain ASCII address (name@example.com, at most 254 characters, at most 64 before
+  the @, a domain whose last part has a letter: no display name, angle brackets, commas,
+  semicolons, colons or spaces): anything else answers 400 code email_invalid.
   A taken name answers 409, and a name whose room is still waiting on its genesis mail answers
   503 code room_pending with Retry-After (seconds); neither counts toward the caps. A room still
   waiting after {{GENESIS_PENDING_MIN}} minutes is offered to the next creator only if nothing was
