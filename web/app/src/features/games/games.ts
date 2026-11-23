@@ -1,4 +1,4 @@
-import type { BattleshipState, DuelState, LightCyclesState } from "@chat/contract";
+import { staleTurn, type BattleshipState, type DuelState, type LightCyclesState } from "@chat/contract";
 import type { Placing as BsPlacing } from "./battleship/BsArena3D";
 import { createElement, type ComponentType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -316,7 +316,13 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     return wrap;
   }
 
+  // One move per match at a time: a double tap, or a tap while the
+  // answer is slow, sent a second copy that landed on the next turn once
+  // the rival had answered (a second disc in the same column).
+  const moving = new Set<number>();
   async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string) {
+    if (moving.has(id)) return;
+    moving.add(id);
     if (note) note.textContent = label || "Queuing " + dir + "…";
     // Several views add their note to the page only when it has text,
     // and on the mover's own turn it has none: a refusal written there
@@ -327,14 +333,24 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       else toast(text, true);
     };
     try {
-      const d = await client.submitMove(id, dir);
+      const d = await client.submitMove(id, dir, opts.turnFor ? opts.turnFor(id) : undefined);
       if (d.game) {
         cache.set(id, d.game);
         notify();
         renderGameView(d.game, true);
       } else say("That move was refused.");
     } catch (e) {
+      // the match moved past the turn this move was meant for: show it
+      // as it is now, and the referee's sentence, to decide again
+      const stale = staleTurn(e);
+      if (stale) {
+        cache.set(id, stale.game);
+        notify();
+        renderGameView(stale.game, true);
+      }
       say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
+    } finally {
+      moving.delete(id);
     }
   }
 

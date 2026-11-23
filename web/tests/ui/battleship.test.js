@@ -1,7 +1,7 @@
 // UI scenarios: Battleship (the 3D arena, placement, free-for-all, phone aim) and the no-WebGL fallbacks.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/battleship.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, noGl, run, shot } = require('./harness');
+const { settle, done, noGl, now, run, shot } = require('./harness');
 
 (async () => {
   await run('battleship-spectator', { state: { bs: true } }, async (page) => {
@@ -349,6 +349,48 @@ const { settle, done, noGl, run, shot } = require('./harness');
       const out = { posts, toast: await page.$eval('#toast', (e) => (e.hidden ? '' : e.textContent)).catch(() => ''), onTop: await page.$eval('#toast', (e) => { const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === e; }).catch(() => false) };
       await shot(page, label + '.png');
       if (posts !== 1 || !out.toast.includes(REFUSED) || !out.onTop) throw new Error('the refusal shows as a toast, over the arena: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  /* A move names the turn room_state hands out for it, and one move per
+     match is out at a time: a double tap while the answer was slow sent a
+     second copy that landed on the next turn once the rival had answered. */
+  await run('move-double-tap', { state: { c4: true }, init: noGl }, async (page, S, calls) => {
+    S.moveDelay = 700;
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer .c4-drop', { timeout: 15000 });
+    await page.click('#viewer .c4-drop:nth-child(2)');
+    await page.click('#viewer .c4-drop:nth-child(2)', { timeout: 500 }).catch(() => {});
+    await page.waitForFunction(() => !document.querySelector('#viewer .c4-drop'), null, { timeout: 10000 });
+    await settle(page);
+    const posts = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c));
+    const out = { posts };
+    if (posts.length !== 1) throw new Error('a double tap sends one move: ' + JSON.stringify(posts));
+    if (!/"turn":7/.test(posts[0]) || !/"dir":"2"/.test(posts[0])) throw new Error('the move names the turn room_state gave: ' + posts[0]);
+    return out;
+  });
+  /* A stale turn: room_state still named turn 7 when the match had moved
+     on (another tab of yours and the rival both played). The referee
+     refuses, and the board catches up from the answer's game. */
+  for (const [label, o] of [['move-stale-turn', {}], ['move-stale-turn-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { c4: true }, init: noGl, allowConsole: [/409/] }, o), async (page, S, calls) => {
+      await page.click('.game-card.kind-fourinarow');
+      await page.waitForSelector('#viewer .c4-flat .c4-grid', { timeout: 15000 });
+      const discs = () => page.$$eval('#viewer .c4-flat .c4-grid .c4-disc', (d) => d.length);
+      const out = { before: await discs() };
+      S.c4AwaitTurn = 7;
+      const mv = [{ n: 7, by: 'Anthony', col: 6, row: 1 }, { n: 8, by: 'Ada', col: 7, row: 1 }];
+      Object.assign(S.c4, { turn: 9, board: S.c4.board.slice(0, 5).concat(['O.XOXXO']), moves: S.c4.moves.concat(mv), last_move: Object.assign({ at: now - 5e3 }, mv[1]) });
+      await page.click('#viewer .c4-drop:nth-child(2)');
+      await page.waitForFunction(() => document.querySelectorAll('#viewer .c4-flat .c4-grid .c4-disc').length === 8, null, { timeout: 10000 }).catch(() => {});
+      await page.waitForFunction(() => /moved on/.test(document.querySelector('#viewer').textContent + ((document.querySelector('#toast') || {}).textContent || '')), null, { timeout: 10000 }).catch(() => {});
+      out.after = await discs();
+      out.post = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c)).pop() || '';
+      out.said = /moved on: it is at turn 9/.test(await page.$eval('#viewer', (e) => e.textContent) + await page.$eval('#toast', (e) => (e.hidden ? '' : e.textContent)).catch(() => ''));
+      await shot(page, label + '.png');
+      if (!/"turn":7/.test(out.post)) throw new Error('the move named turn 7: ' + out.post);
+      if (out.before !== 6 || out.after !== 8) throw new Error('the board catches up from the refusal: ' + JSON.stringify(out));
+      if (!out.said) throw new Error('the referee\'s sentence shows: ' + JSON.stringify(out));
       return out;
     });
   }

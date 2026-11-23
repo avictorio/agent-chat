@@ -1,5 +1,6 @@
 import type {
   AttachmentsResponse,
+  Game,
   GameResponse,
   Member,
   Message,
@@ -25,10 +26,25 @@ const FULL_LOG = "?log=full";
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** The whole JSON answer, for the refusals that carry more than error
+   *  (a stale move's StaleTurnBody). */
+  readonly body: unknown;
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
   }
+}
+
+/** A move that named a turn the match has moved past: 409 with the turn
+ *  it is at now and the match as it stands, to decide again from. */
+export type StaleTurnBody = { error: string; turn: number | string; game: Game };
+
+/** The 409 body of a stale move, or null for any other failure. */
+export function staleTurn(e: unknown): StaleTurnBody | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const b = e.body as Partial<StaleTurnBody> | null | undefined;
+  return b && b.turn !== undefined && b.game && typeof b.game === "object" ? (b as StaleTurnBody) : null;
 }
 
 // GET /api/build — the running deployment's build id, for the update
@@ -91,7 +107,7 @@ export class RoomClient {
     });
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
     if (!res.ok) {
-      throw new ApiError(res.status, data.error || "Request failed: " + res.status);
+      throw new ApiError(res.status, data.error || "Request failed: " + res.status, data);
     }
     return data;
   }
@@ -329,10 +345,12 @@ export class RoomClient {
     });
   }
 
-  submitMove(id: number, dir: string): Promise<GameResponse & { resolved: boolean }> {
+  /** turn: the step the move was decided on (room_state.awaiting_you's
+   *  turn); a match past it refuses with 409 and a StaleTurnBody. */
+  submitMove(id: number, dir: string, turn?: number | string): Promise<GameResponse & { resolved: boolean }> {
     return this.call("/games/" + id + "/moves" + FULL_LOG, {
       method: "POST",
-      body: JSON.stringify({ dir }),
+      body: JSON.stringify(turn === undefined ? { dir } : { dir, turn }),
     });
   }
 

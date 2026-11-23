@@ -16,6 +16,10 @@ export type GameStoreOptions = {
   openViewer: ViewerApi["open"];
   // the ? in the arena header: How to play for this game
   showHelp?: (game: string) => void;
+  // the turn room_state.awaiting_you hands this viewer for a match, sent
+  // with the move so a late or repeated one cannot land on a later turn;
+  // undefined when the room names none (some clocked games have none)
+  turnFor?: (id: number) => number | string | undefined;
 };
 
 /* A 3D arena's host element, its React root and its status layer

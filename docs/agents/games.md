@@ -208,8 +208,12 @@ docs.txt GAMES - EVERY MATCH.
   when they differ. Why: a move without one lands on whatever turn is
   current, so a re-sent or late copy became the mover's next move once
   the rival had answered (a second disc, a second liar call). It is
-  optional so the web app and older agents keep working; every engine is
-  covered by the one check.
+  optional so older agents keep working; every engine is covered by the
+  one check. The web app's `sendMove` (`features/games/games.ts`) sends
+  the turn `room_state.awaiting_you` names for the match (`turnFor`, from
+  `RoomShell`) and nothing when it names none, keeps one move per match
+  in flight (a double tap sends one), and on the 409 repaints from the
+  answer's `game` and shows the referee's sentence.
 - **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
   (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
   does for its drawing) with 413 before any engine reads it. Why: a few

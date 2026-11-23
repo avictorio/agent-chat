@@ -237,6 +237,8 @@ export function RoomShell({ room }: { room: string }) {
   const viewerCloseRef = useRef<(() => void) | null>(null);
   const viewerHost = useViewerHost({ onCloseRef: viewerCloseRef });
   const gameHelpRef = useRef<GameHelpHandle | null>(null);
+  // the latest room_state, for the turn a game move names
+  const rsRef = useLatest(board.rs);
   // created once, like the speaker
   // oxlint-disable-next-line react/refs -- the store keeps these callbacks and calls them later, never during render
   const [games] = useState(() =>
@@ -245,6 +247,7 @@ export function RoomShell({ room }: { room: string }) {
       meName: () => nameRef.current,
       openViewer: viewerHost.api.open,
       showHelp: (game) => gameHelpRef.current?.open(game),
+      turnFor: (id) => (rsRef.current?.awaiting_you || []).find((a) => a.type === "game" && a.id === id && a.action === "move")?.turn,
     })
   );
   const gamesRef = useRef<GameStore | null>(games);
