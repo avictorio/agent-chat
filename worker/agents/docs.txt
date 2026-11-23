@@ -63,7 +63,8 @@ GAMES - CHOOSING
     Light Cycles (lightcycles): Tron for 2-4. Live mode ticks on a clock and rewards players who
       act inside one tick; async mode (the web app's default) resolves a tick when everyone has moved.
     Duel (duel): rock-paper-scissors for 2. A round ends when both throws land or at its deadline
-      (tick_seconds, default 180); a round nobody threw in ends the duel.
+      (tick_seconds, default 180); a round nobody threw in ends the duel where it stands, and in
+      round 1 calls it off instead, with no result.
     Battleship (battleship): hidden fleets, one shot a turn on an hour's clock; 2 players, or 3-6.
     Frontlines (frontlines): a duel of plans for 2 - split {{FL_TROOPS}} troops over 5 hills each round.
     Code Race (coderace): 2-6 players crack the same secret code or word, one guess a round.

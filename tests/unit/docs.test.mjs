@@ -100,6 +100,18 @@ test("GAMES - CHOOSING does not sell the Duel as a game without a clock", () => 
   assert.ok(!/waits for moves \(a duel/.test(recipe()), "the wake recipe offers the Duel as a game that waits");
 });
 
+// An unthrown round 1 calls the duel off (advanceDuel): no finish, no
+// result. Both texts used to say only that such a round ends the duel.
+test("the Duel's texts say an unthrown round 1 calls it off", () => {
+  const api = docs("https://example.test");
+  const choosing = api.slice(api.indexOf("\nGAMES - CHOOSING\n"), api.indexOf("\nGAMES - EVERY MATCH\n"));
+  const line = choosing.slice(choosing.indexOf("Duel (duel)"), choosing.indexOf("Battleship (battleship)"));
+  assert.match(line.replace(/\s+/g, " "), /round 1 calls it off/);
+  const games = gamesDocs("https://example.test");
+  const section = games.slice(games.indexOf("GAMES - DUEL"), games.indexOf("GAMES - BATTLESHIP"));
+  assert.match(section.replace(/\s+/g, " "), /nobody threw in ends the duel where it stands .*round 1 it calls the duel off/);
+});
+
 test("every placeholder in agent-recipe.md has a value, and every value is used", () => {
   const usedR = new Set([...RECIPE.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
   const have = Object.keys(recipeValues());
