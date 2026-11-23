@@ -443,5 +443,93 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     return { tiles, overflow };
   });
 
+  // Signed media links die one to two hours after they are minted, and the
+  // feed gets each row once. A tab left open past 50 minutes (or brought
+  // back into view after one) re-reads the rows that carry media and
+  // swaps in their new links: the same elements, the same scroll, and
+  // no other row touched. Before, nothing renewed them and an afternoon
+  // later the images, clips, documents and downloads answered 403.
+  for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
+    await run('media-links-renew' + tag, { state: { artifacts: true, files: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag }, async (page, S, calls) => {
+      const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c));
+      const fresh = (u) => u.split('?')[0] + '?exp=2&sig=fresh';
+      const img = await page.$('.msg[data-id="8"] img.msg-img');
+      const plain = await page.$('.msg[data-id="2"]');
+      must(img && plain, 'the image row and a plain row are on screen');
+      await page.evaluate(() => { const l = document.querySelector('#list'); l.scrollTop = Math.max(0, l.scrollHeight - l.clientHeight - 150); });
+      const top0 = await page.$eval('#list', (l) => l.scrollTop);
+      // a look back too soon reads nothing
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle(page);
+      must(reads().length === 0, 'no re-read before the links are old: ' + JSON.stringify(reads()));
+      // the server now mints new links; the tab's clock moves 51 minutes on
+      for (const m of S.msgs) for (const k of ['image', 'html', 'doc', 'file']) if (m[k]) m[k] = Object.assign({}, m[k], { url: fresh(m[k].url) });
+      await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 51 * 60e3; });
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.waitForFunction(() => /sig=fresh/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 });
+      await settle(page);
+      const out = {
+        reads: reads(),
+        sameImg: await img.evaluate((e) => e.isConnected),
+        plainKept: await plain.evaluate((e) => e.isConnected),
+        file: await page.$eval('.msg[data-id="60"] .file-card', (a) => a.getAttribute('href')),
+        frame: await page.$eval('.msg[data-id="8"] .art-frame', (f) => f.getAttribute('src')),
+        scroll: [top0, await page.$eval('#list', (l) => l.scrollTop)],
+      };
+      must(out.reads.length === 1 && /\?after=7&limit=54$/.test(out.reads[0]), 'one read, from the first media row to the last: ' + JSON.stringify(out.reads));
+      must(out.sameImg && out.plainKept, 'the rows stay mounted: ' + JSON.stringify(out));
+      must(/sig=fresh/.test(out.file) && /sig=fresh/.test(out.frame), 'the download and the page preview carry the new links: ' + JSON.stringify(out));
+      must(Math.abs(out.scroll[0] - out.scroll[1]) < 2, 'the scroll position holds: ' + JSON.stringify(out.scroll));
+      // renewed just now: the next look reads nothing
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle(page);
+      must(reads().length === 1, 'renewed rows are not read again at once: ' + JSON.stringify(reads()));
+      await img.evaluate((e) => e.scrollIntoView({ block: 'start' }));
+      await settle(page);
+      must(await img.evaluate((e) => e.complete && e.naturalWidth > 0), 'the renewed image shows');
+      await shot(page, 'media-links-renew' + tag + '.png');
+      return out;
+    });
+  }
+  // A media element that fails to load (its link died while the device
+  // slept) asks for its row again and retries once, with the new link;
+  // one that keeps failing is not retried in a loop.
+  await run('media-links-retry', { state: { artifacts: true }, hash: '#invite=tok_Anthony', allowConsole: /status of 403/ }, async (page, S, calls) => {
+    const hits = { image: [], doc: [], gone: 0 };
+    const dead = '?exp=1&sig=dead';
+    S.msgs.find((m) => m.id === 8).image.url += dead;
+    S.msgs.find((m) => m.id === 8).doc.url += dead;
+    S.msgs.push({ id: 90, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'This photo is gone for good.', image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/90/image?exp=1&sig=gone' } });
+    await page.route(/\/messages\/(8\/(image|doc)|90\/image)\?/, (route) => {
+      const u = new URL(route.request().url());
+      const kind = u.pathname.split('/').pop();
+      if (/\/90\//.test(u.pathname)) { hits.gone++; return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' }); }
+      hits[kind].push(u.searchParams.get('sig'));
+      if (u.searchParams.get('sig') === 'dead') {
+        // the server signs anew from here on
+        const m = S.msgs.find((x) => x.id === 8);
+        m[kind] = Object.assign({}, m[kind], { url: m[kind].url.replace('sig=dead', 'sig=live') });
+        return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' });
+      }
+      return route.fallback();
+    });
+    await page.reload();
+    await page.waitForFunction(() => {
+      const i = document.querySelector('.msg[data-id="8"] img.msg-img');
+      return i && /sig=live/.test(i.getAttribute('src')) && i.complete && i.naturalWidth > 0;
+    }, null, { timeout: 8000 });
+    await page.waitForFunction(() => /Probe doc/.test(document.querySelector('.msg[data-id="8"] .doc-body').textContent), null, { timeout: 8000 });
+    await page.evaluate(() => document.querySelector('.msg[data-id="90"]').scrollIntoView());
+    await page.waitForFunction(() => document.querySelector('.msg[data-id="90"] img.msg-img').complete, null, { timeout: 5000 });
+    await settle(page);
+    await page.waitForTimeout(300);
+    await settle(page);
+    const out = { hits, reads: calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c)) };
+    must(out.hits.image.join() === 'dead,live' && out.hits.doc.join() === 'dead,live', 'each retried once, with the new link: ' + JSON.stringify(out.hits));
+    must(out.hits.gone === 2, 'a link that keeps failing is retried once, not in a loop: ' + JSON.stringify(out.hits));
+    must(out.reads.length >= 1 && out.reads.length <= 3, 'failures share re-reads: ' + JSON.stringify(out.reads));
+    return out;
+  });
+
   done('people-media');
 })();

@@ -11,6 +11,9 @@ import { useOnChange } from "../../lib/useOnChange";
 // initial settle window), and the unread count. The stream and
 // the composer feed it; ChatFeed renders it.
 
+// The fields that carry a signed media link (MEDIA LINKS in docs.txt).
+export const MEDIA_FIELDS = ["image", "audio", "video", "speak", "html", "doc", "file"] as const;
+
 export function useMessages(opts: {
   tabRef: RefObject<string>;
   nameRef: RefObject<string>;
@@ -28,6 +31,11 @@ export function useMessages(opts: {
   const initialSettleRef = useRef(false);
   const settleRef = useRef<{ ro: ResizeObserver | null; timer: number }>({ ro: null, timer: 0 });
   const messagesRef = useLatest(messages);
+  // When the server last handed out each row's media links (Date.now()).
+  // Signed links die one to two hours after they are minted, and the feed
+  // gets a row once, so useMediaRenewal re-reads the rows whose links
+  // are getting old.
+  const linksAtRef = useRef<Map<number, number>>(new Map());
 
   const endSettle = useCallback(() => {
     if (settleRef.current.ro) {
@@ -76,6 +84,7 @@ export function useMessages(opts: {
           (m.file && !old.file) ||
           (m.text || "") !== (old.text || "");
         if (!richer) return arr;
+        linksAtRef.current.set(m.id, Date.now());
         const next = [...arr];
         next[i] = m;
         return next;
@@ -83,6 +92,7 @@ export function useMessages(opts: {
       return;
     }
     seenRef.current.add(m.id);
+    linksAtRef.current.set(m.id, Date.now());
     const list = listRef.current;
     const stick = list ? atBottom(list) : true;
     const mine = !!nameRef.current && same(m.from, nameRef.current);
@@ -136,7 +146,11 @@ export function useMessages(opts: {
   // caller steers the scroll afterwards.
   const mergeHistory = useCallback((rows: Message[]) => {
     if (!rows.length) return;
-    rows.forEach((m) => seenRef.current.add(m.id));
+    const at = Date.now();
+    rows.forEach((m) => {
+      seenRef.current.add(m.id);
+      if (!linksAtRef.current.has(m.id)) linksAtRef.current.set(m.id, at);
+    });
     setMessages((arr) => {
       const byId = new Map<number, Message>(arr.map((m) => [m.id, m] as const));
       for (const m of rows) if (!byId.has(m.id)) byId.set(m.id, m);
@@ -148,10 +162,43 @@ export function useMessages(opts: {
   // The boot load: seed the seen set, arm the initial settle, and
   // set the stream cursor.
   const loadInitial = useCallback((sorted: Message[], lastId: number) => {
-    sorted.forEach((m) => seenRef.current.add(m.id));
+    const at = Date.now();
+    sorted.forEach((m) => {
+      seenRef.current.add(m.id);
+      linksAtRef.current.set(m.id, at);
+    });
     initialSettleRef.current = true;
     setMessages(sorted);
     lastRef.current = lastId;
+  }, []);
+
+  // Fresh links from a re-read (useMediaRenewal): swap the media fields
+  // of the rows on screen and nothing else (text, reactions and new rows
+  // are the stream's). A row whose links did not change keeps its object,
+  // and an unchanged list keeps its array, so React leaves those rows and
+  // the scroll position alone. `covered` is every id the re-read reached,
+  // returned or not: a row the server no longer has cannot be renewed,
+  // and asking again every minute would not change that.
+  const renewLinks = useCallback((rows: Message[], covered: number[]) => {
+    const at = Date.now();
+    covered.forEach((id) => linksAtRef.current.set(id, at));
+    if (!rows.length) return;
+    const fresh = new Map<number, Message>(rows.map((m) => [m.id, m] as const));
+    setMessages((arr) => {
+      let changed = false;
+      const next = arr.map((old) => {
+        const m = fresh.get(old.id);
+        if (!m) return old;
+        let row = old;
+        for (const k of MEDIA_FIELDS) {
+          const ref = m[k];
+          if (ref && ref.url && (!old[k] || old[k]!.url !== ref.url)) row = { ...row, [k]: ref };
+        }
+        if (row !== old) changed = true;
+        return row;
+      });
+      return changed ? next : arr;
+    });
   }, []);
 
   return {
@@ -170,5 +217,7 @@ export function useMessages(opts: {
     endSettle,
     loadInitial,
     mergeHistory,
+    linksAtRef,
+    renewLinks,
   };
 }

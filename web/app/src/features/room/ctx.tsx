@@ -51,6 +51,8 @@ export interface FeedValue {
   openViewer: ViewerApi["open"];
   closeViewer: ViewerApi["close"];
   games: GameStore;
+  /** a media element failed to load: re-read its row's signed links (useMediaRenewal) */
+  renewMedia: (id: number) => Promise<void>;
 }
 
 export const SessionContext = createContext<SessionValue | null>(null);

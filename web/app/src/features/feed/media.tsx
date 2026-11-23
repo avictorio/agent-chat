@@ -140,7 +140,14 @@ export function loadDoc(id: number, url: string): Promise<string> {
   return p;
 }
 
-function fillDoc(el: HTMLElement, id: number, url: string, memberSet: Set<string>, errText: string) {
+function fillDoc(
+  el: HTMLElement,
+  id: number,
+  url: string,
+  memberSet: Set<string>,
+  errText: string,
+  onFail?: () => void
+) {
   el.textContent = "";
   const p0 = document.createElement("p");
   p0.className = "md-p";
@@ -157,16 +164,76 @@ function fillDoc(el: HTMLElement, id: number, url: string, memberSet: Set<string
       p.className = "md-p";
       p.textContent = errText;
       el.appendChild(p);
+      onFail?.();
     });
 }
 
-function DocBody({ id, url, memberSet }: { id: number; url: string; memberSet: Set<string> }) {
+function DocBody({ id, url, memberSet, onFail }: { id: number; url: string; memberSet: Set<string>; onFail: () => void }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const memberSetRef = useLatest(memberSet);
+  const onFailRef = useLatest(onFail);
   useEffect(() => {
-    if (ref.current) fillDoc(ref.current, id, url, memberSetRef.current, "Couldn't load the document - tap to try again.");
-  }, [id, url, memberSetRef]);
+    if (ref.current)
+      fillDoc(ref.current, id, url, memberSetRef.current, "Couldn't load the document - tap to try again.", () =>
+        onFailRef.current()
+      );
+  }, [id, url, memberSetRef, onFailRef]);
   return <div className="doc-body" ref={ref}></div>;
+}
+
+/* ---------- renewed links ---------- */
+
+// A media element that fails to load (most often a signed link that died
+// while the tab sat open) asks the feed for its row's links again, then
+// mounts once more - with the new link when there is one. Once only: a
+// file that is really gone must not loop.
+function useOneRetry(id: number): { key: number; onError: () => void } {
+  const { renewMedia } = useFeed();
+  const [key, setKey] = useState(0);
+  const triedRef = useRef(false);
+  const onError = () => {
+    if (triedRef.current) return;
+    triedRef.current = true;
+    void renewMedia(id).then(() => setKey(1));
+  };
+  return { key, onError };
+}
+
+// A video or voice note takes a renewed link only while it is not
+// playing: setting src on a media element starts it over from the top,
+// so a link renewed mid-play waits for the pause, and the position read
+// before the swap is put back once the new source has loaded.
+function Clip({ kind, url, onError }: { kind: "video" | "audio"; url: string; onError: () => void }) {
+  const ref = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const swap = () => {
+      if (el.getAttribute("src") === url) return;
+      const at = el.currentTime;
+      el.src = url;
+      if (at > 0) {
+        el.addEventListener(
+          "loadedmetadata",
+          () => {
+            el.currentTime = at;
+          },
+          { once: true }
+        );
+      }
+    };
+    if (el.paused || !el.getAttribute("src")) {
+      swap();
+      return;
+    }
+    el.addEventListener("pause", swap, { once: true });
+    return () => el.removeEventListener("pause", swap);
+  }, [url]);
+  return kind === "video" ? (
+    <video ref={ref} className="msg-video" controls preload="metadata" onError={onError} />
+  ) : (
+    <audio ref={ref} controls preload="none" onError={onError} />
+  );
 }
 
 /* ---------- the media block under a message's text ---------- */
@@ -179,6 +246,10 @@ export function MediaBlocks({ m }: { m: Message }) {
   // first render (an upload finishing), and a hook called only on some
   // renders breaks React's hook order.
   const memberSetRef = useLatest(memberSet);
+  const imgRetry = useOneRetry(m.id);
+  const videoRetry = useOneRetry(m.id);
+  const audioRetry = useOneRetry(m.id);
+  const docRetry = useOneRetry(m.id);
   const yts = ytLinks(m.text || "");
   if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.file && !m.game) return null;
   return (
@@ -215,8 +286,10 @@ export function MediaBlocks({ m }: { m: Message }) {
       )}
       {m.image && m.image.url && (m.image.bytes || 0) <= INLINE_IMAGE_MAX && (
         <img
+          key={imgRetry.key}
           className="msg-img"
           src={withInvite(m.image.url, token)}
+          onError={imgRetry.onError}
           alt="Attached image"
           loading="lazy"
           {...pressable(() => {
@@ -236,9 +309,11 @@ export function MediaBlocks({ m }: { m: Message }) {
         />
       )}
       {m.video && m.video.url && (
-        <video className="msg-video" controls preload="metadata" src={withInvite(m.video.url, token)} />
+        <Clip key={videoRetry.key} kind="video" url={withInvite(m.video.url, token)} onError={videoRetry.onError} />
       )}
-      {m.audio && m.audio.url && <audio controls preload="none" src={withInvite(m.audio.url, token)} />}
+      {m.audio && m.audio.url && (
+        <Clip key={audioRetry.key} kind="audio" url={withInvite(m.audio.url, token)} onError={audioRetry.onError} />
+      )}
       {m.html && m.html.url && (
         <div
           className="art-card"
@@ -306,7 +381,13 @@ export function MediaBlocks({ m }: { m: Message }) {
             <span className="sp"></span>
             <span className="art-go">›</span>
           </div>
-          <DocBody id={m.id} url={withInvite(m.doc.url, token)} memberSet={memberSet} />
+          <DocBody
+            key={docRetry.key}
+            id={m.id}
+            url={withInvite(m.doc.url, token)}
+            memberSet={memberSet}
+            onFail={docRetry.onError}
+          />
         </div>
       )}
       {m.file && m.file.url && (
