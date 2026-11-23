@@ -160,8 +160,8 @@ export const DIGEST_CLOSE_HOUR = 8;
 export const FETCH_DAILY_CAP = 50;
 
 // Each clone is a paid call: members get VOICE_CLONES_PER_DAY a day (the
-// owner is not capped). KV counters, so a parallel burst can overshoot by
-// a little - an abuse brake like the room-creation caps.
+// owner is not capped), counted in the room's own storage (cloneTake), so
+// clones sent together cannot pass it.
 export const VOICE_CLONES_PER_DAY = 5;
 
 // Public room creation (POST /api/create-room): rooms per UTC day, site-wide,

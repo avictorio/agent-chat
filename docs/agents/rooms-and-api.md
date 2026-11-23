@@ -340,7 +340,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `rx` | reactions: message, emoji, who, time |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |
-| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`, the one row a deleted room keeps), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`, the one row a deleted room keeps), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones today, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read), test-hook flags |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
 | `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
@@ -359,9 +359,9 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
   are not atomic, so a parallel burst can overshoot a cap slightly:
   they are an abuse brake, not a hard guarantee. Gmail dot/+tag variants
   count as different emails; the IP and site-wide caps are the real bind.
-- `clone:<room>:<folded name>:<day>`: voice clones per member per UTC day
-  (`VOICE_CLONES_PER_DAY`; the owner is not capped), 48 h TTL. Same
-  abuse-brake caveat.
+- `clone:<room>:<folded name>:<day>`: no longer written (the clone
+  allowance is counted in the room's `cfg`); old keys expire on their
+  48 h TTL.
 - `asset:emoji-<sha>.json` (`EMOJI_KV_KEY`): the web picker's emoji list,
   built once from the pinned dataset (`EMOJI_SOURCE`).
 - `check:r2-direct`: the direct-upload check's verdict: a day when it

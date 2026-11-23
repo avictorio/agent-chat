@@ -1,24 +1,32 @@
-// Voices: the daily clone allowance, the speak requests in flight, and the
-// Room methods for members' voice samples, clones and speaking.
+// Voices: the speak requests in flight, and the Room methods for members'
+// voice samples, clones, their daily clone allowance and speaking.
 
 import { nameFold } from "../lib/text.js";
 import { goneError } from "../lib/errors.js";
 import { VOICE_CLONES_PER_DAY } from "../limits.js";
-import type { MsgRow, MvRow, Room } from "./Room.js";
+import type { CfgRow, MsgRow, MvRow, Room } from "./Room.js";
 import { warn } from "../lib/log.js";
 
 /** speak syntheses in flight, by "room:message id" */
 export const SPEAK_INFLIGHT: Map<string, Promise<ArrayBuffer>> = new Map();
 
-export async function cloneAllowed(env: Env, room: string, who: string) {
-  const k = "clone:" + room + ":" + nameFold(who) + ":" + new Date().toISOString().slice(0, 10);
-  const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
-  if (n >= VOICE_CLONES_PER_DAY) return false;
-  await env.REQUESTS.put(k, String(n + 1), { expirationTtl: 172800 });
-  return true;
-}
-
 export const VoiceMethods = {
+  // One of the member's VOICE_CLONES_PER_DAY clones (a UTC day), taken in
+  // this one call, before anything is read or sent to Cartesia. The count
+  // was a KV get then put in the Worker: clones sent together all read the
+  // same count and all passed, and a member at the cap still had their
+  // stored sample read through the room on every refused reclone.
+  cloneTake(name: string) {
+    const k = "clone:" + nameFold(name);
+    const day = new Date().toISOString().slice(0, 10);
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = ?", k).toArray()[0];
+    const [d, c] = String((r && r.v) || "").split(":");
+    const used = d === day ? parseInt(c, 10) || 0 : 0;
+    if (used >= VOICE_CLONES_PER_DAY) return false;
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", k, day + ":" + (used + 1));
+    return true;
+  },
+
   // Voices: one cloned voice per member. The sample lives in R2; the mv row carries the
   // provider voice id the server saved when it cloned the sample. Streams get a "members"
   // event on change, like avatars.
@@ -102,14 +110,31 @@ export const VoiceMethods = {
     }
   },
 
-  async clearVoice(name: string) {
+  // Called once the clone is gone at Cartesia (the route deletes it there
+  // first). voiceId is the clone the route deleted: a different one here
+  // means a reclone landed meanwhile, and dropping the row would leave
+  // that new clone at Cartesia with nothing recording it. A sample that
+  // storage would not delete keeps its row (the clone's id cleared), so a
+  // second DELETE finds it and tries again; the row was dropped anyway
+  // before, and the object then had no pointer left.
+  async clearVoice(name: string, voiceId?: string | null): Promise<"none" | "changed" | "STORE_FAIL" | "cleared"> {
     const r = this.voiceRow(name);
-    if (!r) return false;
-    if (r.sample_key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(r.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+    if (!r) return "none";
+    if (voiceId !== undefined && (r.voice_id || null) !== (voiceId || null)) return "changed";
+    if (r.sample_key && this.env && this.env.MEDIA) {
+      try { await this.env.MEDIA.delete(r.sample_key); }
+      catch (e) {
+        warn("media.delete", e, { room: this.roomName });
+        this.sql.exec("UPDATE mv SET voice_id = NULL, ts = ? WHERE name = ?", Date.now(), String(name).toLowerCase());
+        this.notifyMembers(name);
+        await this.invalidateSpeakCache(name);
+        return "STORE_FAIL";
+      }
+    }
     this.sql.exec("DELETE FROM mv WHERE name = ?", String(name).toLowerCase());
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
-    return true;
+    return "cleared";
   },
 
   // What a speak request needs: the message's sender and text. Drafts never speak.

@@ -19,14 +19,14 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.7";
+export const API_VERSION = "2026-11-23.8";
 
 export const NOTICES: Notice[] = [
   {
     id: "2026-11-23-voices",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "MCP speak_message now signs a link only for a published message: a draft or an id that holds nothing answers \"No message with that id\" instead of a link that failed when fetched.",
+    text: "MCP speak_message now signs a link only for a published message: a draft or an id that holds nothing answers \"No message with that id\" instead of a link that failed when fetched. DELETE /voice deletes the clone at Cartesia first: when Cartesia refuses it answers 502 and removes nothing (it used to answer 200 and lose track of the clone), so send it again.",
   },
   {
     id: "2026-11-23-room-deleted",

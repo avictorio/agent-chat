@@ -3,7 +3,7 @@
 import { mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
 import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
-import { SPEAK_INFLIGHT, cloneAllowed } from "../room/voices.js";
+import { SPEAK_INFLIGHT } from "../room/voices.js";
 import { inlineBytes, sniffAudio } from "../lib/sniff.js";
 import { LINK_REFUSED, mediaLink, serveMedia } from "../lib/media.js";
 import { speakableText } from "../lib/text.js";
@@ -29,22 +29,34 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method === "GET" && !action) return json({ room, name: who, voice: await stub.voiceOf(who) });
   const oldVoice = await stub.voiceOf(who);
-  const dropOld = async (keep: string | null) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await cartesiaDelete(env, oldVoice.voice_id); };
+  // A replaced clone: its id is already overwritten, so a delete
+  // Cartesia refuses is only logged (cartesiaDelete).
+  const dropOld = async (keep: string | null) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await cartesiaDelete(env, oldVoice.voice_id, { room }); };
   const capMsg = "You can clone a voice up to " + VOICE_CLONES_PER_DAY + " times a day. Try again tomorrow.";
   if (request.method === "DELETE" && !action) {
-    if (!(await stub.clearVoice(who))) return json({ error: "No voice to remove" }, 404);
-    await dropOld(null);
+    if (!oldVoice) return json({ error: "No voice to remove" }, 404);
+    // Cartesia first, and the room forgets the clone only once Cartesia
+    // has: the row went first before, so a refused delete answered 200
+    // and left the clone on the account with its id recorded nowhere.
+    const vid = oldVoice.provider === "cartesia" ? oldVoice.voice_id : null;
+    if (vid && !(await cartesiaDelete(env, vid, { room }))) return json({ error: env.CARTESIA_API_KEY ? "Cartesia did not delete the voice; nothing was removed. Try again in a minute." : "Removing a cloned voice is not configured right now (the CARTESIA_API_KEY secret is not set); nothing was removed." }, env.CARTESIA_API_KEY ? 502 : 503);
+    const done = await stub.clearVoice(who, oldVoice.voice_id);
+    if (done === "none") return json({ room, name: who, voice: null });
+    if (done === "changed") return json({ error: "The voice changed while it was being removed (a new clone landed). Send the DELETE again." }, 409);
+    if (done === "STORE_FAIL") return json({ error: "Storage did not delete your voice sample (the cloned voice is gone). Send the DELETE again." }, 503);
     return json({ room, name: who, voice: null });
   }
   if (request.method === "POST" && action === "reclone") {
     if (!env.CARTESIA_API_KEY) return json({ error: "Server cloning is not configured yet (the CARTESIA_API_KEY secret is not set)" }, 503);
+    if (!oldVoice || !oldVoice.sample) return json({ error: "No stored sample to clone from" }, 404);
+    // the allowance before the sample is read: a refused reclone costs no read
+    if (!owner && !(await stub.cloneTake(who))) return rateLimited(capMsg, secondsToUtcMidnight());
     const smp = await stub.getVoiceSample(who);
     if (!smp) return json({ error: "No stored sample to clone from" }, 404);
-    if (!owner && !(await cloneAllowed(env, room, who))) return rateLimited(capMsg, secondsToUtcMidnight());
     let vid;
     try { vid = await cartesiaClone(env, smp.data, smp.type, who); } catch (e) { return json({ error: String((e && (e as Error).message) || e) }, 502); }
     const v = await stub.setVoiceId(who, "cartesia", vid);
-    if (!v) { await cartesiaDelete(env, vid); return json({ error: "No member with that name" }, 404); }
+    if (!v) { await cartesiaDelete(env, vid, { room }); return json({ error: "No member with that name" }, 404); }
     await dropOld(vid);
     return json({ room, name: who, voice: v, cloned: true });
   }
@@ -69,7 +81,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (key === "STORE_FAIL") return json({ error: STORE_MSG }, 503);
     if (!key) return json({ error: "No member with that name" }, 404);
     if (!env.CARTESIA_API_KEY) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, note: "Sample stored. Server cloning is not configured yet, so no voice id was saved." }, 202);
-    if (!owner && !(await cloneAllowed(env, room, who))) return rateLimited(capMsg, secondsToUtcMidnight(), { room, name: who, voice: await stub.voiceOf(who), cloned: false, sample_stored: true });
+    if (!owner && !(await stub.cloneTake(who))) return rateLimited(capMsg, secondsToUtcMidnight(), { room, name: who, voice: await stub.voiceOf(who), cloned: false, sample_stored: true });
     let vid;
     try { vid = await cartesiaClone(env, buf, type, who); } catch (e) { return json({ error: String((e && (e as Error).message) || e), sample_stored: true }, 502); }
     const v = await stub.setVoiceId(who, "cartesia", vid);

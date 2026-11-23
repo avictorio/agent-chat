@@ -51,7 +51,7 @@ Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
 Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
 project). Never delete the `__vapid` Durable Object; Web Push lives there.
 Leave the KV `REQUESTS` content alone too: it holds the create-room
-and voice-clone counters, the emoji cache and the activity log.
+counters, the emoji cache and the activity log.
 
 The front end ships with the Worker as Workers Static Assets: section 7 has
 the build and deploy pipeline, `docs/agents/web-app.md` the build id.
@@ -92,7 +92,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first = ["/*", "!/assets/*"]`; `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`); the Worker serves `index.html` at `/` and `/r/:room`. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
-| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters, the direct-upload check's verdict |
+| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room counters, the direct-upload check's verdict |
 | R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings, and the direct check's short-lived objects under `_check/` (`docs/agents/media.md`) |
 | Cron trigger | none: `wrangler.toml` carries `crons = []` (section 7) |
 | Compatibility date | `2025-04-01` |

@@ -41,7 +41,13 @@ Front-end conventions.
   uploading a sample, never by handing the server a voice id. The Worker
   stores the sample in R2 (under `<room>/voice-sample/`, a new key for
   each upload, the old object deleted after the row moves), clones it with
-  Cartesia and saves the returned id in the `mv` table. Cloning needs the
+  Cartesia and saves the returned id in the `mv` table. Removing a voice
+  deletes the clone at Cartesia first and drops the row only once
+  Cartesia answered 2xx or 404 (otherwise 502 and nothing changes: the
+  row is the only record of the clone); a sample storage would not
+  delete keeps its row without the id (503), for the next DELETE. The
+  daily clone allowance is a `cfg` row per member, taken by `cloneTake`
+  before a reclone reads the sample. Cloning needs the
   `CARTESIA_API_KEY` **Secret**; without it an upload stores the sample
   and answers 202 with `cloned: false`, ready for a reclone once the
   secret lands. The room sidebar's "Your voice" dialog is the human

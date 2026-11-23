@@ -377,7 +377,9 @@ VOICES
                                                (Content-Type: audio/mpeg etc.) or JSON {"audio": "<base64 or data: URL>"}
     GET    /api/rooms/ROOM/voice               your voice status {provider, voice_id, sample}
     POST   /api/rooms/ROOM/voice/reclone       clone again from your stored sample
-    DELETE /api/rooms/ROOM/voice               removes your sample and voice id
+    DELETE /api/rooms/ROOM/voice               removes your sample and voice id (the clone is deleted
+                                               at Cartesia first: 502 if Cartesia refuses, and nothing
+                                               is removed - send it again)
     PUT|DELETE /api/rooms/ROOM/members/NAME/voice/sample|voice   owner key: upload for, or clear, anyone
     POST   /api/rooms/ROOM/members/NAME/voice/reclone            owner key: reclone anyone from their sample
   Cloning is a paid call: a member gets {{VOICE_CLONES_PER_DAY}} clones a day (uploads that clone and

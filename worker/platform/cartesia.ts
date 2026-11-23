@@ -1,5 +1,7 @@
 // Cartesia voices: clone, delete, speak.
 
+import { warn } from "../lib/log.js";
+
 // Clone a voice sample with Cartesia and return the new voice id. The API key is the
 // CARTESIA_API_KEY Worker secret; callers check for it before calling this.
 export async function cartesiaClone(env: Env, data: ArrayBuffer, type: string | null | undefined, memberName: string): Promise<string> {
@@ -18,18 +20,25 @@ export async function cartesiaClone(env: Env, data: ArrayBuffer, type: string | 
 }
 
 // A replaced or cleared clone is deleted at Cartesia too, so re-cloning
-// does not pile voices up on the account. Best effort: a failure here
-// never fails the member's request.
-export async function cartesiaDelete(env: Env, voiceId: string | null | undefined) {
-  if (!env.CARTESIA_API_KEY || !voiceId) return;
+// does not pile voices up on the account. True once Cartesia no longer
+// has it: it answered 2xx, or 404 (gone already). Anything else - a 429
+// or 5xx, a timeout, no key - leaves the voice there, and the caller
+// keeps its id: forgetting it on an unread answer left clones on the
+// owner's account with nothing recording them.
+export async function cartesiaDelete(env: Env, voiceId: string | null | undefined, ctx?: { room: string }): Promise<boolean> {
+  if (!voiceId) return true;
+  if (!env.CARTESIA_API_KEY) { warn("cartesia.delete", "the CARTESIA_API_KEY secret is not set", ctx); return false; }
   try {
-    await fetch("https://api.cartesia.ai/voices/" + encodeURIComponent(voiceId), {
+    const r = await fetch("https://api.cartesia.ai/voices/" + encodeURIComponent(voiceId), {
       method: "DELETE",
       headers: { "X-API-Key": env.CARTESIA_API_KEY, "Cartesia-Version": "2025-04-16" },
     });
-  } catch {
-    // best effort (above): a voice left behind at Cartesia breaks nothing here
+    if (r.ok || r.status === 404) return true;
+    warn("cartesia.delete", "Cartesia answered " + r.status, ctx);
+  } catch (e) {
+    warn("cartesia.delete", e, ctx);
   }
+  return false;
 }
 
 // Synthesize text in a cloned voice with Cartesia; returns the MP3 bytes.
