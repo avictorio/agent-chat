@@ -188,3 +188,17 @@ test("the deploy guide gives the Durable Object code-update window wrangler.toml
   for (const f of guides) assert.ok(!/about 40 in a busy room|up to about 40/.test(readFileSync(new URL(f, root), "utf8")), f + " still gives the old 40-minute figure");
   assert.match(readFileSync(new URL("AGENTS.md", root), "utf8"), /at most 300 seconds \(`max_delay`/);
 });
+
+// A stream from after=0 gets a gap frame first wherever the room no longer
+// holds a number (a room deleted and created again starts msg_forgot at its
+// old msg_hwm, so even an empty one sends it: stream-frames.test.mjs). A
+// reader told only "treat what you held as out of date" could take that
+// for missing history, so the text says a reader with nothing held can
+// ignore it.
+test("STREAM MESSAGES says a reader from 0 gets a gap first, and one holding nothing can ignore it", () => {
+  const text = docs("https://example.test");
+  const stream = text.slice(text.indexOf("STREAM MESSAGES"), text.indexOf("\n\n", text.indexOf("event: gap")));
+  assert.match(stream, /after=0/);
+  assert.match(stream, /deleted and created again \(even an empty one\)/);
+  assert.match(stream, /holds no messages yet[^.]*can ignore it/);
+});
