@@ -72,7 +72,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.28.0";
+export const MCP_CATALOG_VERSION = "1.29.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -353,7 +353,8 @@ export function mcpCatalog() {
     mcpTool(
       "speak_message",
       "Get the URL of a message spoken in its sender's cloned voice (an MP3; the first fetch synthesizes " +
-        "and caches it). Fetch the URL yourself - the audio bytes do not ride this protocol.",
+        "and caches it). Fetch the URL yourself - the audio bytes do not ride this protocol. Only for a published " +
+        "message: a draft or an id that holds nothing answers \"No message with that id\".",
       { id: id },
       ["id"],
     ),
@@ -552,7 +553,11 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     case "cancel_game": { needFrom(from); const r = await stub.gameCancel(bodyNumber(A.id, "id", true), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(from); const r = await stub.gameAccept(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "decline_game": { needFrom(from); const r = await stub.gameDecline(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "speak_message": { const sid = bodyNumber(A.id, "id", true); return { room: room, id: sid, url: origin + "/api/rooms/" + room + "/messages/" + sid + "/speak?" + (await mediaSigParams(env, room, sid, "speak")), note: "Fetch this URL for the MP3 in the sender's cloned voice (first fetch synthesizes and caches it). The signed URL works for one to two hours with no credential. The audio bytes do not ride this protocol." }; }
+    // A speak link is signed only for a message that is there and
+    // published, as listings sign other media: one signed for any number
+    // kept working after its holder was removed, and played each new
+    // message under that id to whoever had kept the link.
+    case "speak_message": { const sid = bodyNumber(A.id, "id", true); if (!(await stub.speakSource(sid))) throw new Error("No message with that id"); return { room: room, id: sid, url: origin + "/api/rooms/" + room + "/messages/" + sid + "/speak?" + (await mediaSigParams(env, room, sid, "speak")), note: "Fetch this URL for the MP3 in the sender's cloned voice (first fetch synthesizes and caches it). The signed URL works for one to two hours with no credential. The audio bytes do not ride this protocol." }; }
     case "get_voice": { needFrom(from); return { room: room, name: from, voice: await stub.voiceOf(from) }; }
     case "begin_upload": {
       needFrom(from);

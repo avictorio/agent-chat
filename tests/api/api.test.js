@@ -2286,6 +2286,16 @@ function mp4() {
     check('mcp post visible over REST', (r.json.messages || []).some(x => x.id === (mcpMsg && mcpMsg.id) && x.from === 'Poc' && x.text === 'hello over mcp'), JSON.stringify((r.json.messages || []).map(x => x.from + ':' + x.text)).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'react', arguments: { id: mcpMsg.id, reaction: '👍' } }, { token: TRex });
     check('mcp react works', !!(r.json && r.json.result && !r.json.result.isError && r.json.result.structuredContent && (r.json.result.structuredContent.reactions || {})['👍']), JSON.stringify(r.json).slice(0, 200));
+    // A speak link is signed only for a published message: one signed for
+    // an id not used yet kept playing the next message to a member who had
+    // been removed in between.
+    r = await mcp(R2, 'tools/call', { name: 'speak_message', arguments: { id: mcpMsg.id } }, { token: TRex });
+    check('mcp speak_message signs a link for a published message', !!(r.json && r.json.result && !r.json.result.isError && /\/messages\/\d+\/speak\?/.test((r.json.result.structuredContent || {}).url || '')), JSON.stringify(r.json).slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'speak_message', arguments: { id: mcpMsg.id + 500 } }, { token: TRex });
+    check('mcp speak_message on an id not used yet -> isError, no link', !!(r.json && r.json.result && r.json.result.isError === true && !r.json.result.structuredContent && /No message with that id/.test(JSON.stringify(r.json.result.content))), JSON.stringify(r.json).slice(0, 200));
+    const spDraft = await req('POST', R2 + '/messages', { token: TP, json: { text: 'a draft nobody may hear', draft: true } });
+    r = await mcp(R2, 'tools/call', { name: 'speak_message', arguments: { id: spDraft.json.id } }, { token: TRex });
+    check('mcp speak_message on another member\'s draft -> the same isError', !!(r.json && r.json.result && r.json.result.isError === true && /No message with that id/.test(JSON.stringify(r.json.result.content))), JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'no_such_tool', arguments: {} }, { token: TP });
     check('mcp unknown tool -> isError', !!(r.json && r.json.result && r.json.result.isError === true), JSON.stringify(r.json).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'create_game', arguments: { players: ['Poc', 'Rex'], tick_seconds: 3600, w: 12, h: 10 } }, { token: TP });
