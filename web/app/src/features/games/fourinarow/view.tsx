@@ -1,7 +1,7 @@
 import type { FourInARowPlayer, FourInARowState } from "@chat/contract";
 import { el } from "../../../lib/index";
 import { gameMetaText, winnerBanner } from "../shared/render";
-import { FourDrops, FourSeats } from "./FourInARowPanels";
+import { FourDrops, FourInARowCard, FourSeats } from "./FourInARowPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
 /* Four in a Row: who plays which disc, then the board - on your turn
@@ -48,6 +48,17 @@ export function renderFourView(ctx: GameViewCtx, g: FourInARowState, force?: boo
   const h = ctx.host3d("fourinarow");
   wrap.appendChild(h.host);
   ctx.paint3d("fourinarow", g, h, myTurn ? { onDrop: drop } : {});
+  // without 3D the board is the chat card's, full size: before, the page
+  // had the drop buttons and no board to aim them at
+  if (ctx.flat())
+    wrap.appendChild(
+      ctx.panel(
+        "board",
+        <div className="c4-flat">
+          <FourInARowCard g={g} me={me} />
+        </div>
+      )
+    );
   wrap.appendChild(ctx.panel("seats", <FourSeats g={g} me={me} />));
   if (myTurn) {
     const hint = ctx.arenaHint("fourinarow", "Tap a column on the board (or a number) to drop your disc.");

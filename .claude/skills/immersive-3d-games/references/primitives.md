@@ -183,3 +183,6 @@ until then. Also the your-move chime (`ac-chime-muted`).
   (`webglOk()`), or on a WebGL error from the scene (`fail3d`), a one-line
   note replaces the scene; a chunk-load or other error gets a Reload
   button (a deploy usually deleted the chunk the page was built against).
+  `fail3d` then rebuilds the view, and a view adds its flat panels when
+  `ctx.flat()` says so (no WebGL 2, or the host failed), never on
+  `webglOk()` alone.

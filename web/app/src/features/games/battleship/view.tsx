@@ -129,7 +129,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
       // in rows); without WebGL the scene is a note, so the boards
       // follow it.
       ctx.bsScene(g, wrap);
-      if (!ctx.webglOk()) wrap.appendChild(ctx.panel("watch", <BsWatchBoards g={g} fresh={freshMove} />));
+      if (ctx.flat()) wrap.appendChild(ctx.panel("watch", <BsWatchBoards g={g} fresh={freshMove} />));
       note.textContent = "Spectating - every shot is public; un-hit ships stay hidden.";
     } else {
       ctx.dropBs3d();
@@ -204,10 +204,10 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
     };
     if (ctx.gameView) ctx.gameView.bsPlace = { placed: draft.placed.slice(), orient: draft.orient, next: nextSize, onPlace: tryPlace, onRotate: rotate, onUndo: undoLast };
     ctx.bsScene(g, wrap);
-    if (!ctx.webglOk()) wrap.appendChild(ctx.panel("place-grid", <BsPlaceGrid g={g} hex={me.hex} states={states} ships={ships} onPlace={tryPlace} />));
+    if (ctx.flat()) wrap.appendChild(ctx.panel("place-grid", <BsPlaceGrid g={g} hex={me.hex} states={states} ships={ships} onPlace={tryPlace} />));
     wrap.appendChild(ctx.panel("place", <BsPlacePad next={nextSize} orient={draft.orient} onRotate={rotate} onUndo={undoLast} onRandom={random} onGo={go} />));
     if (!note.textContent)
-      note.textContent = ctx.webglOk()
+      note.textContent = !ctx.flat()
         ? "Click (or tap, then Place) a cell in your waters to lay the next hull's bow there - the hologram shows where it lies; R rotates, Backspace takes it back. Your fleet stays secret until the shooting starts."
         : "Tap a cell to lay the next hull's bow there. Your fleet stays secret until the shooting starts.";
     wrap.appendChild(note);
@@ -234,7 +234,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
         />
       )
     );
-    const flat = !ctx.webglOk();
+    const flat = ctx.flat();
     const fire = (dir: string) => {
       void ctx.sendMove(g.id, dir, note);
     };
@@ -276,7 +276,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
     );
     // No WebGL: the scene is a note, and their waters are the only
     // way to aim - a plain grid of your shots, a tap fires
-    if (!ctx.webglOk()) {
+    if (ctx.flat()) {
       const fire = (label: string) => {
         void ctx.sendMove(g.id, label, note);
       };
@@ -287,7 +287,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
     if (g.status === "running" && g.phase === "play") {
       if (bsWarned(g)) wrap.appendChild(ctx.panel("warn", <BsWarnings g={g} />));
       if (you.playing) {
-        const hint = ctx.webglOk()
+        const hint = !ctx.flat()
           ? ctx.arenaHint(
               "bs-play-3d",
               "Tap a cell in their waters to fire (or arrow keys to aim, Enter to fire) — flames are hits, rings are misses, burning wrecks are sunk."

@@ -98,5 +98,8 @@ export interface GameViewCtx {
   sendMove(id: number, dir: string, note: HTMLElement | null, label?: string): Promise<void>;
   turnBanner(g: GL): HTMLElement | null;
   webglOk(): boolean;
+  /** True when the open arena plays on flat panels: no WebGL, or its
+   * scene failed. Views choose their flat panels with this. */
+  flat(): boolean;
   youSig(g: GL): string;
 }

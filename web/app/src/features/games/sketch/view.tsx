@@ -59,6 +59,18 @@ export function renderSketchView(ctx: GameViewCtx, g: SketchState, force?: boole
   const h = ctx.host3d("sketch");
   wrap.appendChild(h.host);
   ctx.paint3d("sketch", g, h);
+  // without 3D the drawing being guessed is a plain image under the note:
+  // before, a guesser got the guess box and never saw what to guess
+  if (ctx.flat() && g.status === "running" && g.image && g.image.url)
+    wrap.appendChild(
+      ctx.panel(
+        "drawing",
+        <div className="sg-reveal">
+          <div className="fl-cap">{(g.artist || "The artist") + "'s drawing"}</div>
+          <img key={g.image.url} className="sg-rv-img" src={g.image.url} alt={(g.artist || "The artist") + "'s drawing for round " + g.round} />
+        </div>
+      )
+    );
   if (g.status === "running" && you.playing) {
     if (you.artist && g.phase === "draw") {
       if (!gv.sgPad) gv.sgPad = sgNewPad(g.round);

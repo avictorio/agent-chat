@@ -204,25 +204,49 @@ export function LetterGridTopWords({ g }: { g: LetterGridState }) {
   );
 }
 
-/* The card: a small flat grid (claims in their owner's colour), the
-   scores, and the last round's best word. */
-export function LetterGridCard({ g, me }: { g: LetterGridState; me: string }) {
+/* The grid as flat tiles, claims in their owner's colour: the card's
+   small grid, and without 3D the arena's board, where a tap on a tile
+   traces the word (onTap) and the draft's path is lit. */
+export function LetterGridTiles({ g, path, onTap, big }: { g: LetterGridState; path?: number[][] | null; onTap?: (r: number, c: number) => void; big?: boolean }) {
   const grid: string[] = g.grid || [];
   const n = grid.length;
   const claims: (string | null)[] = g.claims || [];
   const hexOf: Record<string, string> = {};
   (g.players || []).forEach((p: LetterGridPlayer) => (hexOf[p.name] = p.hex));
+  const on = new Set((path || []).map(([r, c]) => r! * n + c!));
   const cells: ReactElement[] = [];
   for (let r = 0; r < n; r++)
     for (let c = 0; c < n; c++) {
       const owner = claims[r * n + c];
+      const letter = (grid[r]![c] || "").toUpperCase();
+      const cls = "lg-mini-cell" + (owner ? " owned" : "") + (on.has(r * n + c) ? " on" : "");
+      const style = owner ? ({ "--who": hexOf[owner] || "#94a3b8" } as CSSProperties) : undefined;
+      const rr = r;
+      const cc = c;
       // keyed by owner too: a cell's style comes with its claim
       cells.push(
-        <span key={r * n + c + ":" + (owner || "")} className={"lg-mini-cell" + (owner ? " owned" : "")} style={owner ? ({ "--who": hexOf[owner] || "#94a3b8" } as CSSProperties) : undefined}>
-          {(grid[r]![c] || "").toUpperCase()}
-        </span>
+        onTap ? (
+          <button key={r * n + c + ":" + (owner || "")} type="button" className={cls} style={style} aria-label={letter + " at " + lgLabel(r, c) + (owner ? ", claimed by " + owner : "")} aria-pressed={on.has(r * n + c)} onClick={() => onTap(rr, cc)}>
+            {letter}
+          </button>
+        ) : (
+          <span key={r * n + c + ":" + (owner || "")} className={cls} style={style}>
+            {letter}
+          </span>
+        )
       );
     }
+  if (!n) return null;
+  return (
+    <div className={"lg-mini" + (big ? " big" : "")} style={{ gridTemplateColumns: "repeat(" + n + ", 1fr)" }}>
+      {cells}
+    </div>
+  );
+}
+
+/* The card: a small flat grid, the scores, and the last round's best
+   word. */
+export function LetterGridCard({ g, me }: { g: LetterGridState; me: string }) {
   const last = lgLastRound(g);
   let cap = "";
   if (last) {
@@ -231,11 +255,7 @@ export function LetterGridCard({ g, me }: { g: LetterGridState; me: string }) {
   } else if (g.status === "running") cap = "Round " + g.round + " · words sealed";
   return (
     <div className="lg-card">
-      {n ? (
-        <div className="lg-mini" style={{ gridTemplateColumns: "repeat(" + n + ", 1fr)" }}>
-          {cells}
-        </div>
-      ) : null}
+      <LetterGridTiles g={g} />
       <div className="lg-card-side">
         <LetterGridScores g={g} me={me} compact />
         {cap ? <div className="lg-card-cap">{cap}</div> : null}

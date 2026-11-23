@@ -86,6 +86,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     sendMove,
     turnBanner,
     webglOk,
+    flat,
     youSig,
   };
 
@@ -518,11 +519,14 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     return h;
   }
   let webglKnown: boolean | null = null;
+  // WebGL 2 only: three.js dropped WebGL 1, so a browser that offers only
+  // that passed a webgl-or-webgl2 probe, then the scene threw - and the
+  // views, trusting the probe, left out the flat controls.
   function webglOk(): boolean {
     if (webglKnown != null) return webglKnown;
     try {
       const c = document.createElement("canvas");
-      webglKnown = !!(c.getContext("webgl2") || c.getContext("webgl"));
+      webglKnown = !!c.getContext("webgl2");
     } catch {
       webglKnown = false;
     }
@@ -531,8 +535,28 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   function ready3d(h: Host3d) {
     if (!h.failed) h.status.hidden = true;
   }
+  /* Whether the open arena plays on its flat panels: no WebGL, or its
+     scene failed (a WebGL error, a chunk that did not load, a scene that
+     threw). The views ask this, not webglOk() alone: a host that failed
+     on a device with WebGL said "play with the controls below" over a
+     page that had none. */
+  function flat(): boolean {
+    if (!webglOk()) return true;
+    const gv = gameView;
+    return !!gv && [gv.r3d, gv.bs3d, gv.lc3d, gv.duel3d].some((h) => !!h && h.failed);
+  }
   function fail3d(h: Host3d, err: unknown) {
+    const first = !h.failed;
     h.failed = true;
+    // the view was built for a working scene: build it again, once, with
+    // the flat panels (after this call - it can come from inside React's
+    // commit of the scene)
+    const gv = gameView;
+    if (first && gv && [gv.r3d, gv.bs3d, gv.lc3d, gv.duel3d].indexOf(h) >= 0)
+      window.setTimeout(() => {
+        const cg = gameView === gv ? cache.get(gv.id) : undefined;
+        if (cg) renderGameView(cg, true);
+      }, 0);
     const msg = String((err && (err as Error).message) || err || "");
     if (/webgl/i.test(msg)) {
       h.host.classList.add("no-3d");
