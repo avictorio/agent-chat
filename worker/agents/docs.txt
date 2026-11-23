@@ -417,8 +417,11 @@ UPLOADING FILES
   in the answer) the parts go through the site.
   Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then
   finish. Calling start again with the same size (and fingerprint) resumes rather than
-  restarting. Lost the message id? POST /api/rooms/ROOM/upload/resume {"size", "fingerprint"}
-  finds your draft with that upload in flight. POST /messages/ID/KIND/abort cancels (then
+  restarting (a 502 there means storage did not list the parts: ask again rather than
+  re-send them all). Lost the message id? POST /api/rooms/ROOM/upload/resume {"size", "fingerprint"}
+  finds your draft with that upload in flight. Calls for one message's KIND (start, finish,
+  abort, an attach) run one at a time, in the order they arrive: an abort sent while a finish
+  runs waits for it, then answers "aborted": false. POST /messages/ID/KIND/abort cancels (then
   DELETE /messages/ID?draft_only=1 drops the draft, never a message already live). An
   upload must finish within {{UP_SESSION}} of its start (storage drops unfinished uploads then);
   a draft with an upload in flight lives that long, any other draft a day.
@@ -474,7 +477,8 @@ VIDEO MESSAGES
   a video carry "video": {"type", "bytes", "url"}; GET on the url honours Range.
   Or send a whole video in ONE request: PUT /messages/ID/video/stream with the raw file as
   the body. The site's edge refuses request bodies over 100 MB, so that is its practical
-  limit; bigger files go in parts. A draft posted with "publish_on_complete": true
+  limit; bigger files go in parts. A second stream for the same message replaces one still
+  in flight, which then answers 409 and stores nothing. A draft posted with "publish_on_complete": true
   publishes the moment its video verifies (stream or finish) - no /publish call needed.
 
 FILE ATTACHMENTS

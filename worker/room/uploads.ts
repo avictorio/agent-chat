@@ -49,7 +49,8 @@ export type UpSession = Pick<MdRow, "type" | "r2key" | "size" | "upload_id" | "f
 export type UploadSessionAsk = { size: number | string | null | undefined, type?: unknown, name?: unknown, direct?: unknown };
 /** uploadStart's answer: the part plan, or { status, error }. */
 export type UpStart = { status: number, error?: string, part_size?: number, parts?: number, expires_at?: number, direct?: boolean };
-
+/** A started (or resumed) session's plan, as uploadStart answers it. */
+export type UpPlan = { status: 200, part_size: number, parts: number, resumed: boolean, received: number[], expires_at: number, direct: boolean };
 export const UploadMethods = {
   // ---- Upload tickets: a single-use credential for one PUT ----
   // Minted by begin_upload (MCP) or the REST upload-ticket route for a draft
@@ -303,7 +304,7 @@ export const UploadMethods = {
     if (UP_KINDS.indexOf(kind) < 0) return { status: 400, error: "kind must be one of: " + UP_KINDS.join(", ") };
     // the sweep runs before the message is looked at, never between the look and the write
     await this.sweepDrafts();
-    let a = this.upAuth(id, who, owner, kind);
+    const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     size = Math.floor(Number(size));
@@ -316,10 +317,18 @@ export const UploadMethods = {
       const hint = !could ? "" : direct ? "; direct uploads, which carry up to " + UP_MAX_DIRECT_TEXT + ", are paused for the moment - try again in a few minutes" : "; start with \"direct\": true to send the parts straight to storage, up to " + UP_MAX_DIRECT_TEXT;
       return { status: 413, error: "Uploads through the site can be up to " + UP_MAX_TEXT + hint };
     }
-    fp = fp ? String(fp).slice(0, 200) : null;
-    // the direct check above can wait on storage: the message is looked at again
-    a = this.upAuth(id, who, owner, kind);
+    const fpv = fp ? String(fp).slice(0, 200) : null;
+    const want = size;
+    // the direct check above can wait on storage: from here the session
+    // is decided and replaced in this message and kind's turn (withMediaLock)
+    return this.withMediaLock(id, kind, () => this.upStartNow(id, kind, who, owner, room, want, type, name, fpv, useDirect));
+  },
+
+  /** uploadStart's part that reads and replaces the session, in the turn */
+  async upStartNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string, size: number, type: unknown, name: unknown, fp: string | null, useDirect: boolean): Promise<UpPlan | { status: number, error: string }> {
+    const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
+    const media = this.env.MEDIA;
     const prev = this.upSession(id, kind);
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has " + upNoun(kind) };
     if (prev && prev.upload_id && prev.size === size && (!fp || !prev.fp || prev.fp === fp) && !this.upExpired(prev, a.msg)) {
@@ -327,28 +336,45 @@ export const UploadMethods = {
       // another device): keep the parts already stored, on the route the
       // session began with (upStaysDirect has the one exception).
       const plan = this.upPlan(prev);
-      let received: number[] = [];
-      try { received = Array.from((await this.upReceived(id, kind, prev)).keys()).sort((x, y) => x - y); } catch (e) { warn("upload.received", e, { room, id, kind }); }
-      return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: await this.upStaysDirect(prev.mode, plan.part_size) };
+      let received: number[] | null = null;
+      try { received = Array.from((await this.upReceived(id, kind, prev)).keys()).sort((x, y) => x - y); }
+      catch (e) {
+        const em = String((e && (e as Error).message) || e);
+        // An answer of "nothing received" sent the client to upload the
+        // whole file again over parts storage still had: it asks again.
+        if (!/NoSuchUpload/i.test(em)) return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); start again" };
+        // Storage has dropped it (expired or cancelled): a fresh session
+        // below, rather than a resume onto an upload that is gone.
+        warn("upload.received", e, { room, id, kind });
+      }
+      if (received) return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: await this.upStaysDirect(prev.mode, plan.part_size) };
     }
     if (this.r2TestFail()) return { status: 503, error: STORE_MSG };
-    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
-    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     const key = this.mediaKey(room, id, kind);
     const declared = cleanMediaType(type);
+    // The new upload is created before the old one is touched: a create
+    // that failed used to leave the row on the upload it had just
+    // aborted, and the next start resumed that dead upload.
     let up;
-    try { up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: kind === "file" ? "application/octet-stream" : (declared || "application/octet-stream") } }); }
+    try { up = await media.createMultipartUpload(key, { httpMetadata: { contentType: kind === "file" ? "application/octet-stream" : (declared || "application/octet-stream") } }); }
     catch { return { status: 503, error: STORE_MSG }; }
     // the message may have been deleted while storage answered: no session for a message that is gone
     if (this.upAuth(id, who, owner, kind).status !== 200) {
       try { await up.abort(); } catch { /* nothing to end */ }
       return { status: 404, error: "No message with that id" };
     }
+    // The swap is one step, with no await in it: the receipts go with the
+    // row they belong to. Cleared before the create, they let a part of
+    // the old upload landing during it count in the new one, and finish
+    // then failed every time on that part.
+    const old = this.upSession(id, kind);
     const plan = useDirect ? uploadPlanDirect(size) : uploadPlan(size);
     const now = Date.now();
     const fname = name ? cleanFileName(stripControlChars(String(name)), "") : "";
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size, name, began, mode) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
       id, kind, declared || "application/octet-stream", key, size, up.uploadId, fp, plan.part_size, kind === "file" ? (fname || "file") : (fname || null), now, useDirect ? "direct" : null);
+    if (old && old.upload_id) { try { await media.resumeMultipartUpload(old.r2key, old.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: false, received: [], expires_at: now + UP_SESSION_MS, direct: useDirect };
   },
 
@@ -499,20 +525,34 @@ export const UploadMethods = {
     }
   },
 
+  // Whether this upload still owns its message's row: anything written
+  // after a storage await checks it, since a delete of the message (which
+  // takes no turn) can have taken the row meanwhile.
+  upStill(id: number, kind: string, uploadId: string) {
+    return this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND kind = ? AND upload_id = ?", id, kind, uploadId).toArray().length > 0;
+  },
+
+  // The upload's rows go, if they are still its own.
+  upDrop(id: number, kind: string, uploadId: string) {
+    if (!this.upStill(id, kind, uploadId)) return;
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+    this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id = ?", id, kind, uploadId);
+  },
+
   async uploadAbort(id: number, kind: string, who: string | null | undefined, owner: boolean) {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
-    const row = this.upSession(id, kind);
-    if (!row || !row.upload_id) return { status: 200, aborted: false };
-    if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
-    // A new upload may have started on this message while storage
-    // answered: its row is not this abort's to delete (deleting it left the
-    // new upload in storage with no row, and every part of it refused).
-    const now = this.upSession(id, kind);
-    if (!now || now.upload_id !== row.upload_id) return { status: 200, aborted: true };
-    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-    this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id = ?", id, kind, row.upload_id);
-    return { status: 200, aborted: true };
+    // In the message and kind's turn: an abort sent while a finish runs
+    // waits for it (and then finds nothing to cancel), instead of deleting
+    // the row the finish was completing.
+    return this.withMediaLock(id, kind, async () => {
+      const row = this.upSession(id, kind);
+      if (!row || !row.upload_id) return { status: 200, aborted: false };
+      const uploadId = row.upload_id;
+      if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ } }
+      this.upDrop(id, kind, uploadId);
+      return { status: 200, aborted: true };
+    });
   },
 
   // One of your drafts with an upload in flight for the same file (size
@@ -532,9 +572,10 @@ export const UploadMethods = {
   },
 
   // Streaming ingest: the Worker receives one whole-file PUT (for clients that
-  // can send a file in one request) and assembles R2 multipart parts as bytes arrive.
-  // streamBegin reserves the upload, streamComplete indexes it after the Worker's
-  // own size + signature verification, streamAbort discards it.
+  // can send a file in one request) and uploads R2 multipart parts as bytes
+  // arrive. streamBegin reserves the upload, streamFinish completes, checks
+  // and indexes it, streamAbort discards it, each in the message's video
+  // turn (withMediaLock).
   async streamBegin(id: number, who: string | null | undefined, type: string, size: number, owner: boolean, room: string) {
     const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
@@ -542,46 +583,88 @@ export const UploadMethods = {
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
     if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: VIDEO_STREAM_TOO_BIG };
+    const media = this.env.MEDIA;
     const key = this.mediaKey(room, id, "video");
-    const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
-    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
-    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
-    const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
-    // as in uploadStart: the message may be gone by now
-    if (!this.sql.exec("SELECT id FROM m WHERE id = ?", id).toArray().length) {
-      try { await up.abort(); } catch { /* nothing to end */ }
-      return { status: 404, error: "No message with that id" };
-    }
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, fp, part_size, began) VALUES (?, 'video', ?, ?, ?, ?, NULL, ?, ?)", id, type, key, size, up.uploadId, STREAM_PART, Date.now());
-    return { status: 200, key: key, uploadId: up.uploadId };
+    return this.withMediaLock(id, "video", async () => {
+      const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+      if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
+      // created first, swapped in one step after, as in upStartNow
+      let up;
+      try { up = await media.createMultipartUpload(key, { httpMetadata: { contentType: type } }); }
+      catch { return { status: 503, error: STORE_MSG }; }
+      // as in uploadStart: the message may be gone by now
+      if (!this.sql.exec("SELECT id FROM m WHERE id = ?", id).toArray().length) {
+        try { await up.abort(); } catch { /* nothing to end */ }
+        return { status: 404, error: "No message with that id" };
+      }
+      // A newer stream replaces one still in flight (a client retrying a
+      // stalled PUT), and the older upload ends here: two left live on the
+      // one key let the stream that had lost the row complete over the
+      // published video later.
+      const old = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+      this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
+      this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, fp, part_size, began) VALUES (?, 'video', ?, ?, ?, ?, NULL, ?, ?)", id, type, key, size, up.uploadId, STREAM_PART, Date.now());
+      if (old && old.upload_id) { try { await media.resumeMultipartUpload(old.r2key, old.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
+      return { status: 200, key: key, uploadId: up.uploadId };
+    });
   },
 
-  // Both take the multipart upload id streamBegin answered: a newer upload
-  // for the same message replaces the row, and a late finish or abort of
-  // the old one must not index or delete the new one.
-  async streamComplete(id: number, size: number, sniffed: string, room: string | null | undefined, uploadId: string | null | undefined) {
-    const row = this.sql.exec<Pick<MdRow, "size" | "upload_id">>("SELECT size, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 409, error: "This upload was replaced by a newer one for the same message" };
-    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
-    this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video'", sniffed, size, Date.now(), id);
-    this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
-    this.mediaLanded(id, room);
-    const published = room ? await this.maybeAutoPublish(id, room) : null;
-    return { status: 200, type: sniffed, bytes: size, published: published };
+  // Completes the upload streamBegin answered, once every part is in:
+  // here, and only while that upload still owns the message's row. The
+  // Worker used to complete it itself, before asking, so a stream that had
+  // been replaced wrote its bytes over the key the newer one had published.
+  // The object must then be exactly size bytes (what the Worker counted)
+  // and start like a video; otherwise it is discarded with its row.
+  /** @param parts the parts the Worker uploaded, as R2's complete() takes them */
+  async streamFinish(id: number, uploadId: string, parts: R2UploadedPart[], size: number, room: string | null | undefined) {
+    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
+    const media = this.env.MEDIA;
+    return this.withMediaLock(id, "video", async () => {
+      const replaced = { status: 409, error: "This upload was replaced by a newer one for the same message" };
+      const row = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+      if (!row || row.upload_id !== uploadId) return replaced;
+      const discard = async (status: number, error: string) => {
+        if (this.upStill(id, "video", uploadId) || !this.upSession(id, "video")) { try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+        this.upDrop(id, "video", uploadId);
+        return { status: status, error: error };
+      };
+      try { await media.resumeMultipartUpload(row.r2key, uploadId).complete(parts); }
+      catch (e) {
+        try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
+        this.upDrop(id, "video", uploadId);
+        return { status: 502, error: "Upload stream failed: " + String((e && (e as Error).message) || e) };
+      }
+      let head: { size: number } | null = null, sniffed: string | null = null;
+      try { head = await media.head(row.r2key); } catch (e) { warn("upload.head", e, { room, id }); }
+      if (head && head.size === size) {
+        try { const obj = await media.get(row.r2key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) { warn("upload.sniff", e, { room, id }); }
+      }
+      if (!head || head.size !== size || !sniffed) return discard(400, "The uploaded bytes do not check out as that video; upload discarded");
+      // the message was deleted while storage answered (see upFinishNow)
+      if (!this.upStill(id, "video", uploadId)) return discard(409, "This upload was cancelled while it finished");
+      this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
+      this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video' AND upload_id = ?", sniffed, size, Date.now(), id, uploadId);
+      this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
+      this.mediaLanded(id, room);
+      const published = room ? await this.maybeAutoPublish(id, room) : null;
+      return { status: 200, type: sniffed, bytes: size, published: !!published };
+    });
   },
 
+  // Takes the multipart upload id streamBegin answered: a newer upload for
+  // the same message replaces the row, and a late abort of the old one must
+  // not delete the new one.
   async streamAbort(id: number, uploadId: string | null | undefined) {
     // Discard means the R2 multipart dies too, as in uploadAbort: the
     // one current caller aborts it first, but the upload id is deleted here,
     // so a caller that trusted this method alone would orphan the session.
-    const row = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 200 };
-    if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
-    // a stream that completed in R2 but failed the size/type check left an object
-    if (row && row.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
-    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
-    this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
-    return { status: 200 };
+    return this.withMediaLock(id, "video", async () => {
+      const row = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+      if (!row || !row.upload_id || (uploadId && row.upload_id !== uploadId)) return { status: 200 };
+      const own = row.upload_id;
+      if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, own).abort(); } catch { /* already completed, aborted or expired */ } }
+      this.upDrop(id, "video", own);
+      return { status: 200 };
+    });
   },
 } satisfies ThisType<Room>;

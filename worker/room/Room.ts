@@ -285,6 +285,8 @@ export class Room extends DurableObject {
   destroying = false;
   /** Upload links being minted right now, by folded member name (room/uploads.ts, mintUploadTicket). */
   utMinting: Map<string, number> = new Map();
+  /** The writer of each message's media kind holding its turn, by "msg:kind" (room/media.ts, withMediaLock). */
+  mediaLocks: Map<string, Promise<void>> = new Map();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);

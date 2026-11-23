@@ -76,16 +76,46 @@ export const MediaMethods = {
     return out;
   },
 
+  // Every writer of one message's media kind - an attach, an upload's
+  // start, finish and abort, a stream's begin, finish and abort - shares
+  // its R2 key and its md row, and each awaits storage between reading the
+  // row and writing it, when other requests run. Unlocked they overwrote
+  // each other: a start replaced a file attached meanwhile with an upload
+  // in flight (listed, answering 404), an abort deleted the row a finish
+  // was completing, a stream that had lost the row completed over the
+  // published video. So they take turns, one at a time per message and
+  // kind, in the order they came. The turns live in memory, which is
+  // enough: the requests they order die with the instance too.
+  async withMediaLock<T>(id: number, kind: string, fn: () => Promise<T>): Promise<T> {
+    const k = id + ":" + kind;
+    const before = this.mediaLocks.get(k) || Promise.resolve();
+    let done = () => {};
+    const mine = new Promise<void>((res) => { done = res; });
+    const tail = before.then(() => mine);
+    this.mediaLocks.set(k, tail);
+    try {
+      await before;
+      return await fn();
+    } finally {
+      done();
+      if (this.mediaLocks.get(k) === tail) this.mediaLocks.delete(k);
+    }
+  },
+
   async putMedia(id: number, kind: string, data: ArrayBuffer, type: string, room: string | null | undefined) {
     const key = this.mediaKey(room, id, kind);
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
-    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch { throw storeError(); }
-    // A single-shot attach replaces any upload in flight for the same kind.
-    const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
-    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
-    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, at) VALUES (?, ?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength, Date.now());
-    return key;
+    const media = this.env.MEDIA;
+    return this.withMediaLock(id, kind, async () => {
+      try { await media.put(key, data, { httpMetadata: { contentType: type } }); } catch { throw storeError(); }
+      // A single-shot attach replaces any upload in flight for the same
+      // kind: the row first, then the upload ends.
+      const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
+      this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+      this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, at) VALUES (?, ?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength, Date.now());
+      if (prev && prev.upload_id) { try { await media.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
+      return key;
+    });
   },
 
   // Media exists only with its message: a deleted message has none, even

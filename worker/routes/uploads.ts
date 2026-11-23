@@ -18,9 +18,7 @@ import {
   VIDEO_STREAM_TOO_BIG,
 } from "../limits.js";
 import { mediaSigParams } from "../lib/media.js";
-import { sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
-import { warn } from "../lib/log.js";
 
 // Stream one part's request body into its R2 multipart slot. Nothing is
 // buffered: R2 takes the request stream as it is (its length is known
@@ -285,8 +283,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
   const fail = async (status: number, error: string) => {
     try { await up.abort(); } catch { /* already completed, aborted or expired */ }
-    // streamAbort deletes the object too, but only while this upload
-    // still owns the message's row: the key is shared with any newer one
+    // streamAbort drops the row only while this upload still owns it
     await stub.streamAbort(id, uploadId);
     return json({ error: error }, status);
   };
@@ -319,24 +316,23 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
     }
     if (buflen > 0) { const p = await up.uploadPart(++n, take(buflen)); parts.push({ partNumber: n, etag: p.etag }); }
     if (!parts.length) return await fail(400, "Empty upload");
-    await up.complete(parts);
   } catch (e) {
     return await fail(502, "Upload stream failed: " + String((e && (e as Error).message) || e));
   }
-  let head = null as { size: number } | null, sniffed = null as string | null;
-  try { head = await env.MEDIA.head(key); } catch (e) { warn("upload.head", e, { room, id }); }
-  if (head && head.size === counted) {
-    try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) { warn("upload.sniff", e, { room, id }); }
-  }
-  if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
   // the stream can take minutes: its sender must still be welcome when the video is attached
   if (!owner) {
     const l = await stub.lookupInvite(invite);
     if (!l.ok) return await fail(l.status, l.error);
   }
-  const doneRes = await stub.streamComplete(id, counted, sniffed, room, uploadId);
-  if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
-  return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
+  // The Room completes the upload, only while it still owns the
+  // message's row, then checks and indexes it (streamFinish).
+  const doneRes = await stub.streamFinish(id, uploadId, parts, counted, room);
+  if (refused(doneRes)) {
+    // replaced meanwhile: this upload is nobody's now
+    try { await up.abort(); } catch { /* already completed, aborted or expired */ }
+    return json({ error: doneRes.error }, doneRes.status);
+  }
+  return json({ room: room, id: id, video: { type: doneRes.type, bytes: doneRes.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
 }
 
 // The upload engine (UP_KINDS): start / part / sign / status / finish / abort

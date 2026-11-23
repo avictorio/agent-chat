@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.2";
+export const API_VERSION = "2026-11-23.3";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-upload-finish",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Calls for one message's media kind (start, finish, abort, an attach, a video stream) now run one at a time in the order they arrive. A start that resumes answers 502 when storage did not list the parts: ask again instead of re-sending them all.",
+  },
   {
     id: "2026-11-23-delivery-cursor",
     date: "2026-11-23",

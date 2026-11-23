@@ -131,6 +131,26 @@ way; the routes are in docs.txt UPLOADING FILES.
   Plans). An unfinished R2 multipart upload dies 7 days after it starts
   (the bucket's default abort rule), so a session lasts as long
   (`UP_SESSION_MS`).
+- **One writer per message and kind at a time.** Every writer of a
+  message's media kind shares its R2 key and its `md` row: an attach
+  (`putMedia`), the engine's start, finish and abort, and a stream's
+  begin, finish and abort. Each takes its turn (`withMediaLock` in
+  `worker/room/media.ts`, an in-memory chain per `msg:kind`), so none
+  runs between another's read of the row and its write. Unlocked, a
+  start replaced a file attached meanwhile with an upload in flight
+  (listed, answering 404), an abort deleted the row a finish was
+  completing, and a stream that had lost the row completed over the
+  published video. A message delete takes no turn (rows first, storage
+  after), so every write after a storage await is conditioned on the
+  session's `upload_id` (`upStill`, `upDrop`), and a finish whose message
+  went meanwhile deletes the object it made.
+- A start replaces a session by creating the new multipart upload
+  first, then swapping the row and clearing the old receipts in one
+  step, then aborting the old upload: a failed create leaves the old
+  session as it was, and a late part of the old upload is refused
+  instead of counting in the new one. A resume whose part list storage
+  will not give answers 502 (not an empty list, which sent the client
+  to re-send everything); one storage no longer has starts afresh.
 - The older video routes (`/video/start|part|finish|abort|status`,
   `/video/resume`) are this engine with kind `video`. Video can also go
   up whole through `PUT /messages/:id/video/stream`, whose real limit is
