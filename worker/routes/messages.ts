@@ -21,6 +21,7 @@ import { agentOnboarding, forAgents } from "../agents/onboarding.js";
 import {
   cleanFileName,
   decodeTextPayload,
+  inlineBytes,
   sniffAudio,
   sniffImage,
   sniffVideo,
@@ -160,11 +161,10 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (draftWanted && body && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
   let audio: InlineMedia | null = null;
     if (body && body.audio) {
-      const s = bodyText(body.audio, "audio").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-      let buf;
-      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
+      const buf = inlineBytes(bodyText(body.audio, "audio"), AUDIO_MAX);
+      if (buf === null) return json({ error: "\"audio\" must be base64 or a data: URL" }, 400);
+      if (buf === "too_big") return json({ error: mediaTooBig("audio", "inline") }, 413);
       if (!buf.byteLength) return json({ error: "\"audio\" is empty" }, 400);
-      if (buf.byteLength > AUDIO_MAX) return json({ error: mediaTooBig("audio", "inline") }, 413);
       const atype = sniffAudio(buf);
       if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
       const tr = body && body.transcript ? bodyText(body.transcript, "transcript").slice(0, MAX_TEXT) : null;
@@ -172,22 +172,20 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     }
     let image: InlineMedia | null = null;
     if (body && body.image) {
-      const s = bodyText(body.image, "image").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-      let buf;
-      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
+      const buf = inlineBytes(bodyText(body.image, "image"), IMAGE_MAX);
+      if (buf === null) return json({ error: "\"image\" must be base64 or a data: URL" }, 400);
+      if (buf === "too_big") return json({ error: mediaTooBig("image", "inline") }, 413);
       if (!buf.byteLength) return json({ error: "\"image\" is empty" }, 400);
-      if (buf.byteLength > IMAGE_MAX) return json({ error: mediaTooBig("image", "inline") }, 413);
       const itype = sniffImage(buf);
       if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
       image = { data: buf, type: itype };
     }
     let video: InlineMedia | null = null;
     if (body && body.video) {
-      const s = bodyText(body.video, "video").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-      let buf;
-      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
+      const buf = inlineBytes(bodyText(body.video, "video"), VIDEO_MAX);
+      if (buf === null) return json({ error: "\"video\" must be base64 or a data: URL" }, 400);
+      if (buf === "too_big") return json({ error: mediaTooBig("video", "inline") }, 413);
       if (!buf.byteLength) return json({ error: "\"video\" is empty" }, 400);
-      if (buf.byteLength > VIDEO_MAX) return json({ error: mediaTooBig("video", "inline") }, 413);
       const vtype = sniffVideo(buf);
       if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
       video = { data: buf, type: vtype };

@@ -4,7 +4,7 @@ import { mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "
 import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT, cloneAllowed } from "../room/voices.js";
-import { sniffAudio } from "../lib/sniff.js";
+import { inlineBytes, sniffAudio } from "../lib/sniff.js";
 import { mediaSigState, serveMedia } from "../lib/media.js";
 import { speakableText } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
@@ -54,7 +54,10 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
       const body = await readBody(request);
       const s64 = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-      try { buf = Uint8Array.from(atob(s64), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
+      const b = inlineBytes(s64, VOICE_SAMPLE_MAX);
+      if (b === null) return json({ error: "\"audio\" must be base64 or a data: URL" }, 400);
+      if (b === "too_big") return json({ error: "Voice samples can be up to " + mb(VOICE_SAMPLE_MAX) }, 413);
+      buf = b;
     } else {
       buf = await request.arrayBuffer();
     }

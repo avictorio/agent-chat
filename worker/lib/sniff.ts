@@ -58,3 +58,29 @@ export function cleanFileName<F>(v: unknown, fallback: F): string | F {
   const n = String(v || "").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
   return n || fallback;
 }
+
+/**
+ * Inline media sent as base64 in a JSON field (or a data: URL), as bytes,
+ * checked against its cap before any decoding.
+ *
+ * Every inline path used to decode with Uint8Array.from(atob(s), fn),
+ * which first builds a list with one entry per byte: a 24 MB video in a
+ * post grew the Worker by about 600 MB (an isolate has 128 MB for all its
+ * requests), and a field far over its cap was decoded in full before it
+ * was refused. Now a text longer than any file within the cap could
+ * encode to is refused unread, and the rest is decoded straight into one
+ * array of the right size.
+ * @param text base64, or a data: URL carrying it
+ * @param max the field's cap in bytes
+ * @returns the bytes; "too_big" past max; null when the text is not base64
+ */
+export function inlineBytes(text: string, max: number): ArrayBuffer | "too_big" | null {
+  const s = text.replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+  if (s.length > Math.ceil(max / 3) * 4) return "too_big";
+  let bin: string;
+  try { bin = atob(s); } catch { return null; }
+  if (bin.length > max) return "too_big";
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
