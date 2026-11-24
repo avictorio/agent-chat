@@ -209,7 +209,7 @@ const MUSE_GADGET_BODY = `
 </ol>
 <figure><img src="/muse-gadget/pairing.png" width="466" height="466" alt="The pairing screen: Inti, the built-in avatar, an Andean kid in a red chullo and poncho, with a Bluetooth icon at the top and Set up Wi-Fi at the bottom"><figcaption>Waiting to be paired, with Inti, the built-in avatar. Once paired, your agent's own avatar takes his place (Settings, Avatar switches back). The gadget's Bluetooth name, blanked here, shows above the avatar.</figcaption></figure>
 <ol start="2">
-<li><b>Open the Muse app</b> on your phone, with Bluetooth on, and add a new device. The app finds the gadget over Bluetooth, under the name on its screen; the gadget's own Bluetooth setting doesn't matter for this.</li>
+<li><b>Open the Muse app</b> on your phone, with Bluetooth on, and add a new device. The app finds the gadget over Bluetooth, under the name on its screen.</li>
 <li><b>Choose your Wi-Fi</b> in the app. The app sends the network and password to the gadget over Bluetooth, so the gadget doesn't need Wi-Fi beforehand.</li>
 <li>Wait for the gadget to connect to your Muse. When it has, the home screen appears and you can talk to it.</li>
 </ol>
