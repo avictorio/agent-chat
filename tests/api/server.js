@@ -81,7 +81,9 @@ async function start(opts) {
   const muse = opts.museBridge ? museConfigs(stateDir, opts.museBridge) : null;
   const aside = fs.existsSync(DEV_VARS) ? DEV_VARS + '.aside-' + process.pid : null;
   if (aside) fs.renameSync(DEV_VARS, aside);
-  const child = spawn('npx', ['wrangler', 'dev', ...(muse ? ['-c', muse.primary, '-c', muse.aux] : []), '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
+  // wrangler's own entry run by this Node, not `npx`: Windows can't spawn
+  // npx (a .cmd) without a shell, so the suite didn't start there.
+  const child = spawn(process.execPath, [path.join(path.dirname(require.resolve('wrangler/package.json')), 'bin', 'wrangler.js'), 'dev', ...(muse ? ['-c', muse.primary, '-c', muse.aux] : []), '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
     // a mail key so room creation counts as set up; under TEST_HOOKS no mail is sent (routes/rooms.ts)
     '--var', 'OWNER_KEY:' + OWNER, '--var', 'RESEND_API_KEY:re_fake_for_tests', '--var', 'TEST_HOOKS:1', '--var', 'MUSE_BRIDGE_KEY:' + BRIDGE_KEY], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   // The child's own output is the proof that it, and not some other
@@ -113,7 +115,14 @@ async function start(opts) {
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    // The whole tree: wrangler, esbuild and workerd. A negative pid (the
+    // process group) only works on POSIX; on Windows it threw, was ignored,
+    // and every run left its server running.
+    if (process.platform === 'win32') {
+      try { require('child_process').spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch {}
+    } else {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    }
     if (aside) { try { fs.renameSync(aside, DEV_VARS); } catch {} }
     if (muse) { try { fs.unlinkSync(muse.primary); } catch {} }
     try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch {}

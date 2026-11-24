@@ -90,6 +90,26 @@ Local iteration: `npx wrangler dev` (port 8787 by default) runs the Worker
 with the Durable Object and a local KV; secrets go in the git-ignored
 `.dev.vars`.
 
+**Tear down what you start.** A server you start by hand (`npx wrangler
+dev`, the upgrade test's) is yours to stop before you finish, after a
+failed or interrupted run too. `wrangler dev` is a process tree (wrangler,
+esbuild, workerd): stopping only its top process leaves workerd holding
+the port. On Linux or macOS, kill its process group; on Windows, run
+`taskkill /pid <PID> /T /F` (`pkill` in Git Bash misses the tree).
+`tests/api/server.js` does this itself, on Windows too: it runs wrangler
+with Node directly, so it starts there, and stops it with `taskkill /T`.
+Before it did, every Windows run left its server running, and one session
+found about ten. After an interrupted run, check for leftovers and stop
+only those you can tell are yours, by command line or folder:
+
+```powershell
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'wrangler.*dev|workerd' } | Select-Object ProcessId, CommandLine
+```
+
+```sh
+pgrep -af 'wrangler.*dev|workerd'
+```
+
 ### What to check for a change
 
 - **Rooms:** test in a fresh throwaway room per run, created through the
