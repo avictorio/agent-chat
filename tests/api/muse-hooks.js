@@ -4,7 +4,8 @@
 // grouping, retries, no duplicates across a restart, no delivery while
 // off or muted, and the refusals; the bridge key on every bridge call and
 // the bridge counted as absent without it; the gadget's handover routes
-// (connect, update, disconnect, seal-key) relayed as the bridge answers.
+// (connect, update, disconnect, status, seal-key) relayed as the bridge
+// answers; each hook set or removed reported to the bridge's room count.
 // The bridge is fakeBridge() below: the
 // MUSE_BRIDGE stand-in Worker (tests/api/fake-muse-bridge.js) forwards to
 // it, it records every call and answers as each check asks. Called from
@@ -18,11 +19,12 @@ const { BRIDGE_KEY } = require('./server.js');
  *  handover routes answer as next[path] says ({status, body, headers}, or
  *  {drop: true} to cut the connection), else as the real bridge would. */
 function fakeBridge() {
-  const state = { codes: {}, claims: [], delivers: [], plan: {}, handover: [], next: {} };
+  const state = { codes: {}, claims: [], delivers: [], plan: {}, handover: [], next: {}, rooms: [], hooked: {} };
   const HANDOVER = {
     '/connect': () => ({ code: 'ABCDE-FGHJK', museLinkId: 'mlink-0123456789abcdef', expiresAt: 1900000000000 }),
     '/update': (b) => ({ museLinkId: (b && b.museLinkId) || 'mlink-0123456789abcdef', updated: true }),
     '/disconnect': (b) => ({ museLinkId: b && b.museLinkId, removed: true }),
+    '/status': (b) => ({ museLinkId: b && b.museLinkId, connected: true, rooms: 2, termsVersion: 'v1', tokenHeld: true }),
     '/seal-key': () => ({ alg: 'X25519-HKDF-SHA256-AES-256-GCM', info: 'muse-bridge seal v1', publicKey: 'cHVibGljLWtleS1mb3ItdGhlLWFwaS1zdWl0ZS0zMmI=' }),
   };
   const server = http.createServer((q, res) => {
@@ -46,6 +48,13 @@ function fakeBridge() {
         if (!link) return send(404, { error: 'unknown code' });
         delete state.codes[body.code];
         return send(200, { museLinkId: link });
+      }
+      if (q.url === '/rooms') {
+        state.rooms.push({ raw, body, key });
+        const link = body && body.museLinkId;
+        const set = state.hooked[link] || (state.hooked[link] = new Set());
+        if (body && body.hooked) set.add(body.room); else if (body) set.delete(body.room);
+        return send(200, { museLinkId: link, rooms: set.size });
       }
       if (q.url === '/deliver') {
         const link = body && body.museLinkId;
@@ -125,6 +134,9 @@ async function museHooks(ctx) {
   check('muse: the response carries no token', !r.text.includes(TA) && !r.text.includes(TA2));
   check('muse: the response carries no link id', !r.text.includes('link-ada'), r.text.slice(0, 300));
   check('muse: every claim carried the bridge key', B.claims.length > 0 && B.claims.every((c) => c.key === BRIDGE_KEY), JSON.stringify(B.claims.map((c) => c.key)));
+  const told = (link, rm, hooked) => B.rooms.some((x) => x.body && x.body.museLinkId === link && x.body.room === rm && x.body.hooked === hooked);
+  check('muse: each room set is reported to the bridge\'s room count', told('link-ada', room, true) && told('link-ada', room2, true) && B.hooked['link-ada'].size === 2, JSON.stringify(B.rooms.map((x) => x.body)));
+  check('muse: room reports carry the bridge key and no token', B.rooms.every((x) => x.key === BRIDGE_KEY && !x.raw.includes(TA) && !x.raw.includes(TA2)), JSON.stringify(B.rooms.map((x) => x.key)));
   B.codes['code-bob'] = 'link-bob';
   r = await reg({ code: 'code-bob', routing: 'main', rooms: [{ room, token: TB }] });
   check('muse: a second member registers with routing main', r.status === 200 && r.json.results[0].ok && r.json.results[0].hook.routing === 'main', r.text.slice(0, 200));
@@ -309,6 +321,7 @@ async function museHooks(ctx) {
   check('muse: remove my hook', r.status === 200 && r.json.removed === true, JSON.stringify(r.json));
   r = await hook(R, TA, 'DELETE');
   check('muse: removing it again -> 404', r.status === 404, r.status);
+  check('muse: a removed hook is reported to the bridge (hooked false)', await waitFor(() => told('link-ada', room, false)) && B.hooked['link-ada'].size === 1, JSON.stringify(B.rooms.map((x) => x.body)));
   r = await hook(R, TA);
   check('muse: after removal, status is null', r.status === 200 && r.json.hook === null);
   await req('DELETE', R + '/invites/' + TB, { owner: true });
@@ -318,6 +331,7 @@ async function museHooks(ctx) {
   check('muse: a revoked member\'s hook wakes no more', !B.delivers.slice(tries0).some((d) => d.body.museLinkId === 'link-bob'));
   pk = await peek(room);
   check('muse: a revoked member\'s hook is gone from storage', !hookOf(pk, 'musebob'), JSON.stringify(pk && pk.hooks));
+  check('muse: a revoked member\'s hook is reported to the bridge', await waitFor(() => told('link-bob', room, false)), JSON.stringify(B.rooms.map((x) => x.body)));
 
   for (const P of [R, R2]) {
     await req('DELETE', P + '/invites', { owner: true });
@@ -393,6 +407,15 @@ async function museHandover(ctx) {
   n = B.handover.length;
   r = await hand('POST', 'disconnect', {});
   check('muse handover: disconnect without a link id -> 400', r.status === 400 && B.handover.length === n, r.status);
+  r = await hand('POST', 'status', { museLinkId: 'mlink-0123456789abcdef', sealed: 'not forwarded' });
+  last = calls('/status').slice(-1)[0];
+  check('muse handover: status relays the link id alone, with the room count back', r.status === 200 && r.json && r.json.rooms === 2 && r.json.connected === true && !!last && last.key === BRIDGE_KEY && JSON.stringify(last.body) === JSON.stringify({ museLinkId: 'mlink-0123456789abcdef' }), r.status + ' ' + JSON.stringify(last && last.body));
+  B.next['/status'] = [{ status: 410, body: { code: 'link_gone', error: 'link gone' } }];
+  r = await hand('POST', 'status', { museLinkId: 'mlink-gone' });
+  check('muse handover: status passes a 410 link_gone through', r.status === 410 && r.json && r.json.code === 'link_gone', r.status + ' ' + r.text.slice(0, 120));
+  n = B.handover.length;
+  r = await hand('POST', 'status', {});
+  check('muse handover: status without a link id -> 400', r.status === 400 && B.handover.length === n, r.status);
 
   // without the bridge key: 503 and no bridge call, on every route
   n = B.handover.length;
@@ -402,6 +425,7 @@ async function museHandover(ctx) {
     await hand('POST', 'connect', { sealed: 'c2VhbGVk', termsVersion: 'v1' }, nokey),
     await hand('POST', 'update', { sealed: 'c2VhbGVk' }, nokey),
     await hand('POST', 'disconnect', { museLinkId: 'mlink-x' }, nokey),
+    await hand('POST', 'status', { museLinkId: 'mlink-x' }, nokey),
   ];
   check('muse handover: without the bridge key every route -> 503 muse_unavailable', off.every((x) => x.status === 503 && x.json && x.json.code === 'muse_unavailable'), JSON.stringify(off.map((x) => x.status)));
   check('muse handover: ... and the bridge was not called', B.handover.length === n, B.handover.length - n);

@@ -10,7 +10,7 @@ import {
   MIB, MUSE_BATCH_MAX, MUSE_CODE_MAX, MUSE_HANDOVER_BODY_MAX, MUSE_HANDOVER_PER_IP, MUSE_HANDOVER_WINDOW_S, MUSE_QUOTA_ROOM,
   MUSE_SEAL_KEY_CACHE_S, ROOM_RE, SMALL_BODY_MAX,
 } from "../limits.js";
-import { MUSE_ROUTING_DEFAULT, MUSE_ROUTING_ERROR, museBridge, museRouting } from "../room/muse.js";
+import { MUSE_ROUTING_DEFAULT, MUSE_ROUTING_ERROR, museBridge, museReportRoom, museRouting } from "../room/muse.js";
 import { hashKey, networkKey } from "../lib/address.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
@@ -105,6 +105,8 @@ export async function museRegisterRoute(rc: RouteContext) {
   for (const a of accepted) {
     const s = await env.ROOM.get(env.ROOM.idFromName(a.room)).museSetHook(a.token, link, a.routing, a.room);
     results[a.i] = s.ok ? { room: a.room, ok: true, name: s.name, hook: s.hook } : { room: a.room, ok: false, status: s.status, code: s.code, error: s.error };
+    // the bridge counts the link's rooms for the gadget (best effort: never fails the registration)
+    if (s.ok) await museReportRoom(bridge, link, a.room, true);
   }
   return json({ claimed: true, results });
 }
@@ -150,15 +152,16 @@ export async function museHookRoute(rc: RouteContext, m: RegExpMatchArray) {
 
 // The gadget's handover: POST /api/muse/connect {sealed, termsVersion},
 // POST /api/muse/update {sealed, museLinkId?}, POST /api/muse/disconnect
-// {museLinkId} and GET /api/muse/seal-key, each relayed to the bridge's
+// {museLinkId}, POST /api/muse/status {museLinkId} (the link's room count,
+// for the gadget's screen) and GET /api/muse/seal-key, each relayed to the bridge's
 // route of the same name, its answer (status, body, Retry-After) passed
 // back as it came. The gadget is no member of any room, so no token is
 // asked for: each network gets MUSE_HANDOVER_PER_IP calls a
 // MUSE_HANDOVER_WINDOW_S, and a body is at most MUSE_HANDOVER_BODY_MAX.
 // Only the fields named go on to the bridge. A sealed blob, a code and a
 // link id are never logged (the link id is a bearer secret: /disconnect
-// takes nothing else).
-export type MuseHandover = "connect" | "update" | "disconnect" | "seal-key";
+// and /status take nothing else).
+export type MuseHandover = "connect" | "update" | "disconnect" | "status" | "seal-key";
 
 /** The last seal key the bridge gave, kept for MUSE_SEAL_KEY_CACHE_S (the
  *  settled answer only, as appShell keeps its shell). */
@@ -190,7 +193,7 @@ export async function museHandoverRoute(rc: RouteContext, which: MuseHandover) {
     const sealed = handoverText(body?.sealed, "sealed", MUSE_HANDOVER_BODY_MAX).trim();
     const terms = handoverText(body?.termsVersion, "termsVersion", 64).trim();
     const link = handoverText(body?.museLinkId, "museLinkId", MUSE_CODE_MAX).trim();
-    if (which === "disconnect") {
+    if (which === "disconnect" || which === "status") {
       if (!link) return json({ error: "\"museLinkId\" is required" }, 400);
       out = { museLinkId: link };
     } else {

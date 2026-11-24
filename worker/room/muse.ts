@@ -21,6 +21,13 @@
 // again with backoff; a 429 waits as long as the bridge asks; a 410 (the
 // link is gone) turns the hook off. Logs carry room, counts and statuses
 // only: never message text, a token or the link id.
+//
+// The bridge also keeps which rooms are hooked to each link, so the gadget
+// can show a count: a hook set is reported as POST /rooms {hooked: true}
+// (routes/muse.ts, after registering), a hook removed or moved to another
+// link as {hooked: false} (museDrop, museSetHook). Best effort: a failed
+// report is logged and changes nothing here. A hook the room turns off on a
+// 410 is not reported: the link is gone already.
 
 import { nameFold } from "../lib/text.js";
 import { warn } from "../lib/log.js";
@@ -65,6 +72,19 @@ export function museBridge(env: Env, off?: boolean): MuseBridge | null {
   return (path, body) => b.fetch("https://muse-bridge" + path, body === undefined
     ? { method: "GET", headers: { "X-Bridge-Key": key }, signal: AbortSignal.timeout(MUSE_FETCH_MS) }
     : { method: "POST", headers: { "Content-Type": "application/json", "X-Bridge-Key": key }, body: JSON.stringify(body), signal: AbortSignal.timeout(MUSE_FETCH_MS) });
+}
+
+/** Tells the bridge one room's hook for a link was set (hooked) or
+ *  removed. Never throws; a refusal other than 410 (the link is gone,
+ *  nothing to count) is logged with the room and status only. */
+export async function museReportRoom(bridge: MuseBridge, link: string, room: string, hooked: boolean): Promise<void> {
+  try {
+    const r = await bridge("/rooms", { museLinkId: link, room: room, hooked: hooked });
+    await r.text();
+    if (!r.ok && r.status !== 410) warn("muse.rooms", "HTTP " + r.status, { room: room, hooked: hooked });
+  } catch (e) {
+    warn("muse.rooms", e && (e as Error).name ? (e as Error).name : "fetch failed", { room: room, hooked: hooked });
+  }
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -147,6 +167,8 @@ export const MuseMethods = {
     this.sql.exec("INSERT OR REPLACE INTO mh (member, name, room, link, routing, enabled, muted, cursor, last_at, due_at, fails, skipped, created, updated, off_reason) VALUES (?, ?, ?, ?, ?, 1, 0, ?, NULL, NULL, 0, 0, ?, ?, NULL)",
       member, who.name, room, link, routing, old ? old.cursor : 0, old ? old.created : now, now);
     this.roomName = room;
+    // moved to another link: the old one loses this room (the new one is told by the caller)
+    if (old && old.link !== link) this.museReportGone([{ link: old.link, room: old.room }]);
     this.notifyMembers(who.name);
     return { ok: true, name: who.name, hook: this.museView(this.museRow(member) as MhRow) };
   },
@@ -193,13 +215,27 @@ export const MuseMethods = {
   /** A member's hook and its queue go (their last invite was revoked, or they removed it). */
   museDrop(name: string | null) {
     if (name === null) {
+      const all = this.sql.exec<Pick<MhRow, "link" | "room">>("SELECT link, room FROM mh").toArray();
       this.sql.exec("DELETE FROM mh");
       this.sql.exec("DELETE FROM mq");
+      this.museReportGone(all);
       return;
     }
     const member = nameFold(name);
+    const h = this.museRow(member);
     this.sql.exec("DELETE FROM mh WHERE member = ?", member);
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
+    if (h) this.museReportGone([{ link: h.link, room: h.room }]);
+  },
+
+  /** Tells the bridge these hooks are gone, after the response (best effort). */
+  museReportGone(hooks: Array<{ link: string, room: string }>) {
+    if (!hooks.length) return;
+    const bridge = museBridge(this.env, this.museTestNoKey());
+    if (!bridge) return;
+    this.ctx.waitUntil((async () => {
+      for (const h of hooks) await museReportRoom(bridge, h.link, h.room, false);
+    })());
   },
 
   /** The members whose Muse delivery is on (a hook, on and not muted), by folded name. */

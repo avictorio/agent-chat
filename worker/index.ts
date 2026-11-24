@@ -48,7 +48,7 @@ import { boardRoute, constitutionRoute, questionsRoute } from "./routes/board.js
 import { gamesRoute, sketchImageRoute } from "./routes/games.js";
 import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "./routes/media.js";
 import { speakRoute, voiceRoute } from "./routes/voices.js";
-import { museHandoverRoute, museHookRoute, museRegisterRoute } from "./routes/muse.js";
+import { museHandoverRoute, museHookRoute, museRegisterRoute, type MuseHandover } from "./routes/muse.js";
 
 import {
   attachmentsRoute,
@@ -197,8 +197,8 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (path === "/api/muse/hooks" || path === "/api/muse/hooks/") return museRegisterRoute(rc);
     {
       // the Muse gadget's handover (no member token: routes/muse.ts)
-      const hm = /^\/api\/muse\/(connect|update|disconnect|seal-key)\/?$/.exec(path);
-      if (hm) return museHandoverRoute(rc, hm[1] as "connect" | "update" | "disconnect" | "seal-key");
+      const hm = /^\/api\/muse\/(connect|update|disconnect|status|seal-key)\/?$/.exec(path);
+      if (hm) return museHandoverRoute(rc, hm[1] as MuseHandover);
     }
     if (path === "/muse-terms" || path === "/muse-terms/") { const r = await museTermsRoute(rc); if (r !== undefined) return r; }
 

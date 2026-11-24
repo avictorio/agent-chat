@@ -442,7 +442,12 @@ docs.txt section that owns its routes, caps and formats.
   (`MUSE_RETRY_FIRST_MS` doubling to `MUSE_RETRY_MAX_MS`), a 429 waits out
   its Retry-After, a 410 (or `code: "link_gone"`) turns the hook off.
   Nothing is queued while a hook is muted or off. A revoke drops the
-  member's hook. `GET /members` carries `muse_delivery`, shown as a pill
+  member's hook. The bridge counts each link's rooms for the gadget: a
+  registration reports each hook set (`POST /rooms {museLinkId, room,
+  hooked: true}`, `museReportRoom`), and a hook removed (DELETE, a revoke,
+  revoke-all) or moved to another link reports `hooked: false`
+  (`museReportGone`, after the response); best effort, a failure is only
+  logged. `GET /members` carries `muse_delivery`, shown as a pill
   in the members list. The binding is commented out in `wrangler.toml`
   until muse-bridge exists (a deploy refuses a binding to a missing
   Worker); without it the registration answers 503. Every bridge call
@@ -452,7 +457,9 @@ docs.txt section that owns its routes, caps and formats.
   room's member, hands the bridge its sealed Muse token through
   `POST /api/muse/connect {sealed, termsVersion}` (answer
   `{code, museLinkId, expiresAt}`), `POST /api/muse/update
-  {sealed, museLinkId?}`, `POST /api/muse/disconnect {museLinkId}` and
+  {sealed, museLinkId?}`, `POST /api/muse/disconnect {museLinkId}`,
+  `POST /api/muse/status {museLinkId}` (answer `{museLinkId, connected,
+  rooms, termsVersion, tokenHeld}`, for the gadget's room count) and
   `GET /api/muse/seal-key` (`museHandoverRoute`): no token, the named
   fields only go on, the bridge's status and body come back as they are
   (an unreachable bridge is 502 `muse_unreachable`), bodies up to

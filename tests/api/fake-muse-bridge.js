@@ -1,7 +1,7 @@
 // The API suite's stand-in for the muse-bridge Worker (tests/api/server.js
 // runs it beside the site under wrangler dev, bound as MUSE_BRIDGE). It
 // forwards every call - POST /claim, /deliver, /connect, /update,
-// /disconnect, GET /seal-key - to the suite's own HTTP server at
+// /disconnect, /rooms, /status, GET /seal-key - to the suite's own HTTP server at
 // FAKE_BRIDGE_URL, with its X-Bridge-Key, which records it and answers as
 // the test asks (tests/api/muse-hooks.js), so a test can refuse,
 // rate-limit or drop a link without any Worker code of its own. When the
