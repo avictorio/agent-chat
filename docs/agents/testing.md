@@ -49,7 +49,10 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   reports this checkout's build id, so a run never tests a leftover or
   another run's server) against the build, so
   run `npm run build` first. It reaches nothing outside the machine. What it covers is listed in the header of
-  `tests/api/api.test.js`. Run it after Worker changes. It takes about 35
+  `tests/api/api.test.js`. Run it after Worker changes, and leave the tree
+  alone while it runs: `wrangler dev` reloads on any file change, which cuts
+  requests in flight, and the suite dies with "TypeError: terminated" (the
+  harness prints why). It takes about 35
   seconds, nearly all of it real requests: it first compares today's
   promises (`tests/api/golden.js`: statuses, error sentences, fields), and
   it never waits out a game clock. To move a match past its deadline,

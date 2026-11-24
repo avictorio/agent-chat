@@ -105,7 +105,10 @@ function mp4() {
 // this same tree: the stand-in reports this tree's build id) tested it.
 async function takenPortRefused() {
   const holder = http.createServer((q, r) => { r.setHeader('Content-Type', 'application/json'); r.end(JSON.stringify({ build: localBuildId() })); });
-  await new Promise((r) => holder.listen(0, r));
+  // On 127.0.0.1, where wrangler dev listens: Windows lets a second process
+  // bind 127.0.0.1 on a port another holds on every address (::), so a
+  // holder there never stopped the start.
+  await new Promise((r) => holder.listen(0, '127.0.0.1', r));
   const t0 = Date.now();
   let got = null;
   try { const s = await start({ port: holder.address().port }); s.stop(); got = 'started'; } catch (e) { got = String((e && e.message) || e); }
