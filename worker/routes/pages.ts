@@ -204,8 +204,11 @@ const MUSE_GADGET_BODY = `
 
 <h2>First setup</h2>
 <ol>
-<li><b>Power it</b> with a USB-C cable. A reset gadget starts in pairing mode, and the screen says it's waiting to be paired.</li>
-<li><b>Open the Muse app</b> on your phone, with Bluetooth on, and add a new device. The app finds the gadget over Bluetooth; the gadget's own Bluetooth setting doesn't matter for this.</li>
+<li><b>Power it</b> with a USB-C cable. A reset gadget starts in pairing mode: it shows its Bluetooth name at the top (MuseGadget- and a code) and <b>Set up Wi-Fi</b> at the bottom.</li>
+</ol>
+<figure><img src="/muse-gadget/pairing.png" width="466" height="466" alt="The pairing screen: a default avatar, a Bluetooth icon at the top and Set up Wi-Fi at the bottom"><figcaption>Waiting to be paired. The gadget's Bluetooth name, blanked here, shows above the avatar.</figcaption></figure>
+<ol start="2">
+<li><b>Open the Muse app</b> on your phone, with Bluetooth on, and add a new device. The app finds the gadget over Bluetooth, under the name on its screen; the gadget's own Bluetooth setting doesn't matter for this.</li>
 <li><b>Choose your Wi-Fi</b> in the app. The app sends the network and password to the gadget over Bluetooth, so the gadget doesn't need Wi-Fi beforehand.</li>
 <li>Wait for the gadget to connect to your Muse. When it has, the home screen appears and you can talk to it.</li>
 </ol>
@@ -238,9 +241,10 @@ const MUSE_GADGET_BODY = `
 <h2>Updates, reset and help</h2>
 <ul>
 <li><b>Updates install themselves.</b> About 15 minutes after it starts, and then once a day, the gadget checks for a new version while it's idle with the screen asleep, downloads it in about 30 seconds and restarts. If a new version can't reach Muse, it goes back to the previous one by itself. To get an update sooner, unplug it, plug it back in and leave it alone for about 15 minutes.</li>
-<li><b>Reset</b> from the Muse menu on the gadget, or with a long press on its button. This forgets your Wi-Fi and the pairing with your Muse, and disconnects Agent Chat first. Do this before giving the gadget to someone else. (Removing it in the Muse app only unpairs it and keeps the Wi-Fi.)</li>
+<li><b>Reset:</b> open <b>Settings, then Muse</b>, tap <b>Reset pairing</b>, and tap again within 5 seconds; or give its button a long press. This forgets your Wi-Fi and the pairing with your Muse, and disconnects Agent Chat first. The gadget restarts in pairing mode. Do this before giving the gadget to someone else. (Removing it in the Muse app only unpairs it and keeps the Wi-Fi.)</li>
 <li><b>Help:</b> ask whoever gave you the gadget.</li>
 </ul>
+<figure><img src="/muse-gadget/muse-reset.png" width="466" height="466" alt="The Muse page in Settings: Connected, Paired with the Muse app, Details, a red Reset pairing button and the version number"><figcaption>Settings, then Muse: Reset pairing, and the firmware version.</figcaption></figure>
 `;
 
 export function museGadgetRoute(_rc: RouteContext) {

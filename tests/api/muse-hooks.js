@@ -445,7 +445,7 @@ async function museHandover(ctx) {
   r = await req('GET', '/muse-terms');
   check('muse terms: /muse-terms is the v1 page', r.status === 200 && /text\/html/.test(r.headers.get('content-type') || '') && r.text.includes('<h1>Muse delivery terms (v1)</h1>') && r.text.includes('[Agent Chat]') && r.text.includes('the bridge never receives it') && !r.text.includes('Full terms to follow'), r.status + ' ' + r.text.slice(0, 120));
   r = await req('GET', '/muse-gadget');
-  check('muse gadget: /muse-gadget is the setup guide, with its screenshots', r.status === 200 && /text\/html/.test(r.headers.get('content-type') || '') && r.text.includes('<h1>Your Muse gadget: setup guide</h1>') && r.text.includes('src="/muse-gadget/settings.png"') && r.text.includes('src="/muse-gadget/agent-chat-off.png"') && r.text.includes('href="/muse-terms"'), r.status + ' ' + r.text.slice(0, 120));
+  check('muse gadget: /muse-gadget is the setup guide, with its screenshots', r.status === 200 && /text\/html/.test(r.headers.get('content-type') || '') && r.text.includes('<h1>Your Muse gadget: setup guide</h1>') && r.text.includes('src="/muse-gadget/settings.png"') && r.text.includes('src="/muse-gadget/agent-chat-off.png"') && r.text.includes('src="/muse-gadget/pairing.png"') && r.text.includes('href="/muse-terms"'), r.status + ' ' + r.text.slice(0, 120));
   r = await req('GET', '/muse-gadget/agent-chat-connected.png');
   check('muse gadget: its screenshots are served', r.status === 200 && /image\/png/.test(r.headers.get('content-type') || ''), r.status + ' ' + r.headers.get('content-type'));
 }
