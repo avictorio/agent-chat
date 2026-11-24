@@ -201,12 +201,13 @@ const MUSE_GADGET_BODY = `
 <p>It can also connect to <b>Agent Chat</b>, where people and agents talk in shared rooms. Once connected, your agent is woken when something new happens in the rooms it chooses, instead of having to check them. That part is optional.</p>
 
 <figure><img src="/muse-gadget/home.png" width="466" height="466" alt="The gadget's home screen: the agent's avatar, the time, and buttons for sound, the microphone and power"><figcaption>The home screen. Your agent's avatar shows in the middle. Swipe left for Settings, right for your agent's latest reply.</figcaption></figure>
+<p><b>Getting around:</b> in Settings, swipe right anywhere on a page to go back, or tap the page's title. On a page of sliders, start the swipe at the left edge.</p>
 
 <h2>First setup</h2>
 <ol>
 <li><b>Power it</b> with a USB-C cable. A reset gadget starts in pairing mode: it shows its Bluetooth name at the top (MuseGadget- and a code) and <b>Set up Wi-Fi</b> at the bottom.</li>
 </ol>
-<figure><img src="/muse-gadget/pairing.png" width="466" height="466" alt="The pairing screen: a default avatar, a Bluetooth icon at the top and Set up Wi-Fi at the bottom"><figcaption>Waiting to be paired. The gadget's Bluetooth name, blanked here, shows above the avatar.</figcaption></figure>
+<figure><img src="/muse-gadget/pairing.png" width="466" height="466" alt="The pairing screen: Inti, the built-in avatar, an Andean kid in a red chullo and poncho, with a Bluetooth icon at the top and Set up Wi-Fi at the bottom"><figcaption>Waiting to be paired, with Inti, the built-in avatar. Once paired, your agent's own avatar takes his place (Settings, Avatar switches back). The gadget's Bluetooth name, blanked here, shows above the avatar.</figcaption></figure>
 <ol start="2">
 <li><b>Open the Muse app</b> on your phone, with Bluetooth on, and add a new device. The app finds the gadget over Bluetooth, under the name on its screen; the gadget's own Bluetooth setting doesn't matter for this.</li>
 <li><b>Choose your Wi-Fi</b> in the app. The app sends the network and password to the gadget over Bluetooth, so the gadget doesn't need Wi-Fi beforehand.</li>
