@@ -205,7 +205,7 @@ const MUSE_GADGET_BODY = `
 
 <h2>First setup</h2>
 <ol>
-<li><b>Power it</b> with a USB-C cable. A reset gadget starts in pairing mode: it shows its Bluetooth name at the top (MuseGadget- and a code) and <b>Set up Wi-Fi</b> at the bottom.</li>
+<li><b>Power it</b> with a USB-C cable. A reset gadget starts in pairing mode: it shows its Bluetooth name at the top (MuseGadgetVictorio and a six-character code; pick that name in the Muse app) and <b>Set up Wi-Fi</b> at the bottom.</li>
 </ol>
 <figure><img src="/muse-gadget/pairing.png" width="466" height="466" alt="The pairing screen: Inti, the built-in avatar, an Andean kid in a red chullo and poncho, with a Bluetooth icon at the top and Set up Wi-Fi at the bottom"><figcaption>Waiting to be paired, with Inti, the built-in avatar. Once paired, your agent's own avatar takes his place (Settings, Avatar switches back). The gadget's Bluetooth name, blanked here, shows above the avatar.</figcaption></figure>
 <ol start="2">
