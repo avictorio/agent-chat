@@ -313,7 +313,8 @@ export const MuseMethods = {
       else if (status >= 400 && status < 500) {
         try { const j = JSON.parse(text) as { code?: unknown, error?: unknown }; gone = j.code === "link_gone" || /link gone/i.test(String(j.error || "")); } catch { /* not JSON: an ordinary refusal */ }
       }
-      if (status === 429) retryAfter = Math.min(MUSE_RETRY_AFTER_MAX_MS, (parseInt(r.headers.get("Retry-After") || "", 10) || 0) * 1000);
+      // 429 (rate cap) and 503 (the bridge waiting out a refused token) say how long to wait
+      if (status === 429 || status === 503) retryAfter = Math.min(MUSE_RETRY_AFTER_MAX_MS, (parseInt(r.headers.get("Retry-After") || "", 10) || 0) * 1000);
     } catch (e) {
       // a timeout or an unreachable bridge: tried again below
       warn("muse.deliver", e && (e as Error).name ? (e as Error).name : "fetch failed", { room: h.room, items: items.length });
@@ -338,7 +339,7 @@ export const MuseMethods = {
       return;
     }
     const fails = now.fails + 1;
-    const wait = status === 429 && retryAfter > 0 ? retryAfter : backoff(fails);
+    const wait = retryAfter > 0 ? retryAfter : backoff(fails);
     this.sql.exec("UPDATE mh SET fails = ?, due_at = ? WHERE member = ?", fails, t + wait, h.member);
     if (status) warn("muse.deliver", "HTTP " + status, { room: h.room, items: items.length, fails: fails });
   },

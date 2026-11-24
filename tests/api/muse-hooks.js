@@ -54,6 +54,7 @@ function fakeBridge() {
         state.delivers.push({ raw, body, status, key, at: Date.now() });
         if (status === 410) return send(410, { error: 'link gone', code: 'link_gone' });
         if (status === 429) return send(429, { error: 'slow down' }, { 'Retry-After': String(next.retryAfter || 1) });
+        if (status === 503 && next.retryAfter) return send(503, { error: 'Muse refused the token; retrying', code: 'token_refused' }, { 'Retry-After': String(next.retryAfter) });
         return send(status, status < 300 ? { ok: true } : { error: 'bridge trouble' });
       }
       send(404, { error: 'no route' });
@@ -215,6 +216,15 @@ async function museHooks(ctx) {
   check('muse: a 429 backs off for its Retry-After', hookOf(pk, 'museada').due_at > pk.now + 100000 && hookOf(pk, 'museada').pending === 1, JSON.stringify(hookOf(pk, 'museada')));
   await run(room);
   check('muse: after the 429 the wake goes through', textsOf('link-ada').filter((t) => t === 'muse slow down').length === 1);
+  // 503 with Retry-After (the bridge waiting out a refused token): waits as asked, hook stays on
+  B.plan['link-ada'] = [{ status: 503, retryAfter: 900 }];
+  tries0 = B.delivers.length;
+  await post(R, TC, 'muse token glitch');
+  await waitFor(() => B.delivers.slice(tries0).some((d) => d.status === 503));
+  pk = await peek(room);
+  check('muse: a 503 with Retry-After waits that long and keeps the hook on', hookOf(pk, 'museada').due_at > pk.now + 800000 && hookOf(pk, 'museada').pending === 1 && !!hookOf(pk, 'museada').enabled, JSON.stringify(hookOf(pk, 'museada')));
+  await run(room);
+  check('muse: after the 503 the wake goes through', textsOf('link-ada').filter((t) => t === 'muse token glitch').length === 1);
 
   // ---- a restart loses nothing and sends nothing twice
   B.plan['link-ada'] = [{ status: 503 }];
