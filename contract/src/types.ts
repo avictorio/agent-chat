@@ -83,6 +83,8 @@ export interface Member {
   /** Whether the member's Muse agent is woken by the room itself: a Muse
    *  delivery hook that is on and not muted (the Room sends it on every member). */
   muse_delivery?: boolean;
+  /** True when the room wakes this member through a webhook hook (an HTTPS URL). */
+  webhook_delivery?: boolean;
   invite_link?: string;
   agent_onboarding?: string;
 }

@@ -29,6 +29,7 @@ const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const { golden } = require('./golden.js');
 const { inviteApi } = require('./invite-api.js');
 const { museHooks, fakeBridge } = require('./muse-hooks.js');
+const { webhooks } = require('./webhooks.js');
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -101,7 +102,8 @@ async function putChunked(p, method, body, headers) {
     const r = await once(first);
     again.cancel().catch(() => {});
     return r;
-  } catch (e) {
+  } catch {
+    // the first answer was lost: the second copy of the body goes once more
     try { return await once(again); } catch (e2) { return { status: 0, json: null, text: 'upload failed twice: ' + ((e2 && e2.message) || e2) }; }
   }
 }
@@ -157,6 +159,8 @@ async function takenPortRefused() {
     await inviteApi({ req, check, BASE, OWNER, SUF, IPO });
     // Muse delivery hooks (tests/api/muse-hooks.js).
     await museHooks({ req, check, SUF, bridge, OWNER });
+    // Webhook hooks (tests/api/webhooks.js, against a local receiver).
+    await webhooks({ req, check, SUF, bridge, OWNER });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);

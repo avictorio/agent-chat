@@ -360,8 +360,20 @@ function schemaMuseHooks(sql: SqlStorage) {
   sql.exec("CREATE INDEX IF NOT EXISTS mq_member ON mq (member, n)");
 }
 
+// Step 8. Webhook hooks (room/muse.ts): an mh row's kind, "muse" (link is
+// the Muse link) or "webhook" (url and secret; link and routing empty);
+// and every hook's last answer: last_status (0 when nothing answered) and
+// last_error. Existing rows are Muse hooks.
+function schemaWebhookHooks(sql: SqlStorage) {
+  addColumn(sql, "mh", "kind", "TEXT NOT NULL DEFAULT 'muse'");
+  addColumn(sql, "mh", "url", "TEXT");
+  addColumn(sql, "mh", "secret", "TEXT");
+  addColumn(sql, "mh", "last_status", "INTEGER");
+  addColumn(sql, "mh", "last_error", "TEXT");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults, schemaMuseHooks];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults, schemaMuseHooks, schemaWebhookHooks];
 
 /** Every table a member or the owner writes, inv aside: one row in any of
  *  them and a pending room is not untouched (Room.genesisUntouched). A new

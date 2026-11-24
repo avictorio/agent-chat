@@ -28,10 +28,20 @@
 // link as {hooked: false} (museDrop, museSetHook). Best effort: a failed
 // report is logged and changes nothing here. A hook the room turns off on a
 // 410 is not reported: the link is gone already.
+//
+// A hook can instead wake an HTTPS URL (kind "webhook", routes/webhook.ts,
+// lib/webhook.ts), for agents that are not on Muse: the same queue, cursor,
+// grouping, retries and switches, with the wake POSTed to the URL, signed
+// with the hook's secret, at most one per WEBHOOK_MIN_GAP_MS. A 410 from
+// the URL turns the hook off (off_reason "gone"). The bridge never hears
+// of webhook hooks. Every hook keeps its last answer (last_status,
+// last_error) for its member to see.
 
 import { nameFold } from "../lib/text.js";
 import { warn } from "../lib/log.js";
+import { webhookCall } from "../lib/webhook.js";
 import {
+  WEBHOOK_ERROR_MAX, WEBHOOK_MIN_GAP_MS,
   MUSE_FETCH_MS, MUSE_GRACE_MS, MUSE_ITEM_CUT, MUSE_ITEM_MAX, MUSE_PER_WAKE, MUSE_QUEUE_MAX,
   MUSE_RETRY_AFTER_MAX_MS, MUSE_RETRY_FIRST_MS, MUSE_RETRY_MAX_MS,
 } from "../limits.js";
@@ -45,7 +55,11 @@ import type { Refusal, Room } from "./Room.js";
  *  row; skipped the items dropped from a full queue, told in the next
  *  wake; off_reason why the room turned the hook off ("link_gone"). */
 export type MhRow = { member: string, name: string, room: string, link: string, routing: string, enabled: number, muted: number, cursor: number,
-  last_at: number | null, due_at: number | null, fails: number, skipped: number, created: number, updated: number, off_reason: string | null };
+  last_at: number | null, due_at: number | null, fails: number, skipped: number, created: number, updated: number, off_reason: string | null,
+  kind: HookKind, url: string | null, secret: string | null, last_status: number | null, last_error: string | null };
+
+/** What a hook wakes: a Muse (through the bridge) or an HTTPS URL. */
+export type HookKind = "muse" | "webhook";
 /** mq: one item waiting for a hook: its number (the cursor's line), the
  *  kind of frame, when it was queued, and the frame's data as JSON. */
 export type MqRow = { n: number, member: string, kind: string, at: number, data: string };
@@ -54,8 +68,8 @@ export type MqRow = { n: number, member: string, kind: string, at: number, data:
 export type MuseItemKind = "message" | "reaction" | "game";
 
 /** A hook as its member sees it (no link id: the Muse side has it). */
-export type MuseHookView = { routing: string, enabled: boolean, muted: boolean, last_delivered_at: number | null, pending: number,
-  created: number, updated: number, off_reason: string | null };
+export type MuseHookView = { kind: HookKind, url?: string, routing?: string, enabled: boolean, muted: boolean, last_delivered_at: number | null, pending: number,
+  last_status: number | null, last_error: string | null, created: number, updated: number, off_reason: string | null };
 
 /** A call to the muse-bridge Worker: a path ("/claim"), and a body to POST
  *  as JSON (none: a GET). Each carries X-Bridge-Key and gives up after
@@ -135,7 +149,11 @@ export const MuseMethods = {
 
   museView(h: MhRow): MuseHookView {
     const pending = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM mq WHERE member = ? AND n > ?", h.member, h.cursor).one().n;
-    return { routing: h.routing, enabled: !!h.enabled, muted: !!h.muted, last_delivered_at: h.last_at, pending: pending, created: h.created, updated: h.updated, off_reason: h.off_reason };
+    const v: MuseHookView = { kind: h.kind, enabled: !!h.enabled, muted: !!h.muted, last_delivered_at: h.last_at, pending: pending,
+      last_status: h.last_status, last_error: h.last_error, created: h.created, updated: h.updated, off_reason: h.off_reason };
+    // a Muse hook's routing; a webhook's URL (never its secret)
+    if (h.kind === "webhook") v.url = h.url || ""; else v.routing = h.routing;
+    return v;
   },
 
   /** The member a token names, looked at without opening the invite: the
@@ -164,12 +182,46 @@ export const MuseMethods = {
     const now = Date.now();
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
     const old = this.museRow(member);
-    this.sql.exec("INSERT OR REPLACE INTO mh (member, name, room, link, routing, enabled, muted, cursor, last_at, due_at, fails, skipped, created, updated, off_reason) VALUES (?, ?, ?, ?, ?, 1, 0, ?, NULL, NULL, 0, 0, ?, ?, NULL)",
-      member, who.name, room, link, routing, old ? old.cursor : 0, old ? old.created : now, now);
+    this.museWrite(member, who.name, room, "muse", link, routing, null, null, old, now);
     this.roomName = room;
     // moved to another link: the old one loses this room (the new one is told by the caller)
-    if (old && old.link !== link) this.museReportGone([{ link: old.link, room: old.room }]);
+    if (old && old.kind === "muse" && old.link !== link) this.museReportGone([{ link: old.link, room: old.room }]);
     this.notifyMembers(who.name);
+    return { ok: true, name: who.name, hook: this.museView(this.museRow(member) as MhRow) };
+  },
+
+  /** Writes a member's hook, replacing what they had; the cursor carries
+   *  over (queue numbers are room-wide), the creation time too. */
+  museWrite(member: string, name: string, room: string, kind: HookKind, link: string, routing: string, url: string | null, secret: string | null, old: MhRow | null, now: number) {
+    this.sql.exec("INSERT OR REPLACE INTO mh (member, name, room, link, routing, enabled, muted, cursor, last_at, due_at, fails, skipped, created, updated, off_reason, kind, url, secret, last_status, last_error) VALUES (?, ?, ?, ?, ?, 1, 0, ?, NULL, NULL, 0, 0, ?, ?, NULL, ?, ?, ?, NULL, NULL)",
+      member, name, room, link, routing, old ? old.cursor : 0, old ? old.created : now, now, kind, url, secret);
+  },
+
+  /** Sets the token's member's hook to call this URL (its challenge already
+   *  answered: routes/webhook.ts), replacing any hook they had. */
+  webhookSet(token: string, url: string, secret: string, room: string): { ok: true, name: string, hook: MuseHookView } | Refusal {
+    const who = this.museMember(token);
+    if (!who.ok) return who;
+    const member = nameFold(who.name);
+    const now = Date.now();
+    this.sql.exec("DELETE FROM mq WHERE member = ?", member);
+    const old = this.museRow(member);
+    this.museWrite(member, who.name, room, "webhook", "", "", url, secret, old, now);
+    this.roomName = room;
+    // was a Muse hook: its link loses this room
+    if (old && old.kind === "muse") this.museReportGone([{ link: old.link, room: old.room }]);
+    this.notifyMembers(who.name);
+    return { ok: true, name: who.name, hook: this.museView(this.museRow(member) as MhRow) };
+  },
+
+  /** A webhook's new secret, replacing the old one at once. */
+  webhookRotate(token: string, secret: string): { ok: true, name: string, hook: MuseHookView } | Refusal {
+    const who = this.museMember(token);
+    if (!who.ok) return who;
+    const member = nameFold(who.name);
+    const h = this.museRow(member);
+    if (!h || h.kind !== "webhook") return { ok: false, status: 404, code: "no_webhook", error: "You have no webhook in this room. Register one with POST /api/rooms/ROOM/webhook {\"url\"}." };
+    this.sql.exec("UPDATE mh SET secret = ?, updated = ? WHERE member = ?", secret, Date.now(), member);
     return { ok: true, name: who.name, hook: this.museView(this.museRow(member) as MhRow) };
   },
 
@@ -187,7 +239,8 @@ export const MuseMethods = {
     if (!who.ok) return who;
     const member = nameFold(who.name);
     const h = this.museRow(member);
-    if (!h) return { ok: false, status: 404, code: "no_hook", error: "You have no Muse hook in this room. Register one with POST /api/muse/hooks." };
+    if (!h) return { ok: false, status: 404, code: "no_hook", error: "You have no hook in this room. Register a Muse with POST /api/muse/hooks, or a webhook with POST /api/rooms/ROOM/webhook." };
+    if (change.routing !== undefined && h.kind !== "muse") return { ok: false, status: 400, code: "not_muse", error: "\"routing\" is for Muse hooks; your hook in this room is a webhook" };
     const routing = change.routing !== undefined ? change.routing : h.routing;
     const muted = change.muted !== undefined ? (change.muted ? 1 : 0) : h.muted;
     const enabled = change.enabled !== undefined ? (change.enabled ? 1 : 0) : h.enabled;
@@ -215,7 +268,7 @@ export const MuseMethods = {
   /** A member's hook and its queue go (their last invite was revoked, or they removed it). */
   museDrop(name: string | null) {
     if (name === null) {
-      const all = this.sql.exec<Pick<MhRow, "link" | "room">>("SELECT link, room FROM mh").toArray();
+      const all = this.sql.exec<Pick<MhRow, "link" | "room">>("SELECT link, room FROM mh WHERE kind = 'muse'").toArray();
       this.sql.exec("DELETE FROM mh");
       this.sql.exec("DELETE FROM mq");
       this.museReportGone(all);
@@ -225,7 +278,7 @@ export const MuseMethods = {
     const h = this.museRow(member);
     this.sql.exec("DELETE FROM mh WHERE member = ?", member);
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
-    if (h) this.museReportGone([{ link: h.link, room: h.room }]);
+    if (h && h.kind === "muse") this.museReportGone([{ link: h.link, room: h.room }]);
   },
 
   /** Tells the bridge these hooks are gone, after the response (best effort). */
@@ -238,9 +291,14 @@ export const MuseMethods = {
     })());
   },
 
-  /** The members whose Muse delivery is on (a hook, on and not muted), by folded name. */
+  /** The members whose delivery is on (a hook, on and not muted), by folded name. */
   museOn(): Set<string> {
-    return new Set(this.sql.exec<Pick<MhRow, "member">>("SELECT member FROM mh WHERE enabled = 1 AND muted = 0").toArray().map((r) => r.member));
+    return new Set(this.museOnKinds().keys());
+  },
+
+  /** The same, with each hook's kind. */
+  museOnKinds(): Map<string, HookKind> {
+    return new Map(this.sql.exec<Pick<MhRow, "member" | "kind">>("SELECT member, kind FROM mh WHERE enabled = 1 AND muted = 0").toArray().map((r) => [r.member, r.kind] as [string, HookKind]));
   },
 
   /**
@@ -318,10 +376,11 @@ export const MuseMethods = {
     }
   },
 
-  /** One wake for one hook: its oldest waiting items, to the bridge. */
+  /** One wake for one hook: its oldest waiting items, to the bridge or the URL. */
   async museWake(h: MhRow, gen: number) {
     const items = this.sql.exec<MqRow>("SELECT n, member, kind, at, data FROM mq WHERE member = ? AND n > ? ORDER BY n LIMIT ?", h.member, h.cursor, MUSE_PER_WAKE).toArray();
     if (!items.length) { this.sql.exec("UPDATE mh SET due_at = NULL WHERE member = ?", h.member); return; }
+    if (h.kind === "webhook") return this.webhookWake(h, items, gen);
     const bridge = museBridge(this.env, this.museTestNoKey());
     if (!bridge) {
       // the binding or its key is gone from this deploy: keep the queue, look again later
@@ -359,25 +418,59 @@ export const MuseMethods = {
     // registered again to another link): this answer is not that hook's
     if (!this.alive(gen)) return;
     const now = this.museRow(h.member);
-    if (!now || now.link !== h.link) return;
+    if (!now || now.kind !== "muse" || now.link !== h.link) return;
+    const ok = status >= 200 && status < 300;
+    this.museSettle(h, now, cursor, status, gone ? "link_gone" : null, retryAfter, ok ? null : status ? "HTTP " + status : "the bridge did not answer", 0);
+    if (gone) warn("muse.link_gone", "HTTP " + status, { room: h.room });
+    else if (status && !ok) warn("muse.deliver", "HTTP " + status, { room: h.room, items: items.length, fails: now.fails + 1 });
+  },
+
+  /** One wake for a webhook hook: the items POSTed to its URL, signed. */
+  async webhookWake(h: MhRow, items: MqRow[], gen: number) {
+    const cursor = items[items.length - 1]!.n;
+    const payload: Record<string, unknown> = {
+      type: "wake",
+      room: h.room,
+      member: h.name,
+      cursor: cursor,
+      items: items.map((i) => ({ seq: i.n, kind: i.kind, at: i.at, data: JSON.parse(i.data) as unknown })),
+    };
+    if (h.skipped) payload.skipped = h.skipped;
+    const a = await webhookCall(h.url || "", h.secret || "", "wake", payload);
+    // as for a Muse wake: an answer for a hook that has changed since is not that hook's
+    if (!this.alive(gen)) return;
+    const now = this.museRow(h.member);
+    if (!now || now.kind !== "webhook" || now.url !== h.url) return;
+    const retryAfter = Math.min(MUSE_RETRY_AFTER_MAX_MS, a.retryAfter * 1000);
+    this.museSettle(h, now, cursor, a.status, a.status === 410 ? "gone" : null, retryAfter, a.error, WEBHOOK_MIN_GAP_MS);
+    if (a.error) warn("webhook.deliver", a.status ? "HTTP " + a.status : "no answer", { room: h.room, items: items.length });
+  },
+
+  /**
+   * Records how a wake went. 2xx: the items up to cursor are delivered and
+   * the next wake, if more wait, is due after gap ms. offReason: the target
+   * is gone, so the hook goes off and its queue with it. Otherwise the wake
+   * is tried again after retryAfter ms (when the answer asked) or the backoff.
+   * @param h the hook as the wake read it; now, as it stands
+   */
+  museSettle(h: MhRow, now: MhRow, cursor: number, status: number, offReason: string | null, retryAfter: number, error: string | null, gap: number) {
     const t = Date.now();
+    const err = error ? error.slice(0, WEBHOOK_ERROR_MAX) : null;
     if (status >= 200 && status < 300) {
       this.sql.exec("DELETE FROM mq WHERE member = ? AND n <= ?", h.member, cursor);
       const more = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM mq WHERE member = ?", h.member).one().n > 0;
-      this.sql.exec("UPDATE mh SET cursor = ?, last_at = ?, fails = 0, skipped = MAX(0, skipped - ?), due_at = ? WHERE member = ?", cursor, t, h.skipped, more ? t : null, h.member);
+      this.sql.exec("UPDATE mh SET cursor = ?, last_at = ?, fails = 0, skipped = MAX(0, skipped - ?), due_at = ?, last_status = ?, last_error = NULL WHERE member = ?", cursor, t, h.skipped, more ? t + gap : null, status, h.member);
       return;
     }
-    if (gone) {
-      this.sql.exec("UPDATE mh SET enabled = 0, off_reason = 'link_gone', due_at = NULL, fails = 0, updated = ? WHERE member = ?", t, h.member);
+    if (offReason) {
+      this.sql.exec("UPDATE mh SET enabled = 0, off_reason = ?, due_at = NULL, fails = 0, updated = ?, last_status = ?, last_error = ? WHERE member = ?", offReason, t, status, err, h.member);
       this.sql.exec("DELETE FROM mq WHERE member = ?", h.member);
-      warn("muse.link_gone", "HTTP " + status, { room: h.room });
       this.notifyMembers(h.name);
       return;
     }
     const fails = now.fails + 1;
     const wait = retryAfter > 0 ? retryAfter : backoff(fails);
-    this.sql.exec("UPDATE mh SET fails = ?, due_at = ? WHERE member = ?", fails, t + wait, h.member);
-    if (status) warn("muse.deliver", "HTTP " + status, { room: h.room, items: items.length, fails: fails });
+    this.sql.exec("UPDATE mh SET fails = ?, due_at = ?, last_status = ?, last_error = ? WHERE member = ?", fails, t + wait, status, err, h.member);
   },
 
   /** The API suite's stand-in for an unset MUSE_BRIDGE_KEY in this room

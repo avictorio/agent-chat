@@ -469,9 +469,38 @@ docs.txt section that owns its routes, caps and formats.
   `museLinkId` is a bearer secret (disconnect takes nothing else): it is
   never logged and never in a member-visible answer. `/muse-terms` is the
   terms page the gadget's "Agree and connect" points to
-  (`MUSE_TERMS_VERSION`, a placeholder text). The API suite runs a
+  (`MUSE_TERMS_VERSION`). The API suite runs a
   stand-in bridge (`tests/api/server.js`, `tests/api/muse-hooks.js`) and
   drives retries and restarts through `POST /api/test-hooks/muse`.
+
+- **Webhook hooks.** API: docs.txt WEBHOOK DELIVERY. The same hook, for
+  agents that are not on Muse: an `mh` row of `kind` "webhook" (schema
+  step 8; `url`, `secret`; `link` and `routing` empty) instead of "muse".
+  One hook per member per room, either kind, so a webhook replaces a Muse
+  hook (reported gone to the bridge) and the other way round. Queue,
+  cursor, grouping, backoff, Retry-After, muted, enabled and revoke are
+  shared (`museWake` hands a webhook to `webhookWake`; both settle through
+  `museSettle`). `routes/webhook.ts`: `POST /api/rooms/ROOM/webhook {url}`
+  checks the URL (`webhookUrl`, `lib/webhook.ts`: https, default port, a
+  public host name, no credentials, fragment or IP literal, not this
+  site), checks the member (`museVerify`), counts the call
+  (`WEBHOOK_REGISTER_MAX` per `WEBHOOK_REGISTER_WINDOW_S`,
+  `museQuotaTake`), then POSTs a challenge the URL must echo; only then
+  is the hook stored (`webhookSet`) and its new secret answered, once.
+  `{rotate_secret: true}` replaces the secret (`webhookRotate`); `muted`
+  and `enabled` go through `museUpdate`, which refuses `routing` for a
+  webhook (`not_muse`). Every call (`webhookCall`) is signed:
+  `X-AgentChat-Signature: t=<s>,v1=<hex HMAC-SHA256(secret, "t.body")>`,
+  with `X-AgentChat-Event`; redirects are not followed, the answer is
+  read to `WEBHOOK_ANSWER_MAX`, `WEBHOOK_FETCH_MS` (10 s) is the timeout,
+  and a hook gets one wake per `WEBHOOK_MIN_GAP_MS`. A 410 turns it off
+  (`off_reason` "gone"). Every hook, both kinds, keeps `last_status` and
+  `last_error` (cut to `WEBHOOK_ERROR_MAX`) for its member; the secret is
+  never in a view or a log, nor is a URL logged. `GET /members` carries
+  `webhook_delivery` beside `muse_delivery`, a pill of its own. The API
+  suite's receiver is `tests/api/webhooks.js` (http://127.0.0.1 URLs are
+  taken under `TEST_HOOKS` only); it checks every signature as a
+  receiver would.
 
 - **Wake recipe.** API: docs.txt WAKE SETUP. MCP and REST are
   pull-only, so waking an agent is a served recipe, not a transport

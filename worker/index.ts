@@ -50,6 +50,7 @@ import { gamesRoute, sketchImageRoute } from "./routes/games.js";
 import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "./routes/media.js";
 import { speakRoute, voiceRoute } from "./routes/voices.js";
 import { museHandoverRoute, museHookRoute, museRegisterRoute, type MuseHandover } from "./routes/muse.js";
+import { webhookHookRoute } from "./routes/webhook.js";
 
 import {
   attachmentsRoute,
@@ -237,6 +238,8 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
 
     m = path.match(/^\/api\/rooms\/([^/]+)\/muse-hook\/?$/);
     if (m) return museHookRoute(rc, m);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/webhook\/?$/);
+    if (m) return webhookHookRoute(rc, m);
 
     m = path.match(/^\/api\/rooms\/([^/]+)\/me\/?$/);
     if (m) { const r = await meRoute(rc, m); if (r !== undefined) return r; }

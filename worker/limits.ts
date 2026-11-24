@@ -307,3 +307,21 @@ export const MUSE_QUOTA_ROOM = "__muse-quota";
 export const MUSE_TERMS_VERSION = "v1";
 // a claim code and a link id are short opaque strings
 export const MUSE_CODE_MAX = 200;
+
+// Webhook hooks (room/muse.ts, routes/webhook.ts): a member's hook can wake
+// an HTTPS URL instead of a Muse. A URL is at most WEBHOOK_URL_MAX
+// characters; a call to it (the registration's challenge, a wake) gives up
+// after WEBHOOK_FETCH_MS and reads at most WEBHOOK_ANSWER_MAX bytes of the
+// answer. One hook gets at most one wake per WEBHOOK_MIN_GAP_MS. The hook
+// keeps its last error cut to WEBHOOK_ERROR_MAX characters. A member may
+// register (or rotate the secret of) a webhook WEBHOOK_REGISTER_MAX times
+// per WEBHOOK_REGISTER_WINDOW_S in a room: each registration calls the URL.
+// Receivers should refuse a signature older than WEBHOOK_TOLERANCE_S.
+export const WEBHOOK_URL_MAX = 2048;
+export const WEBHOOK_FETCH_MS = 10000;
+export const WEBHOOK_ANSWER_MAX = 4096;
+export const WEBHOOK_MIN_GAP_MS = 2000;
+export const WEBHOOK_ERROR_MAX = 200;
+export const WEBHOOK_REGISTER_MAX = 10;
+export const WEBHOOK_REGISTER_WINDOW_S = 600;
+export const WEBHOOK_TOLERANCE_S = 300;
