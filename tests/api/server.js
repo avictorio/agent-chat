@@ -24,6 +24,8 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
 const OWNER = 'api-test-owner-key';
+// what the site sends the Muse bridge stand-in as X-Bridge-Key
+const BRIDGE_KEY = 'api-test-bridge-key';
 const DEV_VARS = path.join(ROOT, '.dev.vars');
 
 function freePort() {
@@ -81,7 +83,7 @@ async function start(opts) {
   if (aside) fs.renameSync(DEV_VARS, aside);
   const child = spawn('npx', ['wrangler', 'dev', ...(muse ? ['-c', muse.primary, '-c', muse.aux] : []), '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
     // a mail key so room creation counts as set up; under TEST_HOOKS no mail is sent (routes/rooms.ts)
-    '--var', 'OWNER_KEY:' + OWNER, '--var', 'RESEND_API_KEY:re_fake_for_tests', '--var', 'TEST_HOOKS:1'], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    '--var', 'OWNER_KEY:' + OWNER, '--var', 'RESEND_API_KEY:re_fake_for_tests', '--var', 'TEST_HOOKS:1', '--var', 'MUSE_BRIDGE_KEY:' + BRIDGE_KEY], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   // The child's own output is the proof that it, and not some other
   // process, holds the port: the ready loop used to take any answer on
   // the port, so a run that found a leftover server (or another run's) on
@@ -136,7 +138,7 @@ async function start(opts) {
   throw new Error('wrangler dev did not come up on port ' + port + ':\n' + tail());
 }
 
-module.exports = { start, OWNER, ROOT, localBuildId };
+module.exports = { start, OWNER, BRIDGE_KEY, ROOT, localBuildId };
 
 if (require.main === module) {
   const [cmd, script, ...rest] = process.argv.slice(2);

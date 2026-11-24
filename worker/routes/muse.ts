@@ -2,12 +2,26 @@
 // rooms, and each member's own view and settings of their hook in a room.
 // The room does the waking (room/muse.ts); the muse-bridge Worker, behind
 // the MUSE_BRIDGE service binding, claims link codes and takes the wakes.
+// Also the gadget's handover (museHandoverRoute): the Muse gadget, which is
+// no room's member, hands the bridge its sealed Muse token through here.
 
-import { BadRequest, bodyList, bodyObject, bodyText, deny, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
-import { MIB, MUSE_BATCH_MAX, MUSE_CODE_MAX, MUSE_FETCH_MS, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
-import { MUSE_ROUTING_DEFAULT, MUSE_ROUTING_ERROR, museRouting } from "../room/muse.js";
+import { BadRequest, bodyList, bodyObject, bodyText, CORS, deny, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
+import {
+  MIB, MUSE_BATCH_MAX, MUSE_CODE_MAX, MUSE_HANDOVER_BODY_MAX, MUSE_HANDOVER_PER_IP, MUSE_HANDOVER_WINDOW_S, MUSE_QUOTA_ROOM,
+  MUSE_SEAL_KEY_CACHE_S, ROOM_RE, SMALL_BODY_MAX,
+} from "../limits.js";
+import { MUSE_ROUTING_DEFAULT, MUSE_ROUTING_ERROR, museBridge, museRouting } from "../room/muse.js";
+import { hashKey, networkKey } from "../lib/address.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
+
+/** The bridge for this request: none without the binding or its key. The
+ *  API suite stands in for an unset key with X-Test-Muse-No-Key (owner key
+ *  and TEST_HOOKS only). */
+function bridgeFor(rc: RouteContext) {
+  const off = !!rc.env.TEST_HOOKS && rc.owner && rc.request.headers.get("X-Test-Muse-No-Key") === "1";
+  return museBridge(rc.env, off);
+}
 
 const UNAVAILABLE = { error: "Muse delivery is not set up on this site yet. Use the wake recipe (GET /api/rooms/ROOM/agent-recipe) meanwhile.", code: "muse_unavailable" };
 
@@ -33,7 +47,7 @@ function bodyFlag(v: unknown, name: string): boolean | undefined {
 export async function museRegisterRoute(rc: RouteContext) {
   const { request, env } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const bridge = env.MUSE_BRIDGE;
+  const bridge = bridgeFor(rc);
   if (!bridge) return json(UNAVAILABLE, 503);
   const small = await settleBody(request, SMALL_BODY_MAX);
   if (!small) return json({ error: "That request's body is over " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" }, 413);
@@ -71,7 +85,7 @@ export async function museRegisterRoute(rc: RouteContext) {
   // The code, claimed once for every room.
   let link = "";
   try {
-    const r = await bridge.fetch("https://muse-bridge/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code }), signal: AbortSignal.timeout(MUSE_FETCH_MS) });
+    const r = await bridge("/claim", { code: code });
     if (r.status === 429) return rateLimited("The Muse bridge is busy; try again shortly", parseInt(r.headers.get("Retry-After") || "", 10) || 30);
     if (r.status >= 400 && r.status < 500) return json({ error: "That link code is not valid: it may have expired or been used already. Ask your Muse for a new one.", code: "code_invalid" }, 403);
     if (!r.ok) { warn("muse.claim", "HTTP " + r.status); return json({ error: "The Muse bridge did not answer; nothing was registered. Try again shortly.", code: "muse_unreachable" }, 502); }
@@ -132,4 +146,89 @@ export async function museHookRoute(rc: RouteContext, m: RegExpMatchArray) {
   const s = await stub.museUpdate(invite, change);
   if (!s.ok) return deny(s);
   return json({ room, name: s.name, hook: s.hook });
+}
+
+// The gadget's handover: POST /api/muse/connect {sealed, termsVersion},
+// POST /api/muse/update {sealed, museLinkId?}, POST /api/muse/disconnect
+// {museLinkId} and GET /api/muse/seal-key, each relayed to the bridge's
+// route of the same name, its answer (status, body, Retry-After) passed
+// back as it came. The gadget is no member of any room, so no token is
+// asked for: each network gets MUSE_HANDOVER_PER_IP calls a
+// MUSE_HANDOVER_WINDOW_S, and a body is at most MUSE_HANDOVER_BODY_MAX.
+// Only the fields named go on to the bridge. A sealed blob, a code and a
+// link id are never logged (the link id is a bearer secret: /disconnect
+// takes nothing else).
+export type MuseHandover = "connect" | "update" | "disconnect" | "seal-key";
+
+/** The last seal key the bridge gave, kept for MUSE_SEAL_KEY_CACHE_S (the
+ *  settled answer only, as appShell keeps its shell). */
+let sealKeyKept: { text: string, type: string, until: number } | null = null;
+
+/** A string field: absent is "", anything else but a string is refused. */
+function handoverText(v: unknown, name: string, max: number): string {
+  if (v === undefined || v === null) return "";
+  if (typeof v !== "string") throw new BadRequest("\"" + name + "\" must be text");
+  if (v.length > max) throw new BadRequest("\"" + name + "\" is longer than " + max + " characters");
+  return v;
+}
+
+export async function museHandoverRoute(rc: RouteContext, which: MuseHandover) {
+  const { request, env } = rc;
+  const method = which === "seal-key" ? "GET" : "POST";
+  if (request.method !== method && !(method === "GET" && request.method === "HEAD")) return json({ error: "Method not allowed" }, 405);
+  const bridge = bridgeFor(rc);
+  if (!bridge) return json({ error: "Muse delivery is not set up on this site yet.", code: "muse_unavailable" }, 503);
+  const quota = env.ROOM.get(env.ROOM.idFromName(MUSE_QUOTA_ROOM));
+  const wait = await quota.museQuotaTake("ip:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))), MUSE_HANDOVER_PER_IP, MUSE_HANDOVER_WINDOW_S);
+  if (wait > 0) return rateLimited("Too many Muse handover calls from this network; try again later", wait);
+
+  let out: Record<string, string> | undefined;
+  if (method === "POST") {
+    const small = await settleBody(request, MUSE_HANDOVER_BODY_MAX);
+    if (!small) return json({ error: "That request's body is over " + MUSE_HANDOVER_BODY_MAX + " bytes" }, 413);
+    const body = await readBody(small);
+    const sealed = handoverText(body?.sealed, "sealed", MUSE_HANDOVER_BODY_MAX).trim();
+    const terms = handoverText(body?.termsVersion, "termsVersion", 64).trim();
+    const link = handoverText(body?.museLinkId, "museLinkId", MUSE_CODE_MAX).trim();
+    if (which === "disconnect") {
+      if (!link) return json({ error: "\"museLinkId\" is required" }, 400);
+      out = { museLinkId: link };
+    } else {
+      if (!sealed) return json({ error: "\"sealed\" is required: the gadget's Muse token, sealed to GET /api/muse/seal-key" }, 400);
+      if (which === "connect") {
+        if (!terms) return json({ error: "\"termsVersion\" is required: the version of /muse-terms the person agreed to" }, 400);
+        out = { sealed, termsVersion: terms };
+      } else {
+        out = link ? { sealed, museLinkId: link } : { sealed };
+      }
+    }
+  } else if (sealKeyKept && sealKeyKept.until > Date.now()) {
+    return sealKeyAnswer(sealKeyKept.text, sealKeyKept.type, 200);
+  }
+
+  let status = 0, text = "", type = "", retry = "";
+  try {
+    const r = await bridge("/" + which, out);
+    status = r.status;
+    type = r.headers.get("Content-Type") || "";
+    retry = r.headers.get("Retry-After") || "";
+    text = await r.text();
+  } catch (e) {
+    warn("muse.handover", e && (e as Error).name ? (e as Error).name : "fetch failed", { route: which });
+    return json({ error: "The Muse bridge did not answer. Try again shortly.", code: "muse_unreachable" }, 502);
+  }
+  if (status >= 500 || status === 401) warn("muse.handover", "HTTP " + status, { route: which });
+  if (which === "seal-key") {
+    if (status === 200) sealKeyKept = { text, type, until: Date.now() + MUSE_SEAL_KEY_CACHE_S * 1000 };
+    return sealKeyAnswer(text, type, status);
+  }
+  const headers: Record<string, string> = Object.assign({ "Content-Type": type || "application/json; charset=utf-8", "Cache-Control": "no-store" }, CORS);
+  if (retry) headers["Retry-After"] = retry;
+  return new Response(text, { status, headers });
+}
+
+/** The seal key's answer: cacheable when it is the key. */
+function sealKeyAnswer(text: string, type: string, status: number) {
+  const cache = status === 200 ? "public, max-age=" + MUSE_SEAL_KEY_CACHE_S : "no-store";
+  return new Response(text, { status, headers: Object.assign({ "Content-Type": type || "application/json; charset=utf-8", "Cache-Control": cache }, CORS) });
 }

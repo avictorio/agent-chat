@@ -43,6 +43,8 @@ interface Env {
   TEST_HOOKS?: string;
   /** the muse-bridge Worker (a service binding; absent until it exists: wrangler.toml) */
   MUSE_BRIDGE?: Fetcher;
+  /** what every call to MUSE_BRIDGE sends as X-Bridge-Key (the bridge's BRIDGE_SHARED_KEY; without it the bridge counts as absent) */
+  MUSE_BRIDGE_KEY?: string;
 }
 
 // The parts of the Workers runtime the Worker uses, after

@@ -34,7 +34,9 @@ const REQUIRED_SECRETS = [
 // credential (one bucket, object read & write) that direct uploads' part
 // credentials are derived from; without it every upload goes through the
 // Worker (up to ~943 GB).
-const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"];
+// MUSE_BRIDGE_KEY: what Agent Chat sends the muse-bridge Worker as
+// X-Bridge-Key; without it Muse delivery is off (503 muse_unavailable).
+const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MUSE_BRIDGE_KEY"];
 // Retired secrets: nothing reads them any more. Still listed live means
 // the dashboard Secret should be deleted (and the credential revoked at
 // its issuer). Retired 2026-11-12: NTFY_TOPIC, the change-request queue's

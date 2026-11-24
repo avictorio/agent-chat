@@ -2,6 +2,8 @@
 // registers a hook here (routes/muse.ts) and the room wakes that agent
 // itself, through the muse-bridge Worker (env.MUSE_BRIDGE, a service
 // binding), instead of the agent holding a watcher on its own machine.
+// Every call to the bridge carries X-Bridge-Key (env.MUSE_BRIDGE_KEY,
+// museBridge below); without the secret the bridge counts as absent.
 //
 // One hook per member (mh, keyed by the member's folded name): the Muse
 // link it wakes, where on that Muse the wake lands (routing), whether it is
@@ -47,6 +49,23 @@ export type MuseItemKind = "message" | "reaction" | "game";
 /** A hook as its member sees it (no link id: the Muse side has it). */
 export type MuseHookView = { routing: string, enabled: boolean, muted: boolean, last_delivered_at: number | null, pending: number,
   created: number, updated: number, off_reason: string | null };
+
+/** A call to the muse-bridge Worker: a path ("/claim"), and a body to POST
+ *  as JSON (none: a GET). Each carries X-Bridge-Key and gives up after
+ *  MUSE_FETCH_MS. */
+export type MuseBridge = (path: string, body?: unknown) => Promise<Response>;
+
+/** The bridge, or null when this deploy cannot reach it: no MUSE_BRIDGE
+ *  binding, or no MUSE_BRIDGE_KEY to show it (the bridge refuses every
+ *  call without one). off: the API suite's stand-in for an unset secret. */
+export function museBridge(env: Env, off?: boolean): MuseBridge | null {
+  const b = env.MUSE_BRIDGE;
+  const key = env.MUSE_BRIDGE_KEY;
+  if (!b || !key || off) return null;
+  return (path, body) => b.fetch("https://muse-bridge" + path, body === undefined
+    ? { method: "GET", headers: { "X-Bridge-Key": key }, signal: AbortSignal.timeout(MUSE_FETCH_MS) }
+    : { method: "POST", headers: { "Content-Type": "application/json", "X-Bridge-Key": key }, body: JSON.stringify(body), signal: AbortSignal.timeout(MUSE_FETCH_MS) });
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -267,9 +286,9 @@ export const MuseMethods = {
   async museWake(h: MhRow, gen: number) {
     const items = this.sql.exec<MqRow>("SELECT n, member, kind, at, data FROM mq WHERE member = ? AND n > ? ORDER BY n LIMIT ?", h.member, h.cursor, MUSE_PER_WAKE).toArray();
     if (!items.length) { this.sql.exec("UPDATE mh SET due_at = NULL WHERE member = ?", h.member); return; }
-    const bridge = this.env.MUSE_BRIDGE;
+    const bridge = museBridge(this.env, this.museTestNoKey());
     if (!bridge) {
-      // the binding is gone from this deploy: keep the queue, look again later
+      // the binding or its key is gone from this deploy: keep the queue, look again later
       this.sql.exec("UPDATE mh SET due_at = ? WHERE member = ?", Date.now() + MUSE_RETRY_MAX_MS, h.member);
       return;
     }
@@ -287,7 +306,7 @@ export const MuseMethods = {
     let gone = false;
     let retryAfter = 0;
     try {
-      const r = await bridge.fetch("https://muse-bridge/deliver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(MUSE_FETCH_MS) });
+      const r = await bridge("/deliver", payload);
       status = r.status;
       const text = await r.text();
       if (status === 410) gone = true;
@@ -322,6 +341,30 @@ export const MuseMethods = {
     const wait = status === 429 && retryAfter > 0 ? retryAfter : backoff(fails);
     this.sql.exec("UPDATE mh SET fails = ?, due_at = ? WHERE member = ?", fails, t + wait, h.member);
     if (status) warn("muse.deliver", "HTTP " + status, { room: h.room, items: items.length, fails: fails });
+  },
+
+  /** The API suite's stand-in for an unset MUSE_BRIDGE_KEY in this room
+   *  (testMuse "nokey"): never set without TEST_HOOKS. */
+  museTestNoKey(): boolean {
+    if (!this.env || !this.env.TEST_HOOKS) return false;
+    return this.sql.exec<{ v: string }>("SELECT v FROM cfg WHERE k = 'test_muse_nokey'").toArray().some((r) => r.v === "1");
+  },
+
+  /**
+   * One call counted against a fixed-window cap, on the MUSE_QUOTA_ROOM
+   * object only (the gadget's handover, routes/muse.ts).
+   * @param key the caller's counter (a hash: no address is kept)
+   * @returns 0 when the call may go ahead, else the seconds until the window ends
+   */
+  museQuotaTake(key: string, max: number, windowS: number): number {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS mrl (k TEXT PRIMARY KEY, w INTEGER NOT NULL, n INTEGER NOT NULL)");
+    const now = Date.now();
+    const w = Math.floor(now / (windowS * 1000));
+    this.sql.exec("DELETE FROM mrl WHERE w < ?", w);
+    const r = this.sql.exec<{ n: number }>("SELECT n FROM mrl WHERE k = ? AND w = ?", key, w).toArray()[0];
+    if (r && r.n >= max) return Math.max(1, Math.ceil(((w + 1) * windowS * 1000 - now) / 1000));
+    this.sql.exec("INSERT INTO mrl (k, w, n) VALUES (?, ?, 1) ON CONFLICT(k) DO UPDATE SET w = excluded.w, n = CASE WHEN mrl.w = excluded.w THEN mrl.n + 1 ELSE 1 END", key, w);
+    return 0;
   },
 } satisfies ThisType<Room>;
 

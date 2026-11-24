@@ -82,8 +82,9 @@ class_name = "Room"
 # Worker is deployed: a deploy that declares a binding to a Worker the
 # account does not have fails outright. Until then MUSE_BRIDGE is absent,
 # POST /api/muse/hooks answers 503 and no hook can be registered. To turn
-# it on, deploy muse-bridge first, then uncomment these lines. The API
-# suite adds the binding itself, with a stand-in bridge (tests/api/server.js).
+# it on, deploy muse-bridge first, set the MUSE_BRIDGE_KEY secret (the
+# bridge's BRIDGE_SHARED_KEY), then uncomment these lines. The API suite
+# adds the binding itself, with a stand-in bridge (tests/api/server.js).
 # [[services]]
 # binding = "MUSE_BRIDGE"
 # service = "muse-bridge"

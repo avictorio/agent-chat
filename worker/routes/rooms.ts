@@ -4,7 +4,7 @@ import { cleanName, escHtml, memberNameProblem, nameFold } from "../lib/text.js"
 import { sendViaGmail } from "../platform/gmail.js";
 import { json, rateLimited, readBody, secondsToUtcMidnight, settleBody, bodyText } from "../lib/http.js";
 import { CLONE_DELETE_ON_ROOM_DELETE, CREATE_QUOTA_ROOM, CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, MAIL_FETCH_MS, PROTECTED_ROOMS, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
-import { addressKey, EMAIL_MAX, networkKey, plainAddress } from "../lib/address.js";
+import { addressKey, EMAIL_MAX, hashKey, networkKey, plainAddress } from "../lib/address.js";
 import type { RouteContext } from "../index.js";
 import { retryCloneDeletes } from "./voices.js";
 import { warn } from "../lib/log.js";
@@ -73,12 +73,6 @@ export async function roomExists(stub: DurableObjectStub) {
 /** The answer to a creator who meets a room still waiting on its genesis mail. */
 function genesisPending(retryAfter: number) {
   return json({ error: "Someone is creating a room with that name right now. If their invite mail does not go out, the name is free again in a few minutes.", code: "room_pending" }, 503, { "Retry-After": String(retryAfter) });
-}
-
-/** SHA-256 of s, in hex: the quota object counts callers without holding their addresses. */
-async function hashKey(s: string) {
-  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
-  return Array.from(d, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // Public room creation (home page form). The genesis invite is emailed to

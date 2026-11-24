@@ -278,7 +278,8 @@ export const VIDEO_STREAM_TOO_BIG = "Videos streamed through the site can be up 
 // most MUSE_QUEUE_MAX items waiting; past that the oldest go, and the next
 // wake says how many. An item's JSON past MUSE_ITEM_MAX has its long
 // strings cut to MUSE_ITEM_CUT. One registration covers up to
-// MUSE_BATCH_MAX rooms. A call to the bridge gives up after MUSE_FETCH_MS.
+// MUSE_BATCH_MAX rooms. A call to the bridge gives up after MUSE_FETCH_MS
+// (the bridge's own wake can take a Noise handshake and a request to Muse).
 export const MUSE_GRACE_MS = 500;
 export const MUSE_PER_WAKE = 10;
 export const MUSE_RETRY_FIRST_MS = 5000;
@@ -289,6 +290,20 @@ export const MUSE_QUEUE_MAX = 100;
 export const MUSE_ITEM_MAX = 30000;
 export const MUSE_ITEM_CUT = 2000;
 export const MUSE_BATCH_MAX = 50;
-export const MUSE_FETCH_MS = 10000;
+export const MUSE_FETCH_MS = 30000;
+// The gadget's handover (POST /api/muse/connect, /update, /disconnect, GET
+// /api/muse/seal-key): no member token, so each network (networkKey) gets
+// MUSE_HANDOVER_PER_IP calls per MUSE_HANDOVER_WINDOW_S, counted by the
+// MUSE_QUOTA_ROOM object (a Room no room name can reach, as
+// CREATE_QUOTA_ROOM). A sealed blob is a few KB: bodies over
+// MUSE_HANDOVER_BODY_MAX are refused unread. The seal key is cached for
+// MUSE_SEAL_KEY_CACHE_S. MUSE_TERMS_VERSION is the terms page's
+// (/muse-terms) version.
+export const MUSE_HANDOVER_PER_IP = 30;
+export const MUSE_HANDOVER_WINDOW_S = 600;
+export const MUSE_HANDOVER_BODY_MAX = 8192;
+export const MUSE_SEAL_KEY_CACHE_S = 300;
+export const MUSE_QUOTA_ROOM = "__muse-quota";
+export const MUSE_TERMS_VERSION = "v1";
 // a claim code and a link id are short opaque strings
 export const MUSE_CODE_MAX = 200;

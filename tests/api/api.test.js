@@ -138,7 +138,7 @@ async function takenPortRefused() {
     // The agent invite link API (tests/api/invite-api.js).
     await inviteApi({ req, check, BASE, OWNER, SUF, IPO });
     // Muse delivery hooks (tests/api/muse-hooks.js).
-    await museHooks({ req, check, SUF, bridge });
+    await museHooks({ req, check, SUF, bridge, OWNER });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);

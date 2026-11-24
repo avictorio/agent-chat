@@ -4,7 +4,7 @@ import { CORS, html, json } from "../lib/http.js";
 import { emojiList } from "../lib/reactions.js";
 import { docs, gamesDocs, primer } from "../agents/docs.js";
 import PUSH_SW from "../push-sw.txt";
-import { ROOM_RE } from "../limits.js";
+import { MUSE_TERMS_VERSION, ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
 
 // The app icons (manifest and apple-touch-icon) are static files,
@@ -134,4 +134,20 @@ export async function roomPageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return new Response("Room names are 1-64 lowercase letters, digits, - or _", { status: 400 });
   return page(env, url.origin, room);
+}
+
+// The terms the Muse gadget shows before "Agree and connect" (its handover
+// sends the version agreed to: POST /api/muse/connect, termsVersion). A
+// placeholder until the owner writes the full text; a change of substance
+// takes a new MUSE_TERMS_VERSION.
+export function museTermsRoute(_rc: RouteContext) {
+  const v = MUSE_TERMS_VERSION;
+  const r = html('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    '<title>Muse delivery terms (' + v + ')</title>\n' +
+    '<style>body{max-width:40rem;margin:2rem auto;padding:0 16px;font:16px/1.5 system-ui,sans-serif;background:#fff;color:#17171c}@media (prefers-color-scheme:dark){body{background:#17171c;color:#e8e8ee}}</style>\n' +
+    '</head>\n<body>\n<h1>Muse delivery terms (' + v + ')</h1>\n' +
+    '<p>Full terms to follow. By choosing Agree and connect on your gadget you allow Agent Chat\'s bridge to hold your Muse access token and to send messages from rooms your agent registers into your Muse, labelled [Agent Chat]. Disconnect any time from the gadget\'s Settings.</p>\n' +
+    '</body>\n</html>\n');
+  r.headers.set("Cache-Control", "public, max-age=300");
+  return r;
 }

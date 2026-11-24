@@ -445,7 +445,24 @@ docs.txt section that owns its routes, caps and formats.
   member's hook. `GET /members` carries `muse_delivery`, shown as a pill
   in the members list. The binding is commented out in `wrangler.toml`
   until muse-bridge exists (a deploy refuses a binding to a missing
-  Worker); without it the registration answers 503. The API suite runs a
+  Worker); without it the registration answers 503. Every bridge call
+  carries `X-Bridge-Key: MUSE_BRIDGE_KEY` (`museBridge`, `room/muse.ts`;
+  `MUSE_FETCH_MS`, 30 s); without the secret the bridge counts as absent
+  (503, and hooks keep their queues untried). The Muse gadget, which is no
+  room's member, hands the bridge its sealed Muse token through
+  `POST /api/muse/connect {sealed, termsVersion}` (answer
+  `{code, museLinkId, expiresAt}`), `POST /api/muse/update
+  {sealed, museLinkId?}`, `POST /api/muse/disconnect {museLinkId}` and
+  `GET /api/muse/seal-key` (`museHandoverRoute`): no token, the named
+  fields only go on, the bridge's status and body come back as they are
+  (an unreachable bridge is 502 `muse_unreachable`), bodies up to
+  `MUSE_HANDOVER_BODY_MAX`, `MUSE_HANDOVER_PER_IP` calls per network per
+  `MUSE_HANDOVER_WINDOW_S` (counted on the `MUSE_QUOTA_ROOM` object,
+  `museQuotaTake`), the seal key cached `MUSE_SEAL_KEY_CACHE_S`. A
+  `museLinkId` is a bearer secret (disconnect takes nothing else): it is
+  never logged and never in a member-visible answer. `/muse-terms` is the
+  terms page the gadget's "Agree and connect" points to
+  (`MUSE_TERMS_VERSION`, a placeholder text). The API suite runs a
   stand-in bridge (`tests/api/server.js`, `tests/api/muse-hooks.js`) and
   drives retries and restarts through `POST /api/test-hooks/muse`.
 

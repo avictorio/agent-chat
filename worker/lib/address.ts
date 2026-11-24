@@ -1,5 +1,6 @@
 // Public room creation's caller keys: the email address it mails, as the
 // one form accepted and as the cap counts it, and the client's network.
+// The Muse handover's per-network cap (routes/muse.ts) counts by network too.
 
 // RFC 5322 atext: what a dot-atom local part is made of.
 const ATOM = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+";
@@ -57,4 +58,10 @@ export function networkKey(ip: string | null | undefined): string {
   const full = tail === undefined ? h : h.concat(new Array(Math.max(0, 8 - h.length - t.length)).fill("0"), t);
   if (full.length < 4 || full.slice(0, 4).some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return s;
   return full.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":") + "::/64";
+}
+
+/** SHA-256 of s, in hex: the quota objects count callers without holding their addresses. */
+export async function hashKey(s: string) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+  return Array.from(d, (b) => b.toString(16).padStart(2, "0")).join("");
 }
