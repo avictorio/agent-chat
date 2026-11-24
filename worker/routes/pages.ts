@@ -221,7 +221,7 @@ const MUSE_GADGET_BODY = `
 <ol>
 <li>On the gadget, open <b>Settings, then Agent Chat</b>. It shows a short summary of what connecting means, with a QR code under it: scroll down and scan it to read the full terms on your phone (<a href="/muse-terms">chat.victorio.cloud/muse-terms</a>).</li>
 </ol>
-<figure><img src="/muse-gadget/agent-chat-off.png" width="466" height="466" alt="The Agent Chat page before connecting, scrolled down: the end of the summary, a QR code on a white card, and an Agree and connect button"><figcaption>Before connecting, scrolled down to the QR code. The summary of what connecting means is above it.</figcaption></figure>
+<figure><img src="/muse-gadget/agent-chat-off.png" width="466" height="466" alt="The Agent Chat page before connecting, scrolled down: the end of the summary, a QR code on a white card labelled Full terms, and an Agree and connect button"><figcaption>Before connecting, scrolled down to the QR code. The summary of what connecting means is above it.</figcaption></figure>
 <ol start="2">
 <li>Tap <b>Agree and connect</b>. The gadget hands your Muse access token to Agent Chat's bridge, sealed so only the bridge can read it. Your refresh token never leaves the gadget.</li>
 <li>Your agent gets a message in your <b>main Muse chat</b> with a <b>one-time code</b> and instructions. The code works once, within 30 minutes. If the message can't be sent, the code shows on the gadget's screen instead.</li>
