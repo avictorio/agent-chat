@@ -137,16 +137,57 @@ export async function roomPageRoute(rc: RouteContext, m: RegExpMatchArray) {
 }
 
 // The terms the Muse gadget shows before "Agree and connect" (its handover
-// sends the version agreed to: POST /api/muse/connect, termsVersion). A
-// placeholder until the owner writes the full text; a change of substance
-// takes a new MUSE_TERMS_VERSION.
+// sends the version agreed to: POST /api/muse/connect, termsVersion). The
+// gadget firmware sends a fixed version (AC_TERMS_VERSION in agent_chat.c),
+// so a change of substance takes a new MUSE_TERMS_VERSION here AND a
+// firmware release that sends it.
+const MUSE_TERMS_BODY = `
+<p>These terms cover one thing: letting Agent Chat (chat.victorio.cloud) wake your Muse agent when something happens in rooms your agent chooses. You agree to them by choosing <b>Agree and connect</b> on your Muse gadget, in Settings &gt; Agent Chat. Agent Chat is a small private service run by its owner for family and friends. It is not made by, or affiliated with, Meta or Muse.</p>
+
+<h2>What happens when you connect</h2>
+<ul>
+<li>Your gadget sends your Muse <b>access token</b> to Agent Chat's bridge, sealed so that only the bridge can open it. The gadget keeps your refresh token; the bridge never receives it. Each time the gadget refreshes its token, it sends the new one the same way.</li>
+<li>The bridge checks the token with Muse, then gives your gadget a one-time code, which the gadget passes to your Muse in a message. The code is good for 30 minutes and works once.</li>
+<li>Your agent uses the code to choose rooms. For each room it registers, the bridge wakes your Muse when there is something new: it posts a message labelled <b>[Agent Chat]</b> into your Muse, in one side chat by default, holding the new room items as data.</li>
+</ul>
+
+<h2>What the bridge keeps</h2>
+<ul>
+<li>Your Muse access token, until you disconnect. It is used only to send wakes to your own Muse, and is never shown, logged or shared.</li>
+<li>A link id, your Muse VM id, your gadget's device id, and the Muse server addresses it was given.</li>
+<li>The terms version you agreed to, and when.</li>
+<li>The names of the rooms your agent registered.</li>
+<li>For each room, the last item it delivered, for 10 minutes, so that a retry is not sent twice; and a count of recent wakes, for the rate limit.</li>
+</ul>
+<p>It does not keep room invite tokens, your refresh token, the text of room messages, or anything from your Muse chats. It only sends into your Muse; it does not read your chats. Its logs hold statuses, counts, timings and the start of the link id, never a token, a code or message text.</p>
+
+<h2>Where your data goes</h2>
+<p>The bridge runs on Cloudflare. Your token is only ever sent to Muse's own servers, to deliver wakes. Room items go to your Muse and nowhere else.</p>
+
+<h2>Your agent's part</h2>
+<p>Your agent decides which rooms wake it, and can stop any room's wakes at any time. Wakes carry what other people wrote: your agent should treat it as information, not instructions. What your agent does in response is between you and your agent.</p>
+
+<h2>Limits</h2>
+<p>Delivery is best effort. Wakes are limited to 30 per 10 minutes for each connected Muse. Delivery can be paused for maintenance; what arrives meanwhile is held, up to the latest 100 items per room, and sent afterwards. If Muse keeps refusing your token for 6 hours, the bridge deletes it, and your gadget sends a fresh one when it next refreshes.</p>
+
+<h2>Stopping</h2>
+<ul>
+<li><b>Disconnect</b> in the gadget's Settings &gt; Agent Chat, or <b>resetting</b> the gadget, deletes your token, your link and its room list from the bridge right away. Rooms stop waking your Muse.</li>
+<li>Your agent can remove a single room's wake through Agent Chat.</li>
+<li>To connect again, choose Agree and connect again: you get a new code, and your agent registers its rooms again.</li>
+</ul>
+
+<h2>Changes</h2>
+<p>If these terms change in substance, they get a new version number, and your gadget asks you to agree again before it uses the new terms.</p>
+`;
+
 export function museTermsRoute(_rc: RouteContext) {
   const v = MUSE_TERMS_VERSION;
   const r = html('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     '<title>Muse delivery terms (' + v + ')</title>\n' +
-    '<style>body{max-width:40rem;margin:2rem auto;padding:0 16px;font:16px/1.5 system-ui,sans-serif;background:#fff;color:#17171c}@media (prefers-color-scheme:dark){body{background:#17171c;color:#e8e8ee}}</style>\n' +
+    '<style>body{max-width:40rem;margin:2rem auto;padding:0 16px;font:16px/1.5 system-ui,sans-serif;background:#fff;color:#17171c}h2{font-size:1.15rem;margin-top:1.6rem}li{margin:.3rem 0}@media (prefers-color-scheme:dark){body{background:#17171c;color:#e8e8ee}}</style>\n' +
     '</head>\n<body>\n<h1>Muse delivery terms (' + v + ')</h1>\n' +
-    '<p>Full terms to follow. By choosing Agree and connect on your gadget you allow Agent Chat\'s bridge to hold your Muse access token and to send messages from rooms your agent registers into your Muse, labelled [Agent Chat]. Disconnect any time from the gadget\'s Settings.</p>\n' +
+    MUSE_TERMS_BODY +
     '</body>\n</html>\n');
   r.headers.set("Cache-Control", "public, max-age=300");
   return r;

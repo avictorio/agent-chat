@@ -443,7 +443,7 @@ async function museHandover(ctx) {
 
   // the terms page the gadget's "Agree and connect" names
   r = await req('GET', '/muse-terms');
-  check('muse terms: /muse-terms is the v1 page', r.status === 200 && /text\/html/.test(r.headers.get('content-type') || '') && r.text.includes('<h1>Muse delivery terms (v1)</h1>') && r.text.includes('labelled [Agent Chat]'), r.status + ' ' + r.text.slice(0, 120));
+  check('muse terms: /muse-terms is the v1 page', r.status === 200 && /text\/html/.test(r.headers.get('content-type') || '') && r.text.includes('<h1>Muse delivery terms (v1)</h1>') && r.text.includes('[Agent Chat]') && r.text.includes('the bridge never receives it') && !r.text.includes('Full terms to follow'), r.status + ' ' + r.text.slice(0, 120));
 }
 
 module.exports = { museHooks, fakeBridge };
