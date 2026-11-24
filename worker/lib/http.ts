@@ -1,6 +1,7 @@
 // HTTP helpers shared by the routes and the Room object.
 
 import type { Message, StreamDeleteFrame, StreamGapFrame } from "@chat/contract";
+import { REFUSED_DRAIN_MAX } from "../limits.js";
 
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -139,6 +140,19 @@ export function parseBody(text: string): Body | null {
   return v;
 }
 
+/** Reads and drops the rest of a refused body, up to `budget` more bytes,
+ *  then lets it go. Never throws. */
+async function drainAway(reader: ReadableStreamDefaultReader<Uint8Array>, budget: number): Promise<void> {
+  try {
+    for (let size = 0; size <= budget;) {
+      const c = await reader.read();
+      if (c.done) return;
+      size += c.value.byteLength;
+    }
+    await reader.cancel();
+  } catch { /* the client went away mid-body: nothing left to read */ }
+}
+
 /**
  * The same request with its body already read: the whole body is taken
  * in first, and the request handed back carries those bytes, so every
@@ -154,11 +168,22 @@ export function parseBody(text: string): Body | null {
  * the body in hand before the route runs, nothing the client controls
  * sits between the check and the act.
  *
+ * A body over the cap is read away, up to REFUSED_DRAIN_MAX past the cap,
+ * before the route answers its 413: answered while the client was still
+ * sending, the connection closed under it, and the client saw a reset
+ * ("terminated", "Network connection lost") instead of the 413, now and
+ * then. Past REFUSED_DRAIN_MAX the read is cut off at once, as before.
+ *
  * @returns the request to route; or null when the body is over `cap`
  */
 export async function settleBody(request: Request, cap: number): Promise<Request | null> {
   if (!request.body) return request;
-  if (Number(request.headers.get("Content-Length")) > cap) return null;
+  const declared = Number(request.headers.get("Content-Length"));
+  if (declared > cap) {
+    if (declared - cap <= REFUSED_DRAIN_MAX) await drainAway(request.body.getReader(), declared);
+    else { try { await request.body.cancel(); } catch { /* the client went away */ } }
+    return null;
+  }
   const chunks: Uint8Array[] = [];
   let broke: unknown = null;
   let size = 0;
@@ -169,7 +194,7 @@ export async function settleBody(request: Request, cap: number): Promise<Request
       if (c.done) break;
       size += c.value.byteLength;
       if (size > cap) {
-        try { await reader.cancel(); } catch { /* the client went away */ }
+        await drainAway(reader, REFUSED_DRAIN_MAX);
         return null;
       }
       chunks.push(c.value);

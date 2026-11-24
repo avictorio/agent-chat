@@ -149,6 +149,8 @@ export const MIB = 1048576;
 export const SMALL_BODY_MAX = MIB;
 /** The largest body read whole before a member's or the owner's request is routed (lib/http.ts settleBody). The largest a route takes that way is a 25 MB video as base64 JSON, about 34 MB; bigger files go in parts. */
 export const SETTLED_BODY_MAX = 48 * MIB;
+/** How far past its cap settleBody (lib/http.ts) reads a refused body away before the 413, so the client gets the answer and not a reset; a body further over is cut off there. */
+export const REFUSED_DRAIN_MAX = 8 * MIB;
 /** The largest body a one-request file route takes for a file of up to
  *  max bytes: the file as base64 JSON (4/3 of it, with room for line
  *  breaks) plus a little for the JSON around it. The routes' documented

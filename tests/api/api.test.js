@@ -84,27 +84,18 @@ function chunked(size, head, tail) {
     },
   });
 }
-// A body the server refuses while reading it (413) gets its answer and then
-// a closed socket. Against local wrangler dev, fetch now and then reports
-// that close ("TypeError: terminated") instead of the answer, which used to
-// crash the suite. Such an upload is sent once more, from a tee of the same
-// body; only a second failure counts, and as a failed check, not a crash.
+// A streamed body, sent once. A body the server refuses for its size is
+// read away before the answer (settleBody, lib/http.ts), so the 413 comes
+// back; a lost answer is a failed check (status 0), never a crash.
 async function putChunked(p, method, body, headers) {
-  const [first, again] = body.tee();
-  const once = async (b) => {
-    const r = await fetch(BASE + p, { method, headers: headers || {}, body: b, duplex: 'half' });
+  try {
+    const r = await fetch(BASE + p, { method, headers: headers || {}, body, duplex: 'half' });
     const text = await r.text();
     let json = null;
     try { json = JSON.parse(text); } catch {}
     return { status: r.status, json, text };
-  };
-  try {
-    const r = await once(first);
-    again.cancel().catch(() => {});
-    return r;
-  } catch {
-    // the first answer was lost: the second copy of the body goes once more
-    try { return await once(again); } catch (e2) { return { status: 0, json: null, text: 'upload failed twice: ' + ((e2 && e2.message) || e2) }; }
+  } catch (e) {
+    return { status: 0, json: null, text: 'no answer: ' + ((e && e.message) || e) };
   }
 }
 

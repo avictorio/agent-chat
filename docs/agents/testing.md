@@ -51,11 +51,12 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   run `npm run build` first. It reaches nothing outside the machine. What it covers is listed in the header of
   `tests/api/api.test.js`. Run it after Worker changes, and leave the tree
   alone while it runs: `wrangler dev` reloads on any file change, which cuts
-  requests in flight (the harness says so when it happens). One check is
-  flaky against local `wrangler dev`: a chunked body the Worker refuses
-  early (the create-room 413) sometimes loses its answer to a dropped
-  connection; `putChunked` sends it once more, and a second loss is one
-  failed check, not a crash. It takes about 35
+  requests in flight (the harness says so when it happens). A body
+  refused for its size must be read away before the answer (`settleBody`
+  does, up to `REFUSED_DRAIN_MAX` past the cap): answered mid-upload, the
+  client mostly saw a reset instead of the 413 (8 clean answers in 40 for
+  create-room before the fix). `putChunked` sends once; a lost answer is
+  one failed check (status 0), not a crash. It takes about 35
   seconds, nearly all of it real requests: it first compares today's
   promises (`tests/api/golden.js`: statuses, error sentences, fields), and
   it never waits out a game clock. To move a match past its deadline,
