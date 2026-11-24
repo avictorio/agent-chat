@@ -448,9 +448,9 @@ docs.txt section that owns its routes, caps and formats.
   revoke-all) or moved to another link reports `hooked: false`
   (`museReportGone`, after the response); best effort, a failure is only
   logged. `GET /members` carries `muse_delivery`, shown as a pill
-  in the members list. The binding is commented out in `wrangler.toml`
-  until muse-bridge exists (a deploy refuses a binding to a missing
-  Worker); without it the registration answers 503. Every bridge call
+  in the members list. The binding has been live since muse-bridge was
+  deployed (2026-11-23; a deploy refuses a binding to a missing Worker);
+  without it the registration answers 503. Every bridge call
   carries `X-Bridge-Key: MUSE_BRIDGE_KEY` (`museBridge`, `room/muse.ts`;
   `MUSE_FETCH_MS`, 30 s); without the secret the bridge counts as absent
   (503, and hooks keep their queues untried). The Muse gadget, which is no
