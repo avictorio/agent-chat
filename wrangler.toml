@@ -78,16 +78,14 @@ name = "ROOM"
 class_name = "Room"
 
 # Muse delivery hooks (worker/room/muse.ts) push wakes to the muse-bridge
-# Worker through this service binding. It stays commented out until that
-# Worker is deployed: a deploy that declares a binding to a Worker the
-# account does not have fails outright. Until then MUSE_BRIDGE is absent,
-# POST /api/muse/hooks answers 503 and no hook can be registered. To turn
-# it on, deploy muse-bridge first, set the MUSE_BRIDGE_KEY secret (the
-# bridge's BRIDGE_SHARED_KEY), then uncomment these lines. The API suite
-# adds the binding itself, with a stand-in bridge (tests/api/server.js).
-# [[services]]
-# binding = "MUSE_BRIDGE"
-# service = "muse-bridge"
+# Worker (github.com/avictorio/muse-bridge, deployed separately with no
+# public route) through this service binding. Every call also carries
+# X-Bridge-Key from the MUSE_BRIDGE_KEY secret, the bridge's
+# BRIDGE_SHARED_KEY. The API suite swaps in a stand-in bridge
+# (tests/api/server.js).
+[[services]]
+binding = "MUSE_BRIDGE"
+service = "muse-bridge"
 
 # Already applied on the live Worker (migration tag v1). Add a new tag only when adding a Durable Object class.
 [[migrations]]
