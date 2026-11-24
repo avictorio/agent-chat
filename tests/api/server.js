@@ -42,8 +42,30 @@ function localBuildId() {
   return require('crypto').createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
+// The Muse bridge stand-in (opts.museBridge): wrangler.toml keeps its
+// MUSE_BRIDGE service binding commented out until the real muse-bridge
+// Worker exists (a deploy refuses a binding to a missing Worker), so the
+// run gets a copy of wrangler.toml with the binding added - in ROOT, since
+// its paths are relative to it, and removed with the run - and a second
+// Worker, tests/api/fake-muse-bridge.js, under the bound name. That Worker
+// forwards to the URL given, the suite's own recording server.
+const BRIDGE_SERVICE = 'muse-bridge-apitest';
+function museConfigs(stateDir, bridgeUrl) {
+  const text = fs.readFileSync(path.join(ROOT, 'wrangler.toml'), 'utf8');
+  // a binding already live in the file names the service to stand in for
+  const live = /^\[\[services\]\]\s*\nbinding\s*=\s*"MUSE_BRIDGE"\s*\nservice\s*=\s*"([^"]+)"/m.exec(text);
+  const service = live ? live[1] : BRIDGE_SERVICE;
+  const primary = path.join(ROOT, '.apitest-wrangler-' + process.pid + '.toml');
+  // appended at the end, where a table header cannot capture anything after it
+  fs.writeFileSync(primary, live ? text : text + '\n[[services]]\nbinding = "MUSE_BRIDGE"\nservice = "' + service + '"\n');
+  const aux = path.join(stateDir, 'fake-muse-bridge.toml');
+  fs.writeFileSync(aux, 'name = "' + service + '"\nmain = ' + JSON.stringify(path.join(ROOT, 'tests', 'api', 'fake-muse-bridge.js')) + '\ncompatibility_date = "2025-04-01"\n\n[vars]\nFAKE_BRIDGE_URL = ' + JSON.stringify(bridgeUrl) + '\n');
+  return { primary, aux };
+}
+
 /** Starts wrangler dev and waits until its own child answers.
- *  @param opts {port?: number} - default: API_PORT from the environment, else a free port
+ *  @param opts {port?: number, museBridge?: string} - port's default: API_PORT from the environment, else a free port;
+ *    museBridge: the URL the MUSE_BRIDGE stand-in forwards to (no binding without it)
  *  @returns {{ base: string, port: number, owner: string, stop: () => void }} */
 async function start(opts) {
   opts = opts || {};
@@ -54,9 +76,10 @@ async function start(opts) {
   const inspector = await freePort();
   const build = localBuildId();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apitest-state-'));
+  const muse = opts.museBridge ? museConfigs(stateDir, opts.museBridge) : null;
   const aside = fs.existsSync(DEV_VARS) ? DEV_VARS + '.aside-' + process.pid : null;
   if (aside) fs.renameSync(DEV_VARS, aside);
-  const child = spawn('npx', ['wrangler', 'dev', '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
+  const child = spawn('npx', ['wrangler', 'dev', ...(muse ? ['-c', muse.primary, '-c', muse.aux] : []), '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
     // a mail key so room creation counts as set up; under TEST_HOOKS no mail is sent (routes/rooms.ts)
     '--var', 'OWNER_KEY:' + OWNER, '--var', 'RESEND_API_KEY:re_fake_for_tests', '--var', 'TEST_HOOKS:1'], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   // The child's own output is the proof that it, and not some other
@@ -82,6 +105,7 @@ async function start(opts) {
     stopped = true;
     try { process.kill(-child.pid, 'SIGKILL'); } catch {}
     if (aside) { try { fs.renameSync(aside, DEV_VARS); } catch {} }
+    if (muse) { try { fs.unlinkSync(muse.primary); } catch {} }
     try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch {}
   };
   // a killed or interrupted run still stops its server and restores .dev.vars

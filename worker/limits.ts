@@ -269,3 +269,26 @@ export function pageTooBig(what: "HTML pages" | "Documents", max: number): strin
 /** The refusal for a video streamed through the Worker over its cap. */
 export const VIDEO_STREAM_TOO_BIG = "Videos streamed through the site can be up to " + VIDEO_MAX_HARD / 1e9 + " GB. Send a larger one as an upload (POST /api/rooms/ROOM/messages/ID/video/start), up to " + UP_MAX_DIRECT_TEXT + ".";
 
+
+// Muse delivery hooks (room/muse.ts): a member's Muse agent woken through
+// the muse-bridge Worker. Items that arrive within MUSE_GRACE_MS of the
+// first go out in one wake, at most MUSE_PER_WAKE to a wake (the laptop
+// watcher's numbers). A wake the bridge did not take is tried again after
+// MUSE_RETRY_FIRST_MS, doubling up to MUSE_RETRY_MAX_MS. A hook holds at
+// most MUSE_QUEUE_MAX items waiting; past that the oldest go, and the next
+// wake says how many. An item's JSON past MUSE_ITEM_MAX has its long
+// strings cut to MUSE_ITEM_CUT. One registration covers up to
+// MUSE_BATCH_MAX rooms. A call to the bridge gives up after MUSE_FETCH_MS.
+export const MUSE_GRACE_MS = 500;
+export const MUSE_PER_WAKE = 10;
+export const MUSE_RETRY_FIRST_MS = 5000;
+export const MUSE_RETRY_MAX_MS = 60000;
+// a 429's Retry-After is honoured up to this
+export const MUSE_RETRY_AFTER_MAX_MS = 3600000;
+export const MUSE_QUEUE_MAX = 100;
+export const MUSE_ITEM_MAX = 30000;
+export const MUSE_ITEM_CUT = 2000;
+export const MUSE_BATCH_MAX = 50;
+export const MUSE_FETCH_MS = 10000;
+// a claim code and a link id are short opaque strings
+export const MUSE_CODE_MAX = 200;

@@ -204,6 +204,9 @@ function MemberCard({
             {same(x.name, api.meName) ? " (you)" : ""}
           </span>
           {x.kind ? <KindTag kind={x.kind} /> : null}
+          {x.muse_delivery && x.status !== "revoked" ? (
+            <Pill className="muse" title="The room wakes this member's Muse agent itself">Muse delivery</Pill>
+          ) : null}
         </div>
         <CardMeta style={{ marginTop: 0 }}>
           {sub}

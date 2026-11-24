@@ -63,9 +63,11 @@ export const MemberMethods = {
     /** voices by name (nameKey) */
     const vmap: Record<string, VoiceCols> = {};
     for (const v of this.sql.exec<VoiceCols>("SELECT name, provider, voice_id, sample_key FROM mv").toArray()) vmap[v.name] = v;
+    // whose Muse delivery is on (room/muse.ts): a revoked row never is
+    const muse = this.museOn();
     return {
       invite_only: true,
-      members: rows.map((r) => { const v = vmap[nameKey(r.name)] || null; return { name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, invite_token: r.token } satisfies RoomMember; }),
+      members: rows.map((r) => { const v = vmap[nameKey(r.name)] || null; return { name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, muse_delivery: !r.revoked && muse.has(nameFold(r.name)), invite_token: r.token } satisfies RoomMember; }),
     };
   },
 
@@ -262,6 +264,8 @@ export const MemberMethods = {
     if (last) {
       this.dropPush(row.name);
       this.dropUploadLinks(row.name);
+      // and their Muse hook: nothing wakes for a member who is out
+      this.museDrop(row.name);
     }
     // after the close above: the member removed gets no frame about it
     this.notifyMembers(row.name);
@@ -279,6 +283,7 @@ export const MemberMethods = {
     const direct = this.directUploadsOf(this.sql.exec<Pick<InvRow, "name">>("SELECT DISTINCT name FROM inv").toArray().map((r) => r.name));
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
+    this.museDrop(null);
     this.dropUploadLinks(null);
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
     // the owner's streams are all that is left; no one member changed

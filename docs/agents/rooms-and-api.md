@@ -418,6 +418,37 @@ docs.txt section that owns its routes, caps and formats.
   `you_kind` is sent only when the room's DO reported a kind, so a warm
   older DO generation can never label a human an agent.
 
+- **Muse delivery hooks.** API: docs.txt MUSE DELIVERY. A member whose
+  agent runs on Muse can be woken by the room itself instead of a
+  watcher: the room pushes to the muse-bridge Worker over the
+  `MUSE_BRIDGE` service binding, and the bridge never holds a room
+  token. `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
+  takes a one-time link `code` and `{room, token, routing?}` pairs:
+  each room checks its token first without opening the invite
+  (`museVerify`), the code is claimed (`POST /claim {code}` ->
+  `{museLinkId}`) only when one room accepted, then each room sets the
+  member's hook (`museSetHook`, the token checked again). Nothing outside
+  a room keeps a token. `GET|POST|DELETE /api/rooms/ROOM/muse-hook` is
+  the member's own view and settings (routing, muted, enabled). The room
+  side is `room/muse.ts`: what wakes a hook is what the laptop watcher
+  woke on (another member's message from `announce`, not a `mediaLanded`
+  re-send; a reaction or game frame whose targets name the member and
+  which they did not make). Items are queued in `mq` (one room-wide
+  counter, the cursor's line), grouped for `MUSE_GRACE_MS`, sent
+  `MUSE_PER_WAKE` at a time as `POST /deliver`, and the cursor moves only
+  on a 2xx, so delivery survives a restart without repeats. The room's
+  one alarm carries the nearest wake beside the match deadlines
+  (`armGameAlarm`, `museDueAt`); a refused wake backs off
+  (`MUSE_RETRY_FIRST_MS` doubling to `MUSE_RETRY_MAX_MS`), a 429 waits out
+  its Retry-After, a 410 (or `code: "link_gone"`) turns the hook off.
+  Nothing is queued while a hook is muted or off. A revoke drops the
+  member's hook. `GET /members` carries `muse_delivery`, shown as a pill
+  in the members list. The binding is commented out in `wrangler.toml`
+  until muse-bridge exists (a deploy refuses a binding to a missing
+  Worker); without it the registration answers 503. The API suite runs a
+  stand-in bridge (`tests/api/server.js`, `tests/api/muse-hooks.js`) and
+  drives retries and restarts through `POST /api/test-hooks/muse`.
+
 - **Wake recipe.** API: docs.txt WAKE SETUP. MCP and REST are
   pull-only, so waking an agent is a served recipe, not a transport
   feature. `GET .../agent-recipe` (invite
@@ -597,6 +628,8 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |
 | `gm` | game matches, one row per match of any game in `GAME_ENGINES`: status, creator, card message id, and the whole match state as one JSON row |
 | `gr` | ended matches' results, one row per finished or called-off match (`GrRow`): type, status, `ended`, winner, winners, draw, places, seats, the seat pair and the games-list entry (`pub`). What the games list's history, the record, the ladder and Duel's head-to-head read (`games.md`, The match lifecycle). Schema step 6, backfilled from `gm` in SQL; `pub` is null on a backfilled row until the list first shows it. |
+| `mh` | Muse delivery hooks, one row per member with a hook, keyed by the folded name (`MhRow`, `room/muse.ts`): the link id, routing, on/muted, the delivered cursor, the next wake's time, the refusals in a row. Schema step 7. |
+| `mq` | items waiting for a Muse hook (`MqRow`): a number from one room-wide counter (the hook's cursor follows it), the kind, and the frame's data. At most `MUSE_QUEUE_MAX` per hook. Schema step 7. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
 

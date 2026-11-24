@@ -71,6 +71,7 @@ export type GameRow = { id: number, status: GameStatus, created: number, created
 const CLOCK_RETRY_MIN = 30000;
 const CLOCK_RETRY_MAX = 3600000;
 const ALARM_LEAD_MIN = 1000;
+const MUSE_ALARM_LEAD_MIN = 100;
 
 export const GameMachineryMethods = {
   /* ---------- shared rows and clocks ----------
@@ -438,11 +439,19 @@ export const GameMachineryMethods = {
       const live = new Set(rows.map((r) => String(r.id)));
       const ended = Object.keys(fails).filter((k) => !live.has(k));
       if (ended.length) { for (const k of ended) delete fails[k]; this.gameClockSave(fails); }
-      const cur = await this.ctx.storage.getAlarm();
-      if (next === null) { if (cur !== null) await this.ctx.storage.deleteAlarm(); return; }
       // A deadline already past (one no catch-up has settled yet) is armed
       // a moment ahead, never in the past: a past alarm fires at once.
-      next = Math.max(next, Date.now() + ALARM_LEAD_MIN);
+      if (next !== null) next = Math.max(next, Date.now() + ALARM_LEAD_MIN);
+      // The room has one alarm, so it also carries the nearest Muse wake
+      // (room/muse.ts), which keeps its sub-second grace (MUSE_GRACE_MS):
+      // its floor is a short one of its own.
+      const wake = this.museDueAt();
+      if (wake !== null) {
+        const at = Math.max(wake, Date.now() + MUSE_ALARM_LEAD_MIN);
+        if (next === null || at < next) next = at;
+      }
+      const cur = await this.ctx.storage.getAlarm();
+      if (next === null) { if (cur !== null) await this.ctx.storage.deleteAlarm(); return; }
       // The alarm may fire in a fresh instance, where roomName (memory
       // only) is unset: keep the name with the clock so the Referee's
       // posts and their pushes still link to the room.
@@ -470,10 +479,16 @@ export const GameMachineryMethods = {
   },
 
   broadcastGame(g: GameRow, room: string | null | undefined, actor: string | null | undefined) {
-    if (!this.clients || !this.clients.size) return;
+    const hooked = this.museOn().size > 0;
+    if ((!this.clients || !this.clients.size) && !hooked) return;
     const pub = this.gameSummary(g);
     if (g.st.trails) pub.trails = g.st.trails;
-    const frame = "event: game\ndata: " + JSON.stringify({ type: "game", room: room, from: actor || null, kind: this.memberKind(actor), targets: this.gameTargets(g, pub), game: pub }) + "\n\n";
+    const targets = this.gameTargets(g, pub);
+    const data = { type: "game", room: room, from: actor || null, kind: this.memberKind(actor), targets: targets, game: pub };
+    // a Muse hook wakes on the frame, as the watcher did (room/muse.ts)
+    if (hooked) this.museQueue("game", actor, targets, data);
+    if (!this.clients || !this.clients.size) return;
+    const frame = "event: game\ndata: " + JSON.stringify(data) + "\n\n";
     for (const c of this.clients) { if (!streamWants(c, "game", g.id)) continue; try { c.send(frame); } catch { /* a subscriber that already went away */ } }
     this.emitState(room);
   },

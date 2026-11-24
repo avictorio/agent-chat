@@ -34,6 +34,7 @@ import { BOARD_TABLES, BoardMethods } from "./board.js";
 import { StateMethods } from "./state.js";
 import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
+import { MuseMethods } from "./muse.js";
 import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
@@ -347,13 +348,25 @@ function schemaMatchResults(sql: SqlStorage) {
     "FROM gm WHERE status NOT IN ('lobby', 'running') AND json_valid(state)");
 }
 
+// Step 7. mh and mq: Muse delivery hooks (room/muse.ts, MhRow and MqRow).
+// mh is one row per member with a hook, keyed by the folded name; mq the
+// items waiting for each hook, numbered by one room-wide counter
+// (AUTOINCREMENT, so a number is never handed out twice, even after the
+// newest row is delivered and deleted) that the hook's cursor follows.
+// Both start empty.
+function schemaMuseHooks(sql: SqlStorage) {
+  sql.exec("CREATE TABLE IF NOT EXISTS mh (member TEXT PRIMARY KEY, name TEXT NOT NULL, room TEXT NOT NULL, link TEXT NOT NULL, routing TEXT NOT NULL, enabled INTEGER NOT NULL, muted INTEGER NOT NULL, cursor INTEGER NOT NULL DEFAULT 0, last_at INTEGER, due_at INTEGER, fails INTEGER NOT NULL DEFAULT 0, skipped INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, updated INTEGER NOT NULL, off_reason TEXT)");
+  sql.exec("CREATE TABLE IF NOT EXISTS mq (n INTEGER PRIMARY KEY AUTOINCREMENT, member TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, data TEXT NOT NULL)");
+  sql.exec("CREATE INDEX IF NOT EXISTS mq_member ON mq (member, n)");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults, schemaMuseHooks];
 
 /** Every table a member or the owner writes, inv aside: one row in any of
  *  them and a pending room is not untouched (Room.genesisUntouched). A new
  *  table of that kind belongs here too. */
-export const GENESIS_EMPTY_TABLES = ["m", "rx", "md", "upp", "ut", "mdel", "pcid", "push", "mv", "tf", "gm", "gr", "con", "oq", "dg", "sk", "dc"];
+export const GENESIS_EMPTY_TABLES = ["m", "rx", "md", "upp", "ut", "mdel", "pcid", "push", "mv", "tf", "gm", "gr", "con", "oq", "dg", "sk", "dc", "mh", "mq"];
 
 /** cfg "genesis" (Room.genesisPending). */
 type GenesisMark = { at: number, token: string, prior: string[], hwm: number, rev: number };
@@ -387,6 +400,8 @@ export class Room extends DurableObject {
   mediaLocks: Map<string, Promise<void>> = new Map();
   /** The finish in flight per upload session ("msg:kind"), whose answer a finish sent again shares (room/uploads.ts, uploadFinish). */
   _finishing: Map<string, Promise<UpFinish>> = new Map();
+  /** True while museDeliver is sending (room/muse.ts): one sender per room. */
+  museBusy = false;
   /** Messages whose post is still storing its inline files (room/messages.ts, postKeyed). Nothing publishes or sweeps one of these: published
    *  between two puts, it went out with half its files, and a later put's failure then deleted a live message with no delete frame. */
   storing: Set<number> = new Set();
@@ -786,6 +801,9 @@ export class Room extends DurableObject {
     try { const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'room_name'").toArray()[0]; saved = r ? String(r.v || "") : ""; } catch (e) { warn("alarm.name", e); }
     const room: string = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
     if (room && !this.roomName) this.roomName = room;
+    // Muse wakes that are due (room/muse.ts), on their own: a failure
+    // there must not stop a match's clock, nor one here a wake.
+    try { await this.museDeliver(); } catch (e) { warn("muse.deliver", e, { room }); }
     // One match's bad state must not stop every clock in the room:
     // advance each match under its own try/catch, and re-arm in a
     // finally, so a single throw cannot leave every match without a
@@ -945,4 +963,5 @@ Object.assign(Room.prototype, StateMethods);
 Object.assign(Room.prototype, MessageMethods);
 Object.assign(Room.prototype, LightCyclesTickMethods);
 Object.assign(Room.prototype, GameMachineryMethods);
+Object.assign(Room.prototype, MuseMethods);
 Object.assign(Room.prototype, TestHookMethods);

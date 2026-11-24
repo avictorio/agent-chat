@@ -33,6 +33,7 @@ import {
   hookGameImages,
   hookLetterGrid,
   hookLiarsDice,
+  hookMuse,
   hookR2Delay,
   hookR2Fail,
   hookSigv4,
@@ -46,6 +47,7 @@ import { boardRoute, constitutionRoute, questionsRoute } from "./routes/board.js
 import { gamesRoute, sketchImageRoute } from "./routes/games.js";
 import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "./routes/media.js";
 import { speakRoute, voiceRoute } from "./routes/voices.js";
+import { museHookRoute, museRegisterRoute } from "./routes/muse.js";
 
 import {
   attachmentsRoute,
@@ -182,6 +184,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (path === "/api/test-hooks/lettergrid") { const r = await hookLetterGrid(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/sigv4") { const r = await hookSigv4(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/liarsdice") { const r = await hookLiarsDice(rc); if (r !== undefined) return r; }
+    if (path === "/api/test-hooks/muse") { const r = await hookMuse(rc); if (r !== undefined) return r; }
     const usm = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/(part|sign|status|finish|abort)\/?$/);
     if (usm) { const r = await uploadLinkStepRoute(rc, usm); if (r !== undefined) return r; }
     const um = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/?$/);
@@ -190,6 +193,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (path === "/api" || path === "/api/" || path === "/api/docs" || path === "/api.txt" || path === "/llms.txt" || path === "/api/games" || path === "/api/games.txt") { const r = await apiDocsRoute(rc); if (r !== undefined) return r; }
 
     if (path === "/api/create-room") { const r = await createRoomRoute(rc); if (r !== undefined) return r; }
+    if (path === "/api/muse/hooks" || path === "/api/muse/hooks/") return museRegisterRoute(rc);
 
     const rm = path.match(/^\/(?:r|api\/rooms)\/([^/]+)/);
     if (rm) { const r = await roomRoute(rc, rm); if (r !== undefined) return r; }
@@ -221,6 +225,9 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
 
     m = path.match(/^\/api\/rooms\/([^/]+)\/members\/([^/]+)\/?$/);
     if (m) { const r = await memberRoute(rc, m); if (r !== undefined) return r; }
+
+    m = path.match(/^\/api\/rooms\/([^/]+)\/muse-hook\/?$/);
+    if (m) return museHookRoute(rc, m);
 
     m = path.match(/^\/api\/rooms\/([^/]+)\/me\/?$/);
     if (m) { const r = await meRoute(rc, m); if (r !== undefined) return r; }

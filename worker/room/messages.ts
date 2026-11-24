@@ -3,7 +3,7 @@
 import { streamWants } from "./state.js";
 import { isGoneError, isStoreError, storeError } from "../lib/errors.js";
 import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MS, KEEP, MAX_TEXT, UP_SESSION_MS } from "../limits.js";
-import { deleteFrame, gapFrame, sseFrame } from "../lib/http.js";
+import { deleteFrame, gapFrame, messageFrameData, sseFrame } from "../lib/http.js";
 import { mentionsName, nameFold, sameName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
@@ -61,12 +61,15 @@ export const MessageMethods = {
     for (const x of this.sql.exec<Pick<RxRow, "who">>("SELECT DISTINCT who FROM rx WHERE msg = ?", id).toArray()) if (sameName(x.who, who)) this.sql.exec("DELETE FROM rx WHERE msg = ? AND who = ?", id, x.who);
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
     const reactions = this.reactionsFor(id);
-    const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
+    const data = { type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts };
+    const frame = "event: reaction\ndata: " + JSON.stringify(data) + "\n\n";
     // A draft is private to its sender (and the owner): its reactions are
     // not announced to the rest of the room.
     const sees = (c: StreamClient) => !msg.draft || !this.draftHidden(msg, c.name, c.owner);
     for (const c of this.clients) { if (streamWants(c, "reaction") && sees(c)) c.send(frame); }
     if (msg.draft) return { reactions: reactions, message_from: msg.sender };
+    // the message's author's Muse hook wakes on it, as the watcher did (room/muse.ts)
+    this.museQueue("reaction", who, [msg.sender], data);
     this.emitState(room);
     const ws = this.waiters;
     this.waiters = new Set();
@@ -285,6 +288,9 @@ export const MessageMethods = {
       }
       this.emitState(room);
     }
+    // every Muse hook but the sender's wakes on it (room/muse.ts); a
+    // message sent again because its media landed (mediaLanded) does not
+    this.museQueue("message", msg.from, null, messageFrameData(room, msg));
     this.ctx.waitUntil(this.notifyPush(msg, room).catch((e) => this.activityLog(room, "push error: " + String((e && e.message) || e))));
   },
 

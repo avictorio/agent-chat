@@ -146,6 +146,9 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     await run('desktop-' + scheme, { scheme }, async (page) => {
       await shot(page, scheme + '-chat.png');
       for (const t of ['constitution', 'decisions', 'questions', 'stakes', 'memory', 'members']) { await page.click('.tab[data-tab="' + t + '"]'); await settle(page); await shot(page, scheme + '-' + t + '.png'); }
+      // the members tab is the last one opened: Ada's Muse delivery shows, and only hers
+      const muse = await page.$$eval('.member .pill.muse', els => els.map(e => e.closest('.member').querySelector('.card-title').textContent));
+      if (JSON.stringify(muse) !== JSON.stringify(['Ada'])) throw new Error('Muse delivery pills: ' + JSON.stringify(muse));
       const counts = await page.$$eval('.tab .count', els => els.map(e => e.parentElement.dataset.tab + '=' + e.textContent + (e.classList.contains('alert') ? '!' : '')));
       // Sidebar counts for this fixture, asserted so a counts
       // divergence cannot pass silently: stakes count when due within

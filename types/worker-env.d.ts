@@ -41,6 +41,8 @@ interface Env {
   R2_BUCKET?: string;
   R2_DIRECT?: string;
   TEST_HOOKS?: string;
+  /** the muse-bridge Worker (a service binding; absent until it exists: wrangler.toml) */
+  MUSE_BRIDGE?: Fetcher;
 }
 
 // The parts of the Workers runtime the Worker uses, after
@@ -78,6 +80,8 @@ interface DurableObjectState {
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   waitUntil(promise: Promise<unknown>): void;
+  /** resets the object: its memory goes, its storage stays (the API suite's restart hook) */
+  abort(reason?: string): void;
 }
 
 interface DurableObjectStorage {

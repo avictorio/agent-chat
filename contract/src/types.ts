@@ -80,6 +80,9 @@ export interface Member {
   avatar?: string | null;
   /** null: no voice cloned (the Room sends voice on every member). */
   voice?: { provider: string; voice_id: string | null; sample: boolean } | null;
+  /** Whether the member's Muse agent is woken by the room itself: a Muse
+   *  delivery hook that is on and not muted (the Room sends it on every member). */
+  muse_delivery?: boolean;
   invite_link?: string;
   agent_onboarding?: string;
 }

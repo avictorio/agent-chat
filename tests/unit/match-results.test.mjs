@@ -247,7 +247,8 @@ test("rows the schema step backfilled answer the same, and the list keeps the en
   h.db.exec("DROP TABLE gr");
   h.db.prepare("UPDATE cfg SET v = '5' WHERE k = 'schema_version'").run();
   h.restart().ensureSchema();
-  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'schema_version'").v, "6");
+  // every step from 6 on ran (step 7, the Muse hooks, came after this one)
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'schema_version'").v, "7");
   const back = h.all("SELECT id, type, status, ended, winner, winners, draw, places, players, pair FROM gr ORDER BY id");
   assert.deepEqual(back, rows, "the backfill reads what saveGame writes");
   assert.equal(h.one("SELECT COUNT(*) AS n FROM gr WHERE pub IS NULL").n, rows.length);

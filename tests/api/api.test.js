@@ -3,7 +3,8 @@
 // invite-only invariants, public room creation (validation, name race
 // surface, rollback on email failure), publish-on-complete, draft-media
 // privacy, room destruction, the upload engine (direct-upload signing
-// included), MCP, stream frames and the game engines. Exits non-zero on
+// included), MCP, stream frames, the game engines and Muse delivery hooks
+// (tests/api/muse-hooks.js, against a stand-in bridge). Exits non-zero on
 // any failure.
 //
 //   npm run build     (once, and after web/ changes: the page shell and
@@ -27,6 +28,7 @@ const SUF = Date.now().toString(36);
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const { golden } = require('./golden.js');
 const { inviteApi } = require('./invite-api.js');
+const { museHooks, fakeBridge } = require('./muse-hooks.js');
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -114,11 +116,14 @@ async function takenPortRefused() {
 (async () => {
   let server;
   let taken;
+  let bridge;
   try {
     taken = await takenPortRefused();
+    // the Muse bridge stand-in's recording server (tests/api/muse-hooks.js)
+    bridge = await fakeBridge();
     // API_PORT is kept exactly when given (trees run side by side on fixed
     // ports); otherwise start() picks a free port.
-    server = await start();
+    server = await start({ museBridge: bridge.url });
   } catch (e) {
     console.error('test:api: ' + ((e && e.message) || e));
     process.exit(2);
@@ -132,6 +137,8 @@ async function takenPortRefused() {
     await golden({ req, BASE, OWNER, SUF, IPO }, check);
     // The agent invite link API (tests/api/invite-api.js).
     await inviteApi({ req, check, BASE, OWNER, SUF, IPO });
+    // Muse delivery hooks (tests/api/muse-hooks.js).
+    await museHooks({ req, check, SUF, bridge });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);

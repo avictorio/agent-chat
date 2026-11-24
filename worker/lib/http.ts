@@ -19,7 +19,12 @@ export const SSE_HEADERS = Object.assign({
 /** A message's stream frame ("event: message").
  *  @param dn the message's delivery number (its id unless it went live late or was sent again): the "id:" line a reconnect resumes from */
 export function sseFrame(room: string | null, m: Message & { targets?: string[] }, dn: number = m.id) {
-  return "id: " + dn + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, file: m.file || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
+  return "id: " + dn + "\nevent: message\ndata: " + JSON.stringify(messageFrameData(room, m)) + "\n\n";
+}
+
+/** A message frame's data: what the stream sends, and what a Muse hook is woken with (room/muse.ts). */
+export function messageFrameData(room: string | null, m: Message & { targets?: string[] }) {
+  return { id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, file: m.file || null, game: m.game || null, reactions: m.reactions || {} };
 }
 
 /** @param dn the delete's own delivery number, its "id:" line */

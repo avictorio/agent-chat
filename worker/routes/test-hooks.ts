@@ -79,6 +79,19 @@ export async function hookGameExpire(rc: RouteContext) {
   return json(await tstub.setTestGameExpire(bodyNumber(tb?.id, "id", true)));
 }
 
+// POST {room, action}: Muse hooks - peek, run (due wakes now) or restart (room/test-hooks.ts testMuse).
+export async function hookMuse(rc: RouteContext) {
+  const { request, env, owner } = rc;
+  if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+  if (!owner) return json({ error: "The owner key is required" }, 403);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const tb = await readBody(request);
+  const troom = bodyText(tb?.room, "room").toLowerCase();
+  if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
+  const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
+  return json(await tstub.testMuse(tb && tb.action));
+}
+
 // POST {room, id}: run the room's alarm now and report the match as stored.
 export async function hookAlarm(rc: RouteContext) {
   const { request, env, owner } = rc;
