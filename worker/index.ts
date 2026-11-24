@@ -20,6 +20,7 @@ import {
   currentBuildId,
   emojiRoute,
   manifestRoute,
+  museGadgetRoute,
   museTermsRoute,
   page,
   roomPageRoute,
@@ -201,6 +202,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       if (hm) return museHandoverRoute(rc, hm[1] as MuseHandover);
     }
     if (path === "/muse-terms" || path === "/muse-terms/") { const r = await museTermsRoute(rc); if (r !== undefined) return r; }
+    if (path === "/muse-gadget" || path === "/muse-gadget/") { const r = await museGadgetRoute(rc); if (r !== undefined) return r; }
 
     const rm = path.match(/^\/(?:r|api\/rooms)\/([^/]+)/);
     if (rm) { const r = await roomRoute(rc, rm); if (r !== undefined) return r; }

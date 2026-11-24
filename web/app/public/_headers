@@ -5,3 +5,7 @@
 # The app icons: plain names that can change with a deploy, so a day.
 /icons/*
   Cache-Control: public, max-age=86400
+
+# The Muse gadget guide's screenshots (/muse-gadget): plain names, so a day.
+/muse-gadget/*
+  Cache-Control: public, max-age=86400
