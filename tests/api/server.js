@@ -96,8 +96,8 @@ async function start(opts) {
     said = (said + b.toString()).slice(-8000);
     if (/Ready on /.test(said)) ready = true;
     // wrangler dev watches the tree and reloads the Worker when a file
-    // changes, which cuts requests and streams in flight: the suite then
-    // dies on a bare "TypeError: terminated". Say why, once.
+    // changes, which cuts requests and streams in flight, so checks after
+    // it can fail for no fault of the Worker. Say why, once.
     if (ready && !reloaded && /Reloading local server/.test(b.toString())) {
       reloaded = true;
       process.stderr.write('test:api: wrangler dev reloaded mid-run because a file in the tree changed; results from here on are unreliable. Run again without editing the tree.\n');

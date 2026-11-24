@@ -51,8 +51,11 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   run `npm run build` first. It reaches nothing outside the machine. What it covers is listed in the header of
   `tests/api/api.test.js`. Run it after Worker changes, and leave the tree
   alone while it runs: `wrangler dev` reloads on any file change, which cuts
-  requests in flight, and the suite dies with "TypeError: terminated" (the
-  harness prints why). It takes about 35
+  requests in flight (the harness says so when it happens). One check is
+  flaky against local `wrangler dev`: a chunked body the Worker refuses
+  early (the create-room 413) sometimes loses its answer to a dropped
+  connection; `putChunked` sends it once more, and a second loss is one
+  failed check, not a crash. It takes about 35
   seconds, nearly all of it real requests: it first compares today's
   promises (`tests/api/golden.js`: statuses, error sentences, fields), and
   it never waits out a game clock. To move a match past its deadline,

@@ -83,12 +83,27 @@ function chunked(size, head, tail) {
     },
   });
 }
+// A body the server refuses while reading it (413) gets its answer and then
+// a closed socket. Against local wrangler dev, fetch now and then reports
+// that close ("TypeError: terminated") instead of the answer, which used to
+// crash the suite. Such an upload is sent once more, from a tee of the same
+// body; only a second failure counts, and as a failed check, not a crash.
 async function putChunked(p, method, body, headers) {
-  const r = await fetch(BASE + p, { method, headers: headers || {}, body, duplex: 'half' });
-  const text = await r.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch {}
-  return { status: r.status, json, text };
+  const [first, again] = body.tee();
+  const once = async (b) => {
+    const r = await fetch(BASE + p, { method, headers: headers || {}, body: b, duplex: 'half' });
+    const text = await r.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    return { status: r.status, json, text };
+  };
+  try {
+    const r = await once(first);
+    again.cancel().catch(() => {});
+    return r;
+  } catch (e) {
+    try { return await once(again); } catch (e2) { return { status: 0, json: null, text: 'upload failed twice: ' + ((e2 && e2.message) || e2) }; }
+  }
 }
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
