@@ -19,21 +19,22 @@ export function hasQueryToken(url: URL): boolean {
   return !!(url.searchParams.get("invite") || "").trim();
 }
 
-// The URL token is retired: no route reads it. It was deprecated on
-// QUERY_DEPRECATED_AT and retired on QUERY_RETIRED, ahead of the
-// 2026-12-21 date announced to agents; the MCP route kept it until
-// QUERY_RETIRED_MCP. A room-route answer to a request that still carries
-// one keeps the Deprecation header (RFC 9745), a Sunset header with that
-// route's retirement date (in the past: RFC 8594 allows that) and a Link
-// to the changes feed. A JSON object body also gains a notice field, but
-// not on the MCP route: its answers are JSON-RPC envelopes, which MCP
-// clients parse strictly (the TypeScript SDK rejects a member the protocol
-// does not name), so a notice there would lose the answer. Without a
-// header token the answer is the invite_missing refusal, its sentence
-// saying why (QUERY_REFUSED; the MCP route puts it in its JSON-RPC error);
-// with one, the header token is used and the notice says the URL one was
-// ignored. Keep this at least until the changes-feed notices end
-// (2027-01-31).
+// The URL token is retired: no route reads it. Outside MCP it was
+// deprecated on QUERY_DEPRECATED_AT and retired on QUERY_RETIRED, ahead of
+// the 2026-12-21 date announced to agents. The MCP route kept reading it,
+// never deprecated, until QUERY_RETIRED_MCP, the day it was both
+// deprecated and retired. A room-route answer to a request that still
+// carries one keeps the Deprecation header (RFC 9745) and a Sunset header
+// (in the past: RFC 8594 allows that), each with that route's own date,
+// and a Link to the changes feed. A JSON object body also gains a notice
+// field, but not on the MCP route: its answers are JSON-RPC envelopes,
+// which MCP clients parse strictly (the TypeScript SDK rejects a member the
+// protocol does not name), so a notice there would lose the answer.
+// Without a header token a call that needs one is refused invite_missing,
+// its sentence saying why (QUERY_REFUSED; on MCP inside the JSON-RPC
+// error); with one, the header token is used and, outside MCP, the notice
+// says the URL one was ignored. Keep this at least until the changes-feed
+// notices end (2027-01-31).
 export const QUERY_DEPRECATED_AT = Date.UTC(2026, 10, 21);
 export const QUERY_RETIRED = "2026-11-22";
 export const QUERY_RETIRED_MCP = "2026-11-25";
@@ -49,8 +50,9 @@ export async function queryTokenNotice(request: Request, res: Response): Promise
   const mcp = MCP_PATH.test(url.pathname);
   const fromHeader = !!headerToken(request);
   const headers = new Headers(res.headers);
-  headers.set("Deprecation", "@" + Math.floor(QUERY_DEPRECATED_AT / 1000));
-  headers.set("Sunset", new Date((mcp ? QUERY_RETIRED_MCP : QUERY_RETIRED) + "T00:00:00Z").toUTCString());
+  const retired = Date.parse((mcp ? QUERY_RETIRED_MCP : QUERY_RETIRED) + "T00:00:00Z");
+  headers.set("Deprecation", "@" + Math.floor((mcp ? retired : QUERY_DEPRECATED_AT) / 1000));
+  headers.set("Sunset", new Date(retired).toUTCString());
   headers.set("Link", "<" + url.origin + "/api/changes>; rel=\"deprecation\"; type=\"application/json\"");
   const init = { status: res.status, statusText: res.statusText, headers: headers };
   if (!mcp && (headers.get("Content-Type") || "").includes("application/json") && res.body) {

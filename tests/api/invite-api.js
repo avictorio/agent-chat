@@ -302,7 +302,7 @@ async function queryToken(ctx) {
   let d = dep(r);
   check('query: a URL token alone is refused 401 invite_missing', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + JSON.stringify(r.json));
   check('query: ... its sentence says to use the header', /no longer read/.test(r.json.error || '') && /X-Invite-Token/.test(r.json.error || ''), r.json.error);
-  check('query: ... with Deprecation, Sunset (the retirement day) and a deprecation Link', /^@\d+$/.test(d.dep || '') && /22 Nov 2026/.test(d.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(d.link || ''), JSON.stringify(d));
+  check('query: ... with Deprecation (21 Nov 2026), Sunset (the retirement day) and a deprecation Link', d.dep === '@' + Date.UTC(2026, 10, 21) / 1000 && /22 Nov 2026/.test(d.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(d.link || ''), JSON.stringify(d));
   check('query: ... and a notice saying it was retired', /retired/.test(r.json.notice || '') && /X-Invite-Token/.test(r.json.notice || '') && /2026-11-22/.test(r.json.notice || ''), r.json.notice);
   r = await req('POST', R + '/messages?invite=' + H, { json: { text: 'posted with a URL token' } });
   check('query: a post with a URL token alone is refused and stores nothing', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + JSON.stringify(r.json));
@@ -316,10 +316,11 @@ async function queryToken(ctx) {
     // MCP: QryM's token goes only in the URL. What needs a token is
     // refused as if none was sent (HTTP 200, JSON-RPC -32001), its
     // sentence saying to use the header; every answer carries the three
-    // headers (Sunset: the MCP route's own day) and its envelope gains no
-    // member, which a strict MCP client would reject.
+    // headers (Deprecation and Sunset: the MCP route's own day, as it was
+    // never deprecated before) and its envelope gains no member, which a
+    // strict MCP client would reject.
     const mcp = (body, opts) => req('POST', R + '/mcp?invite=' + M, Object.assign({ json: body }, opts || {}));
-    const mcpDep = (x) => { const h = dep(x); return /^@\d+$/.test(h.dep || '') && /25 Nov 2026/.test(h.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(h.link || ''); };
+    const mcpDep = (x) => { const h = dep(x); return h.dep === '@' + Date.UTC(2026, 10, 25) / 1000 && /25 Nov 2026/.test(h.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(h.link || ''); };
     const envelope = (x) => !!x.json && JSON.stringify(Object.keys(x.json).sort()) === JSON.stringify(x.json.error ? ['error', 'id', 'jsonrpc'] : ['id', 'jsonrpc', 'result']);
     const refusedAsTokenless = (x) => x.status === 200 && !!x.json && !!x.json.error && x.json.error.code === -32001 && (x.json.error.data || {}).code === 'invite_missing' && /no longer read/.test(x.json.error.message) && /X-Invite-Token/.test(x.json.error.message);
     const show = (x) => x.status + ' ' + JSON.stringify(dep(x)) + ' ' + x.text.slice(0, 200);
