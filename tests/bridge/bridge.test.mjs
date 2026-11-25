@@ -524,7 +524,7 @@ test('deliver: 502 when Muse is unreachable, refuses, or does not ack', async ()
 
 // A wake's time (X-Wake-Budget-Ms, at most MUSE_WAKE_BUDGET_MS) bounds
 // every step, so the link answers within it whatever Muse does; the room
-// waits a little longer and never has to guess. Before, a 15 s lookup, a
+// waits a little longer and hears that answer. Before, a 15 s lookup, a
 // 5 s handshake, an 8 s request and one repeat after a 401 could outlast
 // the room's wait, and a wake that had landed was counted as failed.
 const budget = (ms) => ({ headers: { [WAKE_BUDGET_HEADER]: String(ms) } });

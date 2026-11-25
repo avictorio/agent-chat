@@ -313,16 +313,17 @@ export const MUSE_ALARM_WAKES_MS = 20000;
 // waits MUSE_WAKE_WAIT_MARGIN_MS longer for its answer (the trip to the
 // link and back); the link counts the time from when it takes the wake,
 // so it always answers first: delivered, try later or link gone, and the
-// room never has to guess whether a wake it gave up on landed. Each step
-// gets its own cap or what is left, whichever is less: the Muse lookup
-// (fetch_vms) MUSE_LOOKUP_TIMEOUT_MS, opening the session (the upgrade and
-// the Noise handshake) MUSE_HANDSHAKE_TIMEOUT_MS, the chat request
-// MUSE_CHAT_TIMEOUT_MS (below, with the bridge's numbers). No step starts
-// with less than MUSE_WAKE_STEP_MIN_MS left: the wake stops before its
-// chat request goes to Muse and answers 503 out_of_time with a
-// Retry-After of MUSE_WAKE_LATE_RETRY_S. Without one limit for the whole
-// wake, a wake that outlasted the room's wait was counted as failed and
-// sent again although it had landed.
+// room acts on that answer rather than on its own timeout (a 502 after the
+// chat request went may still have landed, and the retry may send those
+// items once more). Each step gets its own cap or what is left, whichever
+// is less: the Muse lookup (fetch_vms) MUSE_LOOKUP_TIMEOUT_MS, opening the
+// session (the upgrade and the Noise handshake) MUSE_HANDSHAKE_TIMEOUT_MS,
+// the chat request MUSE_CHAT_TIMEOUT_MS (below, with the bridge's
+// numbers). No step starts with less than MUSE_WAKE_STEP_MIN_MS left: the
+// wake stops before its chat request goes to Muse and answers 503
+// out_of_time with a Retry-After of MUSE_WAKE_LATE_RETRY_S. Without one
+// limit for the whole wake, a wake that outlasted the room's wait was
+// counted as failed and sent again although it had landed.
 export const MUSE_WAKE_BUDGET_MS = 25000;
 export const MUSE_WAKE_WAIT_MARGIN_MS = 2000;
 export const MUSE_LOOKUP_TIMEOUT_MS = 8000;

@@ -135,8 +135,7 @@ The room passes each wake's time in the `X-Wake-Budget-Ms` header
 number of milliseconds and cuts a larger one to it) and waits
 `MUSE_WAKE_WAIT_MARGIN_MS` longer for the answer. The link counts the
 time from when the wake arrives (`MuseLink.fetch`), so it always answers
-first and the room never has to guess whether a wake it gave up on
-landed:
+first and the room hears the bridge's own answer, not its own timeout:
 
 - Each step gets its own cap or what is left, whichever is less: the Muse
   lookup `MUSE_LOOKUP_TIMEOUT_MS`, opening the session (the upgrade and
@@ -153,10 +152,13 @@ landed:
   `out_of_time` at once; when its turn comes it tries nothing and takes no
   place in the rate cap.
 
-The dedupe stays for the one case left: an answer lost on its way back
-after the wake landed. With today's caps one pass fits inside the wake's
-time, so `out_of_time` comes only from a busy link or a second pass after
-a refused VM bearer.
+The dedupe (`acked`) catches a retry of a wake whose ack the link
+recorded but whose answer never reached the room (a room restarted
+mid-wake, say). It cannot catch a chat request that went and got no
+answer: that 502 `muse_unreachable` may have landed, and the room's
+retry sends those items once more. With today's caps one pass fits
+inside the wake's time, so `out_of_time` comes only from a busy link or
+a second pass after a refused VM bearer.
 
 ### Routing
 
@@ -212,10 +214,13 @@ plain `node:crypto` calls, as a reference for the C side.
 
 muse-gadget's `tools/agent_chat/seal_check.ts` (run by
 `seal_host_test.sh`) checks that the C seals open with this code. It
-loads `<muse-bridge dir>/src/seal.ts`: until muse-gadget changes it, point
-it at this repo's `worker/bridge/seal.ts` instead, and run it with this
-repo's loader (`node --import <agent-chat>/tests/unit/register.mjs`),
-since `seal.ts` imports its neighbours as `./x.js`.
+takes a directory and loads `<dir>/src/seal.ts`, so no argument can name
+`worker/bridge/seal.ts` itself. Until muse-gadget changes that, pass a
+directory whose `src` is a symlink to `<agent-chat>/worker/bridge`, and
+run it with this repo's loader (`node --import
+<agent-chat>/tests/unit/register.mjs ...`), since `seal.ts` imports its
+neighbours as `./x.js`; or keep a muse-bridge checkout at `ef113b6` for
+it.
 
     npm run bridge:keygen          # a throwaway MUSE_SEAL_KEY and its public key
     npm run bridge:seal -- <publicKey> '{"accessToken":"...","nodeId":"gadget-abc123"}'
@@ -357,6 +362,15 @@ API suite runs the real bridge in `wrangler dev` against
    runtime.
 7. After the cut-over: the owner deletes the `muse-bridge` Worker and the
    `MUSE_BRIDGE_KEY` secret when sure nothing needs them (Cut-over).
+8. The dedupe (`acked`) is keyed by room only. Two members of one room
+   hooked to the same link (one Muse holding two invites there, which
+   `museSetHook` allows) share it: once one member's wake is acked up to
+   a seq, the other's retry of lower seqs (the first member's own posts,
+   so never in that member's queue) answers `duplicate: true`, its cursor
+   moves on, and those items never reach Muse. Fix with a key of (room, member),
+   which needs a schema step in `MuseLink` (`CREATE TABLE IF NOT EXISTS`
+   does not change the moved tables), or by refusing a second hook on
+   one link in one room. Not before the cut-over has held.
 
 ## Cut-over from the separate Worker
 

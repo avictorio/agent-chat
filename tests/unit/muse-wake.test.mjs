@@ -358,7 +358,7 @@ test("a run whose pick of the next wake fails ends only once the wakes it sent h
 
 // One wake's time: the room passes it with the wake, the link answers
 // within it whatever Muse does, and the room waits a little longer, so it
-// never has to guess whether a wake it gave up on landed.
+// acts on the link's answer, never on a timeout of its own.
 test("a wake that lands late in its time is counted delivered and not sent again", async () => {
   const w = await museWorld({ ack: () => sleep(450), limits: { stepMinMs: 50 } });
   try {

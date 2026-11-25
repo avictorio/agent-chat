@@ -431,11 +431,13 @@ docs.txt section that owns its routes, caps and formats.
   is kept) and `Directory` (`MUSE_DIRECTORY`, one in all). A wake carries
   its time (`MUSE_WAKE_BUDGET_MS`, in the `X-Wake-Budget-Ms` header),
   within which the bridge always answers, and the room waits
-  `MUSE_WAKE_WAIT_MARGIN_MS` longer, so it never counts a wake that
-  landed as failed; any other call waits `MUSE_FETCH_MS`. A Muse access
-  token is only ever sent to `MUSE_API_HOSTS` and a VM bearer to
-  `MUSE_NOISE_HOSTS`, constants that no request, variable or stored row
-  can widen, and no call to Muse follows a redirect (`museFetch`).
+  `MUSE_WAKE_WAIT_MARGIN_MS` longer, so it always hears the bridge's own
+  answer (a 502 after the chat request went may still have landed, and
+  the retry may send those items once more); any other call waits
+  `MUSE_FETCH_MS`. A Muse access token is only ever sent to
+  `MUSE_API_HOSTS` and a VM bearer to `MUSE_NOISE_HOSTS`, constants that
+  no request, variable or stored row can widen, and no call to Muse
+  follows a redirect (`museFetch`).
   `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
   takes a one-time link `code` and `{room, token, routing?}` pairs:
   each room checks its token first without opening the invite

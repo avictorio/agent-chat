@@ -29,8 +29,9 @@
 // what is left, and a wake still waiting its turn when its time is up
 // answers out_of_time at once and tries nothing when its turn comes. The
 // room waits a little longer than that time, so it always hears how the
-// wake went. The one case left for the dedupe (acked) is an answer lost on
-// its way back after the wake landed.
+// wake went. The dedupe (acked) catches a retry of a wake acked here whose
+// answer never reached the room; a chat request that went unanswered (502)
+// may have landed, and its retry sends the items again.
 
 import { fetchVmsWithStatus } from './muse/api.js';
 import { MuseSession, acknowledgement, vmIdOf, workersWebSocketFactory } from './muse/session.js';
