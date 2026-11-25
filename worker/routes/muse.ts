@@ -1,7 +1,7 @@
 // Muse delivery hooks: registering a member's Muse agent to be woken by its
 // rooms, and each member's own view and settings of their hook in a room.
-// The room does the waking (room/muse.ts); the muse-bridge Worker, behind
-// the MUSE_BRIDGE service binding, claims link codes and takes the wakes.
+// The room does the waking (room/muse.ts); the Muse bridge (worker/bridge,
+// in this Worker: museBridge) claims link codes and takes the wakes.
 // Also the gadget's handover (museHandoverRoute): the Muse gadget, which is
 // no room's member, hands the bridge its sealed Muse token through here.
 
@@ -14,16 +14,6 @@ import { MUSE_ROUTING_DEFAULT, MUSE_ROUTING_ERROR, museBridge, museReportRoom, m
 import { hashKey, networkKey } from "../lib/address.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
-
-/** The bridge for this request: none without the binding or its key. The
- *  API suite stands in for an unset key with X-Test-Muse-No-Key (owner key
- *  and TEST_HOOKS only). */
-function bridgeFor(rc: RouteContext) {
-  const off = !!rc.env.TEST_HOOKS && rc.owner && rc.request.headers.get("X-Test-Muse-No-Key") === "1";
-  return museBridge(rc.env, off);
-}
-
-const UNAVAILABLE = { error: "Muse delivery is not set up on this site yet. Use the wake recipe (GET /api/rooms/ROOM/agent-recipe) meanwhile.", code: "muse_unavailable" };
 
 /** One room's answer in a registration. */
 type RoomResult = { room: string, ok: true, name: string, hook: unknown } | { room: string, ok: false, status: number, code?: string, error: string };
@@ -47,8 +37,7 @@ function bodyFlag(v: unknown, name: string): boolean | undefined {
 export async function museRegisterRoute(rc: RouteContext) {
   const { request, env } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const bridge = bridgeFor(rc);
-  if (!bridge) return json(UNAVAILABLE, 503);
+  const bridge = museBridge(env);
   const small = await settleBody(request, SMALL_BODY_MAX);
   if (!small) return json({ error: "That request's body is over " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" }, 413);
   const body = await readBody(small);
@@ -179,8 +168,7 @@ export async function museHandoverRoute(rc: RouteContext, which: MuseHandover) {
   const { request, env } = rc;
   const method = which === "seal-key" ? "GET" : "POST";
   if (request.method !== method && !(method === "GET" && request.method === "HEAD")) return json({ error: "Method not allowed" }, 405);
-  const bridge = bridgeFor(rc);
-  if (!bridge) return json({ error: "Muse delivery is not set up on this site yet.", code: "muse_unavailable" }, 503);
+  const bridge = museBridge(env);
   const quota = env.ROOM.get(env.ROOM.idFromName(MUSE_QUOTA_ROOM));
   const wait = await quota.museQuotaTake("ip:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))), MUSE_HANDOVER_PER_IP, MUSE_HANDOVER_WINDOW_S);
   if (wait > 0) return rateLimited("Too many Muse handover calls from this network; try again later", wait);
@@ -220,7 +208,7 @@ export async function museHandoverRoute(rc: RouteContext, which: MuseHandover) {
     warn("muse.handover", e && (e as Error).name ? (e as Error).name : "fetch failed", { route: which });
     return json({ error: "The Muse bridge did not answer. Try again shortly.", code: "muse_unreachable" }, 502);
   }
-  if (status >= 500 || status === 401) warn("muse.handover", "HTTP " + status, { route: which });
+  if (status >= 500) warn("muse.handover", "HTTP " + status, { route: which });
   if (which === "seal-key") {
     if (status === 200) sealKeyKept = { text, type, until: Date.now() + MUSE_SEAL_KEY_CACHE_S * 1000 };
     return sealKeyAnswer(text, type, status);

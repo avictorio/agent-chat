@@ -4,8 +4,8 @@
 // surface, rollback on email failure), publish-on-complete, draft-media
 // privacy, room destruction, the upload engine (direct-upload signing
 // included), MCP, stream frames, the game engines and Muse delivery hooks
-// (tests/api/muse-hooks.js, against a stand-in bridge). Exits non-zero on
-// any failure.
+// (tests/api/muse-hooks.js: the real bridge, against a fake Muse,
+// tests/api/fake-muse.mjs). Exits non-zero on any failure.
 //
 //   npm run build     (once, and after web/ changes: the page shell and
 //                      its assets come from web/app/dist)
@@ -19,6 +19,8 @@
 // fail a later same-day run's create checks as 429s. Room names, emails and
 // client IPs stay unique per run as well.
 const http = require('http');
+const { register } = require('node:module');
+const { pathToFileURL } = require('node:url');
 const { start, OWNER, localBuildId } = require('./server.js');
 
 let BASE = '';
@@ -28,7 +30,7 @@ const SUF = Date.now().toString(36);
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const { golden } = require('./golden.js');
 const { inviteApi } = require('./invite-api.js');
-const { museHooks, fakeBridge } = require('./muse-hooks.js');
+const { museHooks } = require('./muse-hooks.js');
 const { webhooks } = require('./webhooks.js');
 
 let failures = 0;
@@ -127,14 +129,17 @@ async function takenPortRefused() {
 (async () => {
   let server;
   let taken;
-  let bridge;
+  let muse;
   try {
     taken = await takenPortRefused();
-    // the Muse bridge stand-in's recording server (tests/api/muse-hooks.js)
-    bridge = await fakeBridge();
+    // The fake Muse (tests/api/fake-muse.mjs) runs the bridge tests' fake
+    // VM and seals as the gadget does, with the Worker's TypeScript: the
+    // unit tests' module hooks load it.
+    register('../unit/txt-hooks.mjs', pathToFileURL(__filename));
+    muse = await (await import('./fake-muse.mjs')).startFakeMuse();
     // API_PORT is kept exactly when given (trees run side by side on fixed
     // ports); otherwise start() picks a free port.
-    server = await start({ museBridge: bridge.url });
+    server = await start({ museOrigin: muse.url });
   } catch (e) {
     console.error('test:api: ' + ((e && e.message) || e));
     process.exit(2);
@@ -149,9 +154,10 @@ async function takenPortRefused() {
     // The agent invite link API (tests/api/invite-api.js).
     await inviteApi({ req, check, BASE, OWNER, SUF, IPO });
     // Muse delivery hooks (tests/api/muse-hooks.js).
-    await museHooks({ req, check, SUF, bridge, OWNER });
+    const museCtx = { req, check, SUF, muse, OWNER, sealPublicKey: server.sealPublicKey };
+    await museHooks(museCtx);
     // Webhook hooks (tests/api/webhooks.js, against a local receiver).
-    await webhooks({ req, check, SUF, bridge, OWNER });
+    await webhooks(museCtx);
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);
@@ -3330,6 +3336,7 @@ async function takenPortRefused() {
     await req('DELETE', R + '?confirm=apitest-main-' + SUF, { owner: true });
   } finally {
     server.stop();
+    muse.close();
   }
   console.log(failures ? 'API SUITE: ' + failures + ' failure(s)' : 'API SUITE: all checks passed');
   process.exit(failures ? 1 : 0);

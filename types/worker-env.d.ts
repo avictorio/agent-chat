@@ -41,27 +41,22 @@ interface Env {
   R2_BUCKET?: string;
   R2_DIRECT?: string;
   TEST_HOOKS?: string;
-  /** the muse-bridge Worker (a service binding; absent until it exists: wrangler.toml) */
-  MUSE_BRIDGE?: Fetcher;
-  /** what every call to MUSE_BRIDGE sends as X-Bridge-Key (the bridge's BRIDGE_SHARED_KEY; without it the bridge counts as absent) */
-  MUSE_BRIDGE_KEY?: string;
-}
-
-// What the Muse bridge's code (worker/bridge) reads from its env, under the
-// names it has in the chat Worker's Env once this Worker serves it. Until
-// then only the bridge's tests (tests/bridge) build one, with Durable
-// Objects on node:sqlite. Its numbers are constants (worker/limits.ts).
-interface BridgeEnv {
+  /** the Muse bridge's MuseLink objects, one per linked Muse (worker/bridge/link.ts) */
   MUSE_LINK: DurableObjectFetchNamespace;
+  /** the Muse bridge's one Directory object (worker/bridge/directory.ts) */
   MUSE_DIRECTORY: DurableObjectFetchNamespace;
-  /** base64 of the raw 32-byte X25519 private key the gadget seals to; unset, /seal-key, /connect and /update answer 503 not_configured */
+  /** base64 of the raw 32-byte X25519 private key the gadget seals its Muse token to; unset, /api/muse/seal-key, /connect and /update answer 503 not_configured */
   MUSE_SEAL_KEY?: string;
-  /** "1" pauses /deliver (503 paused, Retry-After) */
+  /** "1" pauses Muse wakes (the bridge's /deliver answers 503 paused with Retry-After; rooms keep them queued) */
   MUSE_DELIVER_PAUSED?: string;
-  TEST_HOOKS?: string;
   /** test only, with TEST_HOOKS: the API suite's fake Muse (http://127.0.0.1:PORT), where the bridge's calls to Muse hosts go (worker/bridge/util.ts museFetch) */
   TEST_MUSE_ORIGIN?: string;
 }
+
+// What the Muse bridge's code (worker/bridge) reads from the env: the chat
+// Worker's Env passes as one, and the bridge's tests (tests/bridge) build
+// one with Durable Objects on node:sqlite.
+type BridgeEnv = Pick<Env, "MUSE_LINK" | "MUSE_DIRECTORY" | "MUSE_SEAL_KEY" | "MUSE_DELIVER_PAUSED" | "TEST_HOOKS" | "TEST_MUSE_ORIGIN">;
 
 // The parts of the Workers runtime the Worker uses, after
 // @cloudflare/workers-types (not a dependency: only what the code calls).

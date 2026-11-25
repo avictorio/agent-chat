@@ -1,6 +1,8 @@
 // A hermetic local Worker for tests: wrangler dev on its own port, with its
-// own state directory (removed afterwards), the test owner key and
-// TEST_HOOKS on. Nothing here touches the real site.
+// own state directory (removed afterwards), the test owner key, a seal key
+// of its own for the Muse bridge and TEST_HOOKS on. Nothing here touches the
+// real site, and the Muse bridge reaches no real Muse: its calls go to the
+// fake Muse a test names (opts.museOrigin), or fail.
 //
 // The API suite uses start(); a one-off script (a bug repro, a probe) runs
 // against its own instance with
@@ -24,8 +26,6 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
 const OWNER = 'api-test-owner-key';
-// what the site sends the Muse bridge stand-in as X-Bridge-Key
-const BRIDGE_KEY = 'api-test-bridge-key';
 const DEV_VARS = path.join(ROOT, '.dev.vars');
 
 function freePort() {
@@ -44,31 +44,38 @@ function localBuildId() {
   return require('crypto').createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
-// The Muse bridge stand-in (opts.museBridge): wrangler.toml keeps its
-// MUSE_BRIDGE service binding commented out until the real muse-bridge
-// Worker exists (a deploy refuses a binding to a missing Worker), so the
-// run gets a copy of wrangler.toml with the binding added - in ROOT, since
-// its paths are relative to it, and removed with the run - and a second
-// Worker, tests/api/fake-muse-bridge.js, under the bound name. That Worker
-// forwards to the URL given, the suite's own recording server.
-const BRIDGE_SERVICE = 'muse-bridge-apitest';
-function museConfigs(stateDir, bridgeUrl) {
+// The config a local server runs: wrangler.toml with its v2 migration,
+// which transfers the Muse bridge's classes from the muse-bridge Worker
+// (where their live data is), turned into one that creates them with
+// new_sqlite_classes. wrangler dev gives a class SQLite storage only from
+// new_sqlite_classes, and a transferred class came up without it, so the
+// bridge's first query failed. Written in ROOT (its paths are relative to
+// it) and removed with the run; a wrangler.toml this cannot rewrite fails
+// the start rather than run the bridge without its storage.
+let configs = 0;
+function testConfig() {
   const text = fs.readFileSync(path.join(ROOT, 'wrangler.toml'), 'utf8');
-  // a binding already live in the file names the service to stand in for
-  const live = /^\[\[services\]\]\s*\nbinding\s*=\s*"MUSE_BRIDGE"\s*\nservice\s*=\s*"([^"]+)"/m.exec(text);
-  const service = live ? live[1] : BRIDGE_SERVICE;
-  const primary = path.join(ROOT, '.apitest-wrangler-' + process.pid + '.toml');
-  // appended at the end, where a table header cannot capture anything after it
-  fs.writeFileSync(primary, live ? text : text + '\n[[services]]\nbinding = "MUSE_BRIDGE"\nservice = "' + service + '"\n');
-  const aux = path.join(stateDir, 'fake-muse-bridge.toml');
-  fs.writeFileSync(aux, 'name = "' + service + '"\nmain = ' + JSON.stringify(path.join(ROOT, 'tests', 'api', 'fake-muse-bridge.js')) + '\ncompatibility_date = "2025-04-01"\n\n[vars]\nFAKE_BRIDGE_URL = ' + JSON.stringify(bridgeUrl) + '\n');
-  return { primary, aux };
+  const v2 = /^\[\[migrations\]\]\s*\ntag = "v2"\s*\n((?:[ \t]*\[\[migrations\.transferred_classes\]\]\s*\n(?:[ \t]*(?:from|from_script|to)\s*=\s*"[^"]*"\s*\n)+)+)/m.exec(text);
+  const classes = v2 ? [...v2[1].matchAll(/^[ \t]*to\s*=\s*"([^"]+)"/gm)].map((m) => m[1]) : [];
+  if (!v2 || classes.length !== 2) throw new Error('tests/api/server.js: wrangler.toml\'s v2 migration is not the transfer of the Muse bridge\'s two classes it knows how to run locally');
+  const file = path.join(ROOT, '.apitest-wrangler-' + process.pid + '-' + (++configs) + '.toml');
+  fs.writeFileSync(file, text.replace(v2[0], '[[migrations]]\ntag = "v2"\nnew_sqlite_classes = ' + JSON.stringify(classes) + '\n'));
+  return file;
+}
+
+/** A Muse seal key of the run's own: the raw X25519 private key as base64
+ *  (what MUSE_SEAL_KEY holds) and its public key, as GET /api/muse/seal-key
+ *  serves it. */
+function sealKey() {
+  const { privateKey, publicKey } = require('crypto').generateKeyPairSync('x25519');
+  const raw = (k, part) => Buffer.from(k.export({ format: 'jwk' })[part], 'base64url').toString('base64');
+  return { privateKey: raw(privateKey, 'd'), publicKey: raw(publicKey, 'x') };
 }
 
 /** Starts wrangler dev and waits until its own child answers.
- *  @param opts {port?: number, museBridge?: string} - port's default: API_PORT from the environment, else a free port;
- *    museBridge: the URL the MUSE_BRIDGE stand-in forwards to (no binding without it)
- *  @returns {{ base: string, port: number, owner: string, stop: () => void }} */
+ *  @param opts {port?: number, museOrigin?: string} - port's default: API_PORT from the environment, else a free port;
+ *    museOrigin: the fake Muse (http://127.0.0.1:PORT) the bridge's calls to Muse go to; without it they fail
+ *  @returns {{ base: string, port: number, owner: string, sealPublicKey: string, stop: () => void }} */
 async function start(opts) {
   opts = opts || {};
   if (!fs.existsSync(path.join(ROOT, 'web', 'app', 'dist', 'index.html'))) {
@@ -77,15 +84,17 @@ async function start(opts) {
   const port = opts.port || Number(process.env.API_PORT) || await freePort();
   const inspector = await freePort();
   const build = localBuildId();
+  const config = testConfig();
+  const seal = sealKey();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apitest-state-'));
-  const muse = opts.museBridge ? museConfigs(stateDir, opts.museBridge) : null;
   const aside = fs.existsSync(DEV_VARS) ? DEV_VARS + '.aside-' + process.pid : null;
   if (aside) fs.renameSync(DEV_VARS, aside);
   // wrangler's own entry run by this Node, not `npx`: Windows can't spawn
   // npx (a .cmd) without a shell, so the suite didn't start there.
-  const child = spawn(process.execPath, [path.join(path.dirname(require.resolve('wrangler/package.json')), 'bin', 'wrangler.js'), 'dev', ...(muse ? ['-c', muse.primary, '-c', muse.aux] : []), '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
+  const child = spawn(process.execPath, [path.join(path.dirname(require.resolve('wrangler/package.json')), 'bin', 'wrangler.js'), 'dev', '-c', config, '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
     // a mail key so room creation counts as set up; under TEST_HOOKS no mail is sent (routes/rooms.ts)
-    '--var', 'OWNER_KEY:' + OWNER, '--var', 'RESEND_API_KEY:re_fake_for_tests', '--var', 'TEST_HOOKS:1', '--var', 'MUSE_BRIDGE_KEY:' + BRIDGE_KEY], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    '--var', 'OWNER_KEY:' + OWNER, '--var', 'RESEND_API_KEY:re_fake_for_tests', '--var', 'TEST_HOOKS:1', '--var', 'MUSE_SEAL_KEY:' + seal.privateKey,
+    ...(opts.museOrigin ? ['--var', 'TEST_MUSE_ORIGIN:' + opts.museOrigin] : [])], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   // The child's own output is the proof that it, and not some other
   // process, holds the port: the ready loop used to take any answer on
   // the port, so a run that found a leftover server (or another run's) on
@@ -124,7 +133,7 @@ async function start(opts) {
       try { process.kill(-child.pid, 'SIGKILL'); } catch {}
     }
     if (aside) { try { fs.renameSync(aside, DEV_VARS); } catch {} }
-    if (muse) { try { fs.unlinkSync(muse.primary); } catch {} }
+    try { fs.unlinkSync(config); } catch {}
     try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch {}
   };
   // a killed or interrupted run still stops its server and restores .dev.vars
@@ -146,7 +155,7 @@ async function start(opts) {
       try {
         const r = await fetch(base + '/api/build');
         const j = r.ok ? await r.json() : null;
-        if (j && j.build === build && exited === null) return { base, port, owner: OWNER, stop };
+        if (j && j.build === build && exited === null) return { base, port, owner: OWNER, sealPublicKey: seal.publicKey, stop };
       } catch {}
     }
     await new Promise((r) => setTimeout(r, 500));
@@ -155,7 +164,7 @@ async function start(opts) {
   throw new Error('wrangler dev did not come up on port ' + port + ':\n' + tail());
 }
 
-module.exports = { start, OWNER, BRIDGE_KEY, ROOT, localBuildId };
+module.exports = { start, OWNER, ROOT, localBuildId };
 
 if (require.main === module) {
   const [cmd, script, ...rest] = process.argv.slice(2);

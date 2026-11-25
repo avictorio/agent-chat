@@ -1,9 +1,8 @@
 // Room methods: Muse delivery hooks. A member whose agent runs on Muse
 // registers a hook here (routes/muse.ts) and the room wakes that agent
-// itself, through the muse-bridge Worker (env.MUSE_BRIDGE, a service
-// binding), instead of the agent holding a watcher on its own machine.
-// Every call to the bridge carries X-Bridge-Key (env.MUSE_BRIDGE_KEY,
-// museBridge below); without the secret the bridge counts as absent.
+// itself, through the Muse bridge (worker/bridge, called in-process by
+// museBridge below), instead of the agent holding a watcher on its own
+// machine.
 //
 // One hook per member (mh, keyed by the member's folded name): the Muse
 // link it wakes, where on that Muse the wake lands (routing), whether it is
@@ -40,6 +39,7 @@
 import { nameFold } from "../lib/text.js";
 import { warn } from "../lib/log.js";
 import { webhookCall } from "../lib/webhook.js";
+import { bridgeFetch } from "../bridge/index.js";
 import {
   WEBHOOK_ERROR_MAX, WEBHOOK_MIN_GAP_MS,
   MUSE_FETCH_MS, MUSE_GRACE_MS, MUSE_ITEM_CUT, MUSE_ITEM_MAX, MUSE_PER_WAKE, MUSE_QUEUE_MAX,
@@ -71,21 +71,32 @@ export type MuseItemKind = "message" | "reaction" | "game";
 export type MuseHookView = { kind: HookKind, url?: string, routing?: string, enabled: boolean, muted: boolean, last_delivered_at: number | null, pending: number,
   last_status: number | null, last_error: string | null, created: number, updated: number, off_reason: string | null };
 
-/** A call to the muse-bridge Worker: a path ("/claim"), and a body to POST
- *  as JSON (none: a GET). Each carries X-Bridge-Key and gives up after
- *  MUSE_FETCH_MS. */
+/** A call to the Muse bridge: a path ("/claim"), and a body to POST as
+ *  JSON (none: a GET), answered as the bridge's router answers it. */
 export type MuseBridge = (path: string, body?: unknown) => Promise<Response>;
 
-/** The bridge, or null when this deploy cannot reach it: no MUSE_BRIDGE
- *  binding, or no MUSE_BRIDGE_KEY to show it (the bridge refuses every
- *  call without one). off: the API suite's stand-in for an unset secret. */
-export function museBridge(env: Env, off?: boolean): MuseBridge | null {
-  const b = env.MUSE_BRIDGE;
-  const key = env.MUSE_BRIDGE_KEY;
-  if (!b || !key || off) return null;
-  return (path, body) => b.fetch("https://muse-bridge" + path, body === undefined
-    ? { method: "GET", headers: { "X-Bridge-Key": key }, signal: AbortSignal.timeout(MUSE_FETCH_MS) }
-    : { method: "POST", headers: { "Content-Type": "application/json", "X-Bridge-Key": key }, body: JSON.stringify(body), signal: AbortSignal.timeout(MUSE_FETCH_MS) });
+/** The bridge (worker/bridge/index.ts bridgeFetch), in this Worker. A call
+ *  that has not answered after MUSE_FETCH_MS rejects with a TimeoutError:
+ *  the caller tries again later, and a wake that lands after all is the
+ *  bridge's dedupe to catch, so it is not sent twice. */
+export function museBridge(env: Env): MuseBridge {
+  return (path, body) => {
+    const request = new Request("https://muse-bridge" + path, body === undefined
+      ? { method: "GET" }
+      : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return withTimeout(bridgeFetch(request, env), MUSE_FETCH_MS);
+  };
+}
+
+/** p, or a TimeoutError once ms have passed. p runs on either way. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new DOMException("The Muse bridge did not answer in time", "TimeoutError")), ms);
+  });
+  // a failure after the race gave up on p has no one left to tell
+  p.catch(() => undefined);
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 /** Tells the bridge one room's hook for a link was set (hooked) or
@@ -284,8 +295,7 @@ export const MuseMethods = {
   /** Tells the bridge these hooks are gone, after the response (best effort). */
   museReportGone(hooks: Array<{ link: string, room: string }>) {
     if (!hooks.length) return;
-    const bridge = museBridge(this.env, this.museTestNoKey());
-    if (!bridge) return;
+    const bridge = museBridge(this.env);
     this.ctx.waitUntil((async () => {
       for (const h of hooks) await museReportRoom(bridge, h.link, h.room, false);
     })());
@@ -381,12 +391,7 @@ export const MuseMethods = {
     const items = this.sql.exec<MqRow>("SELECT n, member, kind, at, data FROM mq WHERE member = ? AND n > ? ORDER BY n LIMIT ?", h.member, h.cursor, MUSE_PER_WAKE).toArray();
     if (!items.length) { this.sql.exec("UPDATE mh SET due_at = NULL WHERE member = ?", h.member); return; }
     if (h.kind === "webhook") return this.webhookWake(h, items, gen);
-    const bridge = museBridge(this.env, this.museTestNoKey());
-    if (!bridge) {
-      // the binding or its key is gone from this deploy: keep the queue, look again later
-      this.sql.exec("UPDATE mh SET due_at = ? WHERE member = ?", Date.now() + MUSE_RETRY_MAX_MS, h.member);
-      return;
-    }
+    const bridge = museBridge(this.env);
     const cursor = items[items.length - 1]!.n;
     const payload: Record<string, unknown> = {
       museLinkId: h.link,
@@ -471,13 +476,6 @@ export const MuseMethods = {
     const fails = now.fails + 1;
     const wait = retryAfter > 0 ? retryAfter : backoff(fails);
     this.sql.exec("UPDATE mh SET fails = ?, due_at = ?, last_status = ?, last_error = ? WHERE member = ?", fails, t + wait, status, err, h.member);
-  },
-
-  /** The API suite's stand-in for an unset MUSE_BRIDGE_KEY in this room
-   *  (testMuse "nokey"): never set without TEST_HOOKS. */
-  museTestNoKey(): boolean {
-    if (!this.env || !this.env.TEST_HOOKS) return false;
-    return this.sql.exec<{ v: string }>("SELECT v FROM cfg WHERE k = 'test_muse_nokey'").toArray().some((r) => r.v === "1");
   },
 
   /**
