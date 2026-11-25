@@ -243,6 +243,12 @@ export function mb(bytes: number) {
   return bytes / 1e6 + " MB";
 }
 
+/** A span in seconds as the texts quote it: "an hour", "15 minutes", "7 days". */
+export function span(sec: number) {
+  const [n, unit] = sec % 86400 === 0 ? [sec / 86400, "day"] : sec % 3600 === 0 ? [sec / 3600, "hour"] : [Math.round(sec / 60), "minute"];
+  return n === 1 ? (unit === "hour" ? "an hour" : "a " + unit) : n + " " + unit + "s";
+}
+
 const MEDIA_CAP = { image: ["Images", IMAGE_MAX], audio: ["Audio clips", AUDIO_MAX], video: ["Videos", VIDEO_MAX] } as const;
 
 /** The refusal for an image, clip or video too big for a one-request route
@@ -273,15 +279,16 @@ export const VIDEO_STREAM_TOO_BIG = "Videos streamed through the site can be up 
 
 
 // Muse delivery hooks (room/muse.ts): a member's Muse agent woken through
-// the muse-bridge Worker. Items that arrive within MUSE_GRACE_MS of the
+// the Muse bridge (worker/bridge). Items that arrive within MUSE_GRACE_MS of the
 // first go out in one wake, at most MUSE_PER_WAKE to a wake (the laptop
 // watcher's numbers). A wake the bridge did not take is tried again after
 // MUSE_RETRY_FIRST_MS, doubling up to MUSE_RETRY_MAX_MS. A hook holds at
 // most MUSE_QUEUE_MAX items waiting; past that the oldest go, and the next
 // wake says how many. An item's JSON past MUSE_ITEM_MAX has its long
 // strings cut to MUSE_ITEM_CUT. One registration covers up to
-// MUSE_BATCH_MAX rooms. A call to the bridge gives up after MUSE_FETCH_MS
-// (the bridge's own wake can take a Noise handshake and a request to Muse).
+// MUSE_BATCH_MAX rooms. A call to the bridge other than a wake (a claim, a
+// room count, the gadget's handover) gives up after MUSE_FETCH_MS; a wake
+// has its own time (MUSE_WAKE_BUDGET_MS, below).
 export const MUSE_GRACE_MS = 500;
 export const MUSE_PER_WAKE = 10;
 export const MUSE_RETRY_FIRST_MS = 5000;
@@ -293,8 +300,70 @@ export const MUSE_ITEM_MAX = 30000;
 export const MUSE_ITEM_CUT = 2000;
 export const MUSE_BATCH_MAX = 50;
 export const MUSE_FETCH_MS = 30000;
-// The gadget's handover (POST /api/muse/connect, /update, /disconnect, GET
-// /api/muse/seal-key): no member token, so each network (networkKey) gets
+// The room's alarm sends the wakes that are due after it has advanced the
+// match clocks (room/muse.ts museDeliver): wakes for different members go
+// out together, at most MUSE_WAKES_AT_ONCE at a time, one at a time per
+// member, and new ones start only within MUSE_ALARM_WAKES_MS of the run's
+// start. What is still due then stays queued for the alarm armed right
+// after, so a slow Muse cannot hold the room's alarm, and the match
+// deadlines it carries, for long.
+export const MUSE_WAKES_AT_ONCE = 4;
+export const MUSE_ALARM_WAKES_MS = 20000;
+// One wake's time. The room passes MUSE_WAKE_BUDGET_MS with each wake and
+// waits MUSE_WAKE_WAIT_MARGIN_MS longer for its answer (the trip to the
+// link and back); the link counts the time from when it takes the wake,
+// so it always answers first: delivered, try later or link gone, and the
+// room acts on that answer rather than on its own timeout (a 502 after the
+// chat request went may still have landed, and the retry may send those
+// items once more). Each step gets its own cap or what is left, whichever
+// is less: the Muse lookup (fetch_vms) MUSE_LOOKUP_TIMEOUT_MS, opening the
+// session (the upgrade and the Noise handshake) MUSE_HANDSHAKE_TIMEOUT_MS,
+// the chat request MUSE_CHAT_TIMEOUT_MS (below, with the bridge's
+// numbers). No step starts with less than MUSE_WAKE_STEP_MIN_MS left: the
+// wake stops before its chat request goes to Muse and answers 503
+// out_of_time with a Retry-After of MUSE_WAKE_LATE_RETRY_S. Without one
+// limit for the whole wake, a wake that outlasted the room's wait was
+// counted as failed and sent again although it had landed.
+export const MUSE_WAKE_BUDGET_MS = 25000;
+export const MUSE_WAKE_WAIT_MARGIN_MS = 2000;
+export const MUSE_LOOKUP_TIMEOUT_MS = 8000;
+export const MUSE_WAKE_STEP_MIN_MS = 2000;
+export const MUSE_WAKE_LATE_RETRY_S = 5;
+// The Muse bridge's own numbers (worker/bridge; they were the muse-bridge
+// Worker's [vars]). A link is woken at most MUSE_LINK_WAKES_MAX times per
+// MUSE_LINK_WAKES_WINDOW_S (past that 429 with Retry-After). A one-time
+// link code is good for MUSE_LINK_CODE_TTL_S. A wake gives up on opening
+// its session to the VM (the upgrade and the Noise handshake) after
+// MUSE_HANDSHAKE_TIMEOUT_MS and on Muse's answer to the chat request after
+// MUSE_CHAT_TIMEOUT_MS, or sooner when its time runs out (MUSE_WAKE_BUDGET_MS,
+// above). The last item a link delivered
+// for a room is remembered for MUSE_WAKE_DEDUPE_S, so a retry of a wake
+// that landed is not sent twice. Muse refusing a link's access token
+// answers 503 with a Retry-After of MUSE_TOKEN_RETRY_AFTER_S and keeps the
+// token, so a passing glitch cannot switch every room off; only
+// MUSE_TOKEN_REFUSALS_MAX refusals spread over at least MUSE_TOKEN_GRACE_S
+// delete it (410).
+export const MUSE_LINK_WAKES_MAX = 30;
+export const MUSE_LINK_WAKES_WINDOW_S = 600;
+export const MUSE_LINK_CODE_TTL_S = 1800;
+export const MUSE_HANDSHAKE_TIMEOUT_MS = 5000;
+export const MUSE_CHAT_TIMEOUT_MS = 8000;
+export const MUSE_WAKE_DEDUPE_S = 600;
+export const MUSE_TOKEN_RETRY_AFTER_S = 900;
+export const MUSE_TOKEN_REFUSALS_MAX = 5;
+export const MUSE_TOKEN_GRACE_S = 21600;
+// Where the bridge's two credentials go, and nowhere else: a member's Muse
+// access token only to MUSE_API_HOSTS (fetch_vms), the VM bearer Muse
+// hands back only to MUSE_NOISE_HOSTS (the VM's Noise socket);
+// "*.example.com" would take that domain's subdomains. A gadget's handover
+// naming any other host is refused, a link whose stored host is not on
+// them is not woken, and a redirect is never followed (museFetch in
+// worker/bridge/util.ts). They are constants on purpose: no request,
+// variable or stored value can add a host.
+export const MUSE_API_HOSTS: readonly string[] = Object.freeze(["api.muse.ai"]);
+export const MUSE_NOISE_HOSTS: readonly string[] = Object.freeze(["hatch.metaaivm.com"]);
+// The gadget's handover (POST /api/muse/connect, /update, /disconnect,
+// /status, GET /api/muse/seal-key): no member token, so each network (networkKey) gets
 // MUSE_HANDOVER_PER_IP calls per MUSE_HANDOVER_WINDOW_S, counted by the
 // MUSE_QUOTA_ROOM object (a Room no room name can reach, as
 // CREATE_QUOTA_ROOM). A sealed blob is a few KB: bodies over

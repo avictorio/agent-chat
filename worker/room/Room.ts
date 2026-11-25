@@ -412,7 +412,7 @@ export class Room extends DurableObject {
   mediaLocks: Map<string, Promise<void>> = new Map();
   /** The finish in flight per upload session ("msg:kind"), whose answer a finish sent again shares (room/uploads.ts, uploadFinish). */
   _finishing: Map<string, Promise<UpFinish>> = new Map();
-  /** True while museDeliver is sending (room/muse.ts): one sender per room. */
+  /** True while museDeliver is sending (room/muse.ts): one run of wakes per room. */
   museBusy = false;
   /** Messages whose post is still storing its inline files (room/messages.ts, postKeyed). Nothing publishes or sweeps one of these: published
    *  between two puts, it went out with half its files, and a later put's failure then deleted a live message with no delete frame. */
@@ -803,8 +803,15 @@ export class Room extends DurableObject {
 
   // The deadline, firing: advance every running match that is due (the
   // same catch-up a read performs, Referee result post included), then
-  // re-arm for the next deadline. This is what lets a match run to its
-  // finish overnight with nobody reading it.
+  // send the Muse and webhook wakes that are due, then re-arm for the next
+  // of both. This is what lets a match run to its finish overnight with
+  // nobody reading it.
+  //
+  // The clocks go first: a wake waits on someone else's server, and when
+  // the wakes went first, one after another, a slow Muse held every match
+  // deadline due in the same run for as long as its wakes took. Each step
+  // runs under its own try/catch, so a failure in one never stops the
+  // other, and the re-arm is in a finally.
   async alarm() {
     // a room deleted with its alarm still set has nothing left to advance
     if (!this.ready) return;
@@ -813,34 +820,39 @@ export class Room extends DurableObject {
     try { const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'room_name'").toArray()[0]; saved = r ? String(r.v || "") : ""; } catch (e) { warn("alarm.name", e); }
     const room: string = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
     if (room && !this.roomName) this.roomName = room;
-    // Muse wakes that are due (room/muse.ts), on their own: a failure
-    // there must not stop a match's clock, nor one here a wake.
-    try { await this.museDeliver(); } catch (e) { warn("muse.deliver", e, { room }); }
-    // One match's bad state must not stop every clock in the room:
-    // advance each match under its own try/catch, and re-arm in a
-    // finally, so a single throw cannot leave every match without a
-    // clock until somebody happens to read one.
     try {
-      const rows = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
-      for (const r of rows) {
-        // deleted during an earlier match's await: these ids are not the
-        // ones read above any more (a room created since starts at 1)
-        if (!this.alive(gen)) break;
-        try {
-          const g = this.gameRow(r.id);
-          const eng = g && g.status === "running" ? gameEngine(g.st) : null;
-          // an engine with async clock work (Sketch & Guess's Referee) is
-          // awaited here; the read paths only ever run the sync part
-          // eng is set only for a running match, so g is too
-          if (eng && eng.advanceAsync) await eng.advanceAsync(this, g as GameRow, room);
-          else if (g && g.status === "running") this.advanceGame(g, room);
-          else if (g && g.status === "lobby") this.advanceLobby(g, room);
-        } catch (e) {
-          console.error("alarm: advancing match " + r.id + " failed: " + (e && (e as Error).message ? (e as Error).message : e));
-        }
-      }
+      try { await this.advanceClocks(gen, room); } catch (e) { warn("alarm.clocks", e, { room }); }
+      // Muse wakes that are due (room/muse.ts): they get an allowance of
+      // their own per run and leave what is still due to the next one
+      try { await this.museDeliver(); } catch (e) { warn("muse.deliver", e, { room }); }
     } finally {
       if (this.alive(gen)) await this.armGameAlarm();
+    }
+  }
+
+  /** The alarm's first step: every running match and lobby whose clock is
+   *  due, advanced. One match's bad state must not stop every clock in the
+   *  room: each is advanced under its own try/catch, so a single throw
+   *  cannot leave every match without a clock until somebody happens to
+   *  read one. */
+  async advanceClocks(gen: number, room: string) {
+    const rows = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
+    for (const r of rows) {
+      // deleted during an earlier match's await: these ids are not the
+      // ones read above any more (a room created since starts at 1)
+      if (!this.alive(gen)) break;
+      try {
+        const g = this.gameRow(r.id);
+        const eng = g && g.status === "running" ? gameEngine(g.st) : null;
+        // an engine with async clock work (Sketch & Guess's Referee) is
+        // awaited here; the read paths only ever run the sync part
+        // eng is set only for a running match, so g is too
+        if (eng && eng.advanceAsync) await eng.advanceAsync(this, g as GameRow, room);
+        else if (g && g.status === "running") this.advanceGame(g, room);
+        else if (g && g.status === "lobby") this.advanceLobby(g, room);
+      } catch (e) {
+        console.error("alarm: advancing match " + r.id + " failed: " + (e && (e as Error).message ? (e as Error).message : e));
+      }
     }
   }
 

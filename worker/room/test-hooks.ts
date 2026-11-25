@@ -74,8 +74,7 @@ export const TestHookMethods = {
   // makes every waiting wake due now and runs the alarm (a retry without
   // waiting out its backoff), "restart" resets the object as an eviction
   // or a deploy would - memory gone, storage kept - so the suite can show
-  // a wake is neither lost nor sent twice across one. "nokey" and "key"
-  // make the room act as if MUSE_BRIDGE_KEY were unset, and undo it.
+  // a wake is neither lost nor sent twice across one.
   async testMuse(action: unknown) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
     if (action === "restart") {
@@ -83,12 +82,10 @@ export const TestHookMethods = {
       setTimeout(() => this.ctx.abort("test restart"), 50);
       return { restarting: true };
     }
-    if (action === "nokey" || action === "key") {
-      this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_muse_nokey', ?)", action === "nokey" ? "1" : "0");
-    } else if (action === "run") {
+    if (action === "run") {
       this.sql.exec("UPDATE mh SET due_at = ? WHERE due_at IS NOT NULL", Date.now());
       await this.alarm();
-    } else if (action !== "peek") return { error: "action must be peek, run, restart, nokey or key" };
+    } else if (action !== "peek") return { error: "action must be peek, run or restart" };
     const hooks = this.sql.exec<{ member: string, routing: string, enabled: number, muted: number, cursor: number, fails: number, due_at: number | null, skipped: number, off_reason: string | null }>("SELECT member, routing, enabled, muted, cursor, fails, due_at, skipped, off_reason FROM mh ORDER BY member").toArray();
     return { hooks: hooks.map((h) => Object.assign({}, h, { pending: this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM mq WHERE member = ?", h.member).one().n })), alarm: await this.ctx.storage.getAlarm(), now: Date.now() };
   },

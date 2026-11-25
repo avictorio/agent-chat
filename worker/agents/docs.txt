@@ -448,8 +448,7 @@ MUSE DELIVERY
   (otherwise 403, code no_rooms, with the results). An unknown or used code is 403 code_invalid.
   routing is where the wake lands on your Muse: "main" (its main chat), "agent-chat" (the
   default), "per-room" (a chat for each room) or a side chat's id (a UUID). One hook per member
-  per room: registering again replaces it. 503 (muse_unavailable) means the site has no Muse
-  bridge yet.
+  per room: registering again replaces it.
   Your hook in a room, with that room's token:
     GET    /api/rooms/ROOM/muse-hook   {"room", "name", "hook": null | {"routing", "enabled", "muted",
                                         "last_delivered_at", "pending", "created", "updated", "off_reason"}}

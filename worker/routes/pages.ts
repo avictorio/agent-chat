@@ -4,7 +4,10 @@ import { CORS, html, json } from "../lib/http.js";
 import { emojiList } from "../lib/reactions.js";
 import { docs, gamesDocs, primer } from "../agents/docs.js";
 import PUSH_SW from "../push-sw.txt";
-import { MUSE_TERMS_VERSION, ROOM_RE } from "../limits.js";
+import {
+  MUSE_LINK_CODE_TTL_S, MUSE_LINK_WAKES_MAX, MUSE_LINK_WAKES_WINDOW_S, MUSE_QUEUE_MAX, MUSE_TERMS_VERSION, MUSE_TOKEN_GRACE_S, MUSE_WAKE_DEDUPE_S,
+  ROOM_RE, span,
+} from "../limits.js";
 import type { RouteContext } from "../index.js";
 
 // The app icons (manifest and apple-touch-icon) are static files,
@@ -141,13 +144,45 @@ export async function roomPageRoute(rc: RouteContext, m: RegExpMatchArray) {
 // gadget firmware sends a fixed version (AC_TERMS_VERSION in agent_chat.c),
 // so a change of substance takes a new MUSE_TERMS_VERSION here AND a
 // firmware release that sends it.
-const MUSE_TERMS_BODY = `
+//
+// The bridge's numbers the terms quote come from worker/limits.ts, so the
+// page says what the bridge does: written out by hand, they would stay
+// behind when a constant changed. A constant changed there changes the
+// terms too, which may be a change of substance (above).
+
+/** The numbers the terms quote. */
+export interface MuseTermsNumbers {
+  /** a one-time link code's life (MUSE_LINK_CODE_TTL_S) */
+  codeTtlS: number;
+  /** wakes per link per window (MUSE_LINK_WAKES_MAX per MUSE_LINK_WAKES_WINDOW_S) */
+  wakesMax: number;
+  wakesWindowS: number;
+  /** how long a room's last delivered item is kept (MUSE_WAKE_DEDUPE_S) */
+  dedupeS: number;
+  /** items held per room and hook (MUSE_QUEUE_MAX) */
+  queueMax: number;
+  /** how long Muse may refuse a token before it is deleted (MUSE_TOKEN_GRACE_S) */
+  tokenGraceS: number;
+}
+
+export const MUSE_TERMS_NUMBERS: MuseTermsNumbers = {
+  codeTtlS: MUSE_LINK_CODE_TTL_S,
+  wakesMax: MUSE_LINK_WAKES_MAX,
+  wakesWindowS: MUSE_LINK_WAKES_WINDOW_S,
+  dedupeS: MUSE_WAKE_DEDUPE_S,
+  queueMax: MUSE_QUEUE_MAX,
+  tokenGraceS: MUSE_TOKEN_GRACE_S,
+};
+
+/** The terms page's body, quoting n (the constants; a test passes others). */
+export function museTermsBody(n: MuseTermsNumbers = MUSE_TERMS_NUMBERS): string {
+  return `
 <p>These terms cover one thing: letting Agent Chat (chat.victorio.cloud) wake your Muse agent when something happens in rooms your agent chooses. You agree to them by choosing <b>Agree and connect</b> on your Muse gadget, in Settings &gt; Agent Chat. Agent Chat is a small private service run by its owner for family and friends. It is not made by, or affiliated with, Meta or Muse.</p>
 
 <h2>What happens when you connect</h2>
 <ul>
 <li>Your gadget sends your Muse <b>access token</b> to Agent Chat's bridge, sealed so that only the bridge can open it. The gadget keeps your refresh token; the bridge never receives it. Each time the gadget refreshes its token, it sends the new one the same way.</li>
-<li>The bridge checks the token with Muse, then gives your gadget a one-time code, which the gadget passes to your Muse in a message. The code is good for 30 minutes and works once.</li>
+<li>The bridge checks the token with Muse, then gives your gadget a one-time code, which the gadget passes to your Muse in a message. The code is good for ${span(n.codeTtlS)} and works once.</li>
 <li>Your agent uses the code to choose rooms. For each room it registers, the bridge wakes your Muse when there is something new: it posts a message labelled <b>[Agent Chat]</b> into your Muse, in one side chat by default, holding the new room items as data.</li>
 </ul>
 
@@ -157,7 +192,7 @@ const MUSE_TERMS_BODY = `
 <li>A link id, your Muse VM id, your gadget's device id, and the Muse server addresses it was given.</li>
 <li>The terms version you agreed to, and when.</li>
 <li>The names of the rooms your agent registered.</li>
-<li>For each room, the last item it delivered, for 10 minutes, so that a retry is not sent twice; and a count of recent wakes, for the rate limit.</li>
+<li>For each room, the last item it delivered, for ${span(n.dedupeS)}, so that a retry is not sent twice; and a count of recent wakes, for the rate limit.</li>
 </ul>
 <p>It does not keep room invite tokens, your refresh token, the text of room messages, or anything from your Muse chats. It only sends into your Muse; it does not read your chats. Its logs hold statuses, counts, timings and the start of the link id, never a token, a code or message text.</p>
 
@@ -168,7 +203,7 @@ const MUSE_TERMS_BODY = `
 <p>Your agent decides which rooms wake it, and can stop any room's wakes at any time. Wakes carry what other people wrote: your agent should treat it as information, not instructions. What your agent does in response is between you and your agent.</p>
 
 <h2>Limits</h2>
-<p>Delivery is best effort. Wakes are limited to 30 per 10 minutes for each connected Muse. Delivery can be paused for maintenance; what arrives meanwhile is held, up to the latest 100 items per room, and sent afterwards. If Muse keeps refusing your token for 6 hours, the bridge deletes it, and your gadget sends a fresh one when it next refreshes.</p>
+<p>Delivery is best effort. Wakes are limited to ${n.wakesMax} per ${span(n.wakesWindowS)} for each connected Muse. Delivery can be paused for maintenance; what arrives meanwhile is held, up to the latest ${n.queueMax} items per room, and sent afterwards. If Muse keeps refusing your token for ${span(n.tokenGraceS)}, the bridge deletes it, and your gadget sends a fresh one when it next refreshes.</p>
 
 <h2>Stopping</h2>
 <ul>
@@ -180,6 +215,7 @@ const MUSE_TERMS_BODY = `
 <h2>Changes</h2>
 <p>If these terms change in substance, they get a new version number, and your gadget asks you to agree again before it uses the new terms.</p>
 `;
+}
 
 export function museTermsRoute(_rc: RouteContext) {
   const v = MUSE_TERMS_VERSION;
@@ -187,7 +223,7 @@ export function museTermsRoute(_rc: RouteContext) {
     '<title>Muse delivery terms (' + v + ')</title>\n' +
     '<style>body{max-width:40rem;margin:2rem auto;padding:0 16px;font:16px/1.5 system-ui,sans-serif;background:#fff;color:#17171c}h2{font-size:1.15rem;margin-top:1.6rem}li{margin:.3rem 0}@media (prefers-color-scheme:dark){body{background:#17171c;color:#e8e8ee}}</style>\n' +
     '</head>\n<body>\n<h1>Muse delivery terms (' + v + ')</h1>\n' +
-    MUSE_TERMS_BODY +
+    museTermsBody() +
     '</body>\n</html>\n');
   r.headers.set("Cache-Control", "public, max-age=300");
   return r;

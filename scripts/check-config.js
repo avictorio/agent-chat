@@ -21,9 +21,14 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
+// MUSE_SEAL_KEY is the X25519 key every Muse gadget seals its token to:
+// without it the gadget's handover (seal-key, connect, update) answers 503
+// and tokens stop reaching the bridge, so a deploy must not go out without
+// it.
 const REQUIRED_SECRETS = [
   "CARTESIA_API_KEY",
   "GMAIL_SA",
+  "MUSE_SEAL_KEY",
   "OWNER_KEY",
 ];
 // Optional secrets: fine either way, reported for visibility.
@@ -34,9 +39,9 @@ const REQUIRED_SECRETS = [
 // credential (one bucket, object read & write) that direct uploads' part
 // credentials are derived from; without it every upload goes through the
 // Worker (up to ~943 GB).
-// MUSE_BRIDGE_KEY: what Agent Chat sends the muse-bridge Worker as
-// X-Bridge-Key; without it Muse delivery is off (503 muse_unavailable).
-const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MUSE_BRIDGE_KEY"];
+// MUSE_DELIVER_PAUSED: "1" pauses every Muse wake (rooms keep them queued);
+// unset in normal running.
+const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MUSE_DELIVER_PAUSED"];
 // Retired secrets: nothing reads them any more. Still listed live means
 // the dashboard Secret should be deleted (and the credential revoked at
 // its issuer). Retired 2026-11-12: NTFY_TOPIC, the change-request queue's
@@ -44,6 +49,17 @@ const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_
 // app and its server side are gone). Both are deleted live (FCM_SA on
 // 2026-11-20); they stay listed so one that comes back is flagged.
 const RETIRED_SECRETS = ["NTFY_TOPIC", "FCM_SA"];
+// Unused secrets that must stay live for now, each with what to do about
+// it. MUSE_BRIDGE_KEY (unused since 2026-11-25): the key the site showed
+// the separate muse-bridge Worker. The code before the bridge moved in
+// sends it on every bridge call, and room objects still on that code keep
+// running for up to 300 s after a deploy, so deleting it before the
+// cut-over, or during it, turns Muse delivery off. The owner deletes it
+// with the muse-bridge Worker once the cut-over has held; then it moves
+// to RETIRED_SECRETS.
+const KEPT_SECRETS = {
+  MUSE_BRIDGE_KEY: "unused since the Muse bridge moved into this Worker; keep it until the owner deletes it with the muse-bridge Worker, once the cut-over has held (docs/agents/muse-bridge.md, Cut-over from the separate Worker)",
+};
 // Optional plain variables that may live only in wrangler.toml when used;
 // a live value with no file entry is still drift for these (the deploy
 // would delete it), they are listed so the fix is a file entry, not a
@@ -110,8 +126,9 @@ for (const key of Object.keys(liveVars)) {
 // Test hooks must never be live: TEST_HOOKS arms the /api/test-hooks routes
 // (the API suite passes it to its local server only). If it ever appears in the live
 // config - as a var or a secret - the outage simulation is one owner call
-// away from production. Fail loudly and by name.
-for (const name of ["TEST_HOOKS"]) {
+// away from production. TEST_MUSE_ORIGIN, with TEST_HOOKS, sends the Muse
+// bridge's calls to the suite's fake Muse. Fail loudly and by name.
+for (const name of ["TEST_HOOKS", "TEST_MUSE_ORIGIN"]) {
   if (name in liveVars || liveSecrets.has(name))
     fail(name + ": TEST HOOK LIVE - remove it from the dashboard config immediately; it belongs only on the test suite's local server");
 }
@@ -126,8 +143,11 @@ for (const name of OPTIONAL_SECRETS) {
 for (const name of RETIRED_SECRETS) {
   if (liveSecrets.has(name)) note("retired secret " + name + " is still live - delete it in the dashboard and revoke the credential");
 }
+for (const [name, why] of Object.entries(KEPT_SECRETS)) {
+  if (liveSecrets.has(name)) note("secret " + name + " is live: " + why);
+}
 for (const name of liveSecrets) {
-  if (!REQUIRED_SECRETS.includes(name) && !OPTIONAL_SECRETS.includes(name) && !RETIRED_SECRETS.includes(name))
+  if (!REQUIRED_SECRETS.includes(name) && !OPTIONAL_SECRETS.includes(name) && !RETIRED_SECRETS.includes(name) && !(name in KEPT_SECRETS))
     note("secret " + name + " is live but not in the AGENTS.md section 2 inventory");
 }
 

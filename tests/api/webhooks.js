@@ -10,6 +10,7 @@
 'use strict';
 const crypto = require('crypto');
 const http = require('http');
+const { museGadget, handover } = require('./muse-hooks.js');
 
 /** The suite's webhook receiver: records every call; answers a challenge
  *  as state.challenge says ("body", "json", "wrong", or a status), and a
@@ -56,7 +57,7 @@ function signed(call, secret) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function webhooks(ctx) {
-  const { req, check, SUF, bridge } = ctx;
+  const { req, check, SUF, muse } = ctx;
   const rx = await receiver();
   const S = rx.state;
   try {
@@ -210,15 +211,19 @@ async function webhooks(ctx) {
     r = await wh(TA, 'POST', { enabled: true });
     check('webhook: enabled again by its member', r.status === 200 && r.json.hook.enabled === true && r.json.hook.off_reason === null, r.text.slice(0, 200));
 
-    // ---- a Muse hook replaced by a webhook: the bridge is told the room is gone
-    const B = bridge.state;
-    B.codes['code-wh'] = 'link-wh';
-    r = await req('POST', '/api/muse/hooks', { json: { code: 'code-wh', rooms: [{ room, token: TM }] } });
+    // ---- a Muse hook replaced by a webhook: the link loses the room
+    const hand = handover(req, '198.51.' + (parseInt(SUF, 36) % 250) + '.4');
+    const g = await museGadget(ctx, hand, 'wh');
+    const roomsOf = async () => (await hand('POST', 'status', { museLinkId: g.link })).json;
+    r = await req('POST', '/api/muse/hooks', { json: { code: g.code, rooms: [{ room, token: TM }] } });
     check('webhook: a Muse hook first', r.status === 200 && r.json.results[0].ok, r.text.slice(0, 200));
+    check('webhook: ... counted on its link', (await roomsOf()).rooms === 1);
     r = await wh(TM, 'POST', { url: rx.url + '/hook/muse' });
     check('webhook: then a webhook for the same member replaces it', r.status === 200 && r.json.hook.kind === 'webhook', r.text.slice(0, 200));
-    check('webhook: ... and the bridge hears the link lost the room', await waitFor(() => B.rooms.some((x) => x.body && x.body.museLinkId === 'link-wh' && x.body.room === room && x.body.hooked === false)), JSON.stringify(B.rooms.slice(-2).map((x) => x.body)));
-    check('webhook: no wake or challenge ever went to the bridge', !B.delivers.some((d) => d.body && d.body.room === room && d.body.museLinkId !== 'link-wh'));
+    let left = null;
+    for (let i = 0; i < 10 && !(left && left.rooms === 0); i++) { await sleep(200); left = await roomsOf(); }
+    check('webhook: ... and the link loses the room', !!left && left.rooms === 0, JSON.stringify(left));
+    check('webhook: no wake or challenge ever went to the Muse', !muse.state.chats.some((c) => c.vm === g.vm));
 
     // ---- removal
     r = await wh(TB, 'DELETE');

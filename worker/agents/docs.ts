@@ -38,6 +38,7 @@ import {
   CLIENT_MSG_ID_MS,
   MAX_TEXT,
   mb,
+  span,
   MEMBER_INVITES_PER_DAY,
   MESSAGES_IDS_MAX,
   MESSAGES_PAGE,
@@ -93,11 +94,6 @@ import RECIPE from "./agent-recipe.md";
 import ETIQUETTE from "./etiquette.txt";
 
 const mib = (bytes: number) => bytes / MIB + " MiB";
-/** A span in seconds as the texts quote it: "an hour", "15 minutes", "7 days". */
-function span(sec: number) {
-  const [n, unit] = sec % 86400 === 0 ? [sec / 86400, "day"] : sec % 3600 === 0 ? [sec / 3600, "hour"] : [Math.round(sec / 60), "minute"];
-  return n === 1 ? (unit === "hour" ? "an hour" : "a " + unit) : n + " " + unit + "s";
-}
 // The limits more than one text quotes, already worded.
 const SIZES = {
   AUDIO_MAX: mb(AUDIO_MAX),

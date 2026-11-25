@@ -31,9 +31,9 @@ Topic file of `AGENTS.md` (read that first; `AGENTS.md` sections 9 and
 
 ### The suites
 
-They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
-`web/tests/` (the UI suite, on the web workspace's Playwright);
-`tests/fixtures/` holds the files they share.
+They live in `tests/api/`, `tests/unit/`, `tests/bridge/`,
+`tests/upgrade/` and `web/tests/` (the UI suite, on the web workspace's
+Playwright); `tests/fixtures/` holds the files they share.
 
 - **Unit tests:** `npm run test:unit` (`node:test`, a second or two)
   covers the pure logic: the Light Cycles timeline model the arena
@@ -41,7 +41,36 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   (`tests/unit/register.mjs`) imports the Worker's `.txt` data files the
   way wrangler's Text rule does, and its TypeScript with the types
   stripped (a `./x.js` import finds `x.ts`, as wrangler's bundler does).
-  Add a test there with any new pure helper.
+  Add a test there with any new pure helper. `check-config.test.mjs` runs
+  `check:config` against a live config of its own (a fake connector
+  helper under a scratch home; skipped without `python3`).
+- **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
+  in the same `npm run test:unit`, with the same hook, and need no
+  network and no Python. `bridge.test.mjs` runs the bridge's router and
+  both of its Durable Objects in Node, on `node:sqlite`
+  (`helpers/fake-do.mjs`), against a stub of Muse's `fetch_vms` and a
+  fake Noise VM (`helpers/fake-vm.mjs`); `sdk-fixtures.test.mjs` holds
+  the port to the bytes the Python SDK produced
+  (`tests/bridge/fixtures/sdk-fixtures.json`; regenerate it with
+  `scripts/bridge/extract_sdk.sh` and `scripts/bridge/gen_fixtures.py`,
+  which need the SDK checkout and Python's `cryptography`). The live
+  handshake against the Python SDK stays opt-in:
+  `MUSE_SDK_SRC=<the SDK's linux/src> npm run test:bridge-interop`
+  (skipped without it; `MUSE_INTEROP_CMD` names another interpreter as
+  a JSON argv). `npm run bridge:keygen` and `npm run bridge:seal` make a
+  throwaway seal key and seal a handover to it, for local runs. The
+  bridge's numbers are constants (`worker/limits.ts`); a test shortens a
+  timeout or the rate cap through `deps.limits` (`worker/bridge/util.ts`),
+  never the host allow-lists. `tests/unit/muse-wake.test.mjs` runs a
+  room's Muse hooks (`room-harness.mjs`) on the real bridge the same
+  way: pass `MUSE_LINK`, `MUSE_DIRECTORY` and `MUSE_SEAL_KEY` in
+  `makeRoom({env})`. A test there shortens the alarm's allowance for
+  wakes and a wake's time with `museDeliver({allowanceMs, budgetMs})`,
+  and the bridge's step floor and caps with `deps.limits` (`stepMinMs`,
+  `lookupTimeoutMs`, ...). A fake that stands for a network call holds a
+  timer of its own until it answers or is aborted: Node does not wait on
+  `AbortSignal.timeout`'s timer, and a test process left waiting on that
+  alone ends mid-test, its tests reported cancelled.
 - **The API suite:** `npm run test:api` boots `wrangler dev` through
   `tests/api/server.js` (the port `API_PORT` names, else a free one; its
   own temp state per run through `--persist-to`; the start fails unless
@@ -49,7 +78,26 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   reports this checkout's build id, so a run never tests a leftover or
   another run's server) against the build, so
   run `npm run build` first. It reaches nothing outside the machine. What it covers is listed in the header of
-  `tests/api/api.test.js`. Run it after Worker changes, and leave the tree
+  `tests/api/api.test.js`. The Muse checks (`tests/api/muse-hooks.js`)
+  run the real bridge inside that Worker against a fake Muse,
+  `tests/api/fake-muse.mjs` on 127.0.0.1: Muse's `fetch_vms`, and each
+  VM's Noise socket, a real WebSocket served by the bridge tests' fake VM.
+  `server.js` gives each run a seal key of its own (`MUSE_SEAL_KEY`;
+  `sealPublicKey` in what `start()` returns) and the fake's address
+  (`TEST_MUSE_ORIGIN`, honoured only with `TEST_HOOKS` and only as
+  `http://127.0.0.1:PORT`, `museFetch` in `worker/bridge/util.ts`); a
+  server without one fails every call to a Muse host rather than reach
+  the real Muse. A test links a Muse as the gadget does (seal its token
+  to `GET /api/muse/seal-key`, `POST /api/muse/connect`), tells the fake
+  how to answer (`account`, `refuse`, `plan`, `redirect`) and reads what
+  reached it (`state.chats`, each wake's items parsed from its text). A
+  redirect points at a second loopback server, the fake's "elsewhere",
+  standing for a host off Muse's allow-lists; `state.elsewhere` must
+  stay empty, since the bridge follows no redirect. `server.js`
+  runs a copy of `wrangler.toml` whose v2 migration creates the bridge's
+  two classes with `new_sqlite_classes`: wrangler dev takes SQLite from
+  that alone, and the production file's transfer left them without it
+  (`AGENTS.md` section 12). Run it after Worker changes, and leave the tree
   alone while it runs: `wrangler dev` reloads on any file change, which cuts
   requests in flight (the harness says so when it happens). A body
   refused for its size must be read away before the answer (`settleBody`
@@ -73,7 +121,9 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
 - **A one-off script against its own local server** (a bug repro, a
   probe): `node tests/api/server.js run path/to/script.js` starts a
   server on a free port, runs the script with `BASE` and `OWNER` (the
-  test owner key) in its environment, and stops the server. Several can
+  test owner key) in its environment, and stops the server. Its Muse
+  bridge has a seal key and no Muse: a connect or a wake fails as Muse
+  unreachable. Several can
   run side by side. Keep new real-time
   sleeps to a second or two (stream settling; one 6 s lobby expiry stays
   on the real clock): long waits add up to minutes across the suite.
@@ -88,7 +138,9 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
 
 Local iteration: `npx wrangler dev` (port 8787 by default) runs the Worker
 with the Durable Object and a local KV; secrets go in the git-ignored
-`.dev.vars`.
+`.dev.vars`. On `wrangler.toml` as it is, the Muse bridge's two Durable
+Objects come up without SQLite and every Muse call answers 500: for those,
+use `tests/api/server.js`, whose config creates them with it.
 
 **Tear down what you start.** A server you start by hand (`npx wrangler
 dev`, the upgrade test's) is yours to stop before you finish, after a

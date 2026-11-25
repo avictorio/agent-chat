@@ -1,9 +1,8 @@
 // Room methods: Muse delivery hooks. A member whose agent runs on Muse
 // registers a hook here (routes/muse.ts) and the room wakes that agent
-// itself, through the muse-bridge Worker (env.MUSE_BRIDGE, a service
-// binding), instead of the agent holding a watcher on its own machine.
-// Every call to the bridge carries X-Bridge-Key (env.MUSE_BRIDGE_KEY,
-// museBridge below); without the secret the bridge counts as absent.
+// itself, through the Muse bridge (worker/bridge, called in-process by
+// museBridge below), instead of the agent holding a watcher on its own
+// machine.
 //
 // One hook per member (mh, keyed by the member's folded name): the Muse
 // link it wakes, where on that Muse the wake lands (routing), whether it is
@@ -40,10 +39,12 @@
 import { nameFold } from "../lib/text.js";
 import { warn } from "../lib/log.js";
 import { webhookCall } from "../lib/webhook.js";
+import { bridgeFetch } from "../bridge/index.js";
+import { WAKE_BUDGET_HEADER } from "../bridge/util.js";
 import {
   WEBHOOK_ERROR_MAX, WEBHOOK_MIN_GAP_MS,
-  MUSE_FETCH_MS, MUSE_GRACE_MS, MUSE_ITEM_CUT, MUSE_ITEM_MAX, MUSE_PER_WAKE, MUSE_QUEUE_MAX,
-  MUSE_RETRY_AFTER_MAX_MS, MUSE_RETRY_FIRST_MS, MUSE_RETRY_MAX_MS,
+  MUSE_ALARM_WAKES_MS, MUSE_FETCH_MS, MUSE_GRACE_MS, MUSE_ITEM_CUT, MUSE_ITEM_MAX, MUSE_PER_WAKE, MUSE_QUEUE_MAX,
+  MUSE_RETRY_AFTER_MAX_MS, MUSE_RETRY_FIRST_MS, MUSE_RETRY_MAX_MS, MUSE_WAKE_BUDGET_MS, MUSE_WAKE_WAIT_MARGIN_MS, MUSE_WAKES_AT_ONCE,
 } from "../limits.js";
 import type { Refusal, Room } from "./Room.js";
 
@@ -71,21 +72,39 @@ export type MuseItemKind = "message" | "reaction" | "game";
 export type MuseHookView = { kind: HookKind, url?: string, routing?: string, enabled: boolean, muted: boolean, last_delivered_at: number | null, pending: number,
   last_status: number | null, last_error: string | null, created: number, updated: number, off_reason: string | null };
 
-/** A call to the muse-bridge Worker: a path ("/claim"), and a body to POST
- *  as JSON (none: a GET). Each carries X-Bridge-Key and gives up after
- *  MUSE_FETCH_MS. */
-export type MuseBridge = (path: string, body?: unknown) => Promise<Response>;
+/** A call to the Muse bridge: a path ("/claim"), and a body to POST as
+ *  JSON (none: a GET), answered as the bridge's router answers it. A wake
+ *  (/deliver) also passes its time, budgetMs. */
+export type MuseBridge = (path: string, body?: unknown, budgetMs?: number) => Promise<Response>;
 
-/** The bridge, or null when this deploy cannot reach it: no MUSE_BRIDGE
- *  binding, or no MUSE_BRIDGE_KEY to show it (the bridge refuses every
- *  call without one). off: the API suite's stand-in for an unset secret. */
-export function museBridge(env: Env, off?: boolean): MuseBridge | null {
-  const b = env.MUSE_BRIDGE;
-  const key = env.MUSE_BRIDGE_KEY;
-  if (!b || !key || off) return null;
-  return (path, body) => b.fetch("https://muse-bridge" + path, body === undefined
-    ? { method: "GET", headers: { "X-Bridge-Key": key }, signal: AbortSignal.timeout(MUSE_FETCH_MS) }
-    : { method: "POST", headers: { "Content-Type": "application/json", "X-Bridge-Key": key }, body: JSON.stringify(body), signal: AbortSignal.timeout(MUSE_FETCH_MS) });
+/** The bridge (worker/bridge/index.ts bridgeFetch), in this Worker. A wake
+ *  carries its time (WAKE_BUDGET_HEADER), within which the bridge always
+ *  answers; the room waits MUSE_WAKE_WAIT_MARGIN_MS longer than that, for
+ *  the trip to the link and back. Any other call waits MUSE_FETCH_MS. A
+ *  call that has not answered by then rejects with a TimeoutError: the
+ *  caller tries again later, and a wake whose answer was lost after it
+ *  landed is the bridge's dedupe to catch, so it is not sent twice. */
+export function museBridge(env: Env): MuseBridge {
+  return (path, body, budgetMs) => {
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (budgetMs !== undefined) headers[WAKE_BUDGET_HEADER] = String(budgetMs);
+    const request = new Request("https://muse-bridge" + path, body === undefined
+      ? { method: "GET", headers }
+      : { method: "POST", headers, body: JSON.stringify(body) });
+    return withTimeout(bridgeFetch(request, env), budgetMs === undefined ? MUSE_FETCH_MS : budgetMs + MUSE_WAKE_WAIT_MARGIN_MS);
+  };
+}
+
+/** p, or a TimeoutError once ms have passed. p runs on either way. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new DOMException("The Muse bridge did not answer in time", "TimeoutError")), ms);
+  });
+  // a failure after the race gave up on p has no one left to tell
+  p.catch(() => undefined);
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 /** Tells the bridge one room's hook for a link was set (hooked) or
@@ -284,8 +303,7 @@ export const MuseMethods = {
   /** Tells the bridge these hooks are gone, after the response (best effort). */
   museReportGone(hooks: Array<{ link: string, room: string }>) {
     if (!hooks.length) return;
-    const bridge = museBridge(this.env, this.museTestNoKey());
-    if (!bridge) return;
+    const bridge = museBridge(this.env);
     this.ctx.waitUntil((async () => {
       for (const h of hooks) await museReportRoom(bridge, h.link, h.room, false);
     })());
@@ -354,39 +372,92 @@ export const MuseMethods = {
     }
   },
 
-  /** Sends every wake that is due (the alarm calls it). One at a time per
-   *  room: a second call while one runs leaves it to that one. */
-  async museDeliver() {
+  /**
+   * Sends the wakes that are due (the alarm calls it, after the match
+   * clocks). Wakes for different members go out together, at most
+   * MUSE_WAKES_AT_ONCE at a time; a member's wakes go one at a time (a busy
+   * hook's next wake starts once its last has settled). New wakes start only
+   * within the run's allowance, MUSE_ALARM_WAKES_MS: what is still due when
+   * it is used up stays queued and due, and the alarm the caller re-arms
+   * (armGameAlarm, museDueAt) comes right after for it. Wakes used to go one
+   * after another with nothing but a round cap, so one slow Muse held every
+   * other member's wake, and the room's alarm, for as long as it took. One
+   * run per room: a second call while one runs leaves the wakes to it.
+   * Each wake gets its own time, MUSE_WAKE_BUDGET_MS, whenever in the
+   * allowance it starts.
+   * @param limits a shorter allowance and wake time, for tests
+   */
+  async museDeliver(limits: { allowanceMs?: number, budgetMs?: number } = {}) {
     if (this.museBusy) return;
     this.museBusy = true;
     const gen = this.gen;
-    try {
-      // a busy hook may need several wakes; the round cap keeps one alarm bounded
-      for (let round = 0; round < 20; round++) {
-        if (!this.alive(gen)) return;
-        const due = this.sql.exec<MhRow>("SELECT * FROM mh WHERE enabled = 1 AND muted = 0 AND due_at IS NOT NULL AND due_at <= ? ORDER BY due_at", Date.now()).toArray();
-        if (!due.length) return;
-        for (const h of due) {
-          if (!this.alive(gen)) return;
-          await this.museWake(h, gen);
+    const until = Date.now() + (limits.allowanceMs ?? MUSE_ALARM_WAKES_MS);
+    const budget = limits.budgetMs ?? MUSE_WAKE_BUDGET_MS;
+    /** members with a wake out, or whose wake failed this run */
+    const taken = new Set<string>();
+    const next = (): MhRow | null => {
+      if (!this.alive(gen) || Date.now() >= until) return null;
+      const due = this.sql.exec<MhRow>("SELECT * FROM mh WHERE enabled = 1 AND muted = 0 AND due_at IS NOT NULL AND due_at <= ? ORDER BY due_at", Date.now()).toArray();
+      return due.find((h) => !taken.has(h.member)) || null;
+    };
+    // A lane whose pick fails (storage) stops; the run ends only when every
+    // lane has, or the next run would pick the members whose wakes are
+    // still out and send them again.
+    const pickFailed: { error: unknown }[] = [];
+    const pick = (): MhRow | null => {
+      try {
+        return next();
+      } catch (e) {
+        pickFailed.push({ error: e });
+        return null;
+      }
+    };
+    const lane = async () => {
+      for (let h = pick(); h; h = pick()) {
+        taken.add(h.member);
+        try {
+          await this.museWake(h, gen, budget);
+          taken.delete(h.member);
+        } catch (e) {
+          // A wake that threw left its hook due: picked again at once, it
+          // would spin until the allowance ran out, and every run after.
+          // It waits out a backoff instead, and sits out this run. Its
+          // name only: a queued item that no longer parses would put
+          // member text in the message (lib/log.ts).
+          warn("muse.wake", e instanceof Error ? e.name : null, { room: h.room });
+          this.museDefer(h.member, gen);
         }
       }
+    };
+    try {
+      await Promise.allSettled(Array.from({ length: MUSE_WAKES_AT_ONCE }, lane));
     } finally {
       this.museBusy = false;
     }
+    const failed = pickFailed[0];
+    if (failed) warn("muse.pick", failed.error, { room: this.roomName, lanes: pickFailed.length });
   },
 
-  /** One wake for one hook: its oldest waiting items, to the bridge or the URL. */
-  async museWake(h: MhRow, gen: number) {
+  /** A hook whose wake failed outside museSettle (a throw): tried again
+   *  after the backoff, as a refused wake is. */
+  museDefer(member: string, gen: number) {
+    try {
+      if (!this.alive(gen)) return;
+      const h = this.museRow(member);
+      if (!h) return;
+      this.sql.exec("UPDATE mh SET fails = ?, due_at = ? WHERE member = ?", h.fails + 1, Date.now() + backoff(h.fails + 1), member);
+    } catch (e) {
+      warn("muse.defer", e, { room: this.roomName });
+    }
+  },
+
+  /** One wake for one hook: its oldest waiting items, to the bridge (with
+   *  budgetMs, the wake's time) or the URL. */
+  async museWake(h: MhRow, gen: number, budgetMs: number = MUSE_WAKE_BUDGET_MS) {
     const items = this.sql.exec<MqRow>("SELECT n, member, kind, at, data FROM mq WHERE member = ? AND n > ? ORDER BY n LIMIT ?", h.member, h.cursor, MUSE_PER_WAKE).toArray();
     if (!items.length) { this.sql.exec("UPDATE mh SET due_at = NULL WHERE member = ?", h.member); return; }
     if (h.kind === "webhook") return this.webhookWake(h, items, gen);
-    const bridge = museBridge(this.env, this.museTestNoKey());
-    if (!bridge) {
-      // the binding or its key is gone from this deploy: keep the queue, look again later
-      this.sql.exec("UPDATE mh SET due_at = ? WHERE member = ?", Date.now() + MUSE_RETRY_MAX_MS, h.member);
-      return;
-    }
+    const bridge = museBridge(this.env);
     const cursor = items[items.length - 1]!.n;
     const payload: Record<string, unknown> = {
       museLinkId: h.link,
@@ -401,14 +472,14 @@ export const MuseMethods = {
     let gone = false;
     let retryAfter = 0;
     try {
-      const r = await bridge("/deliver", payload);
+      const r = await bridge("/deliver", payload, budgetMs);
       status = r.status;
       const text = await r.text();
       if (status === 410) gone = true;
       else if (status >= 400 && status < 500) {
         try { const j = JSON.parse(text) as { code?: unknown, error?: unknown }; gone = j.code === "link_gone" || /link gone/i.test(String(j.error || "")); } catch { /* not JSON: an ordinary refusal */ }
       }
-      // 429 (rate cap) and 503 (the bridge waiting out a refused token) say how long to wait
+      // 429 (rate cap) and 503 (a refused token, a pause, a wake out of time) say how long to wait
       if (status === 429 || status === 503) retryAfter = Math.min(MUSE_RETRY_AFTER_MAX_MS, (parseInt(r.headers.get("Retry-After") || "", 10) || 0) * 1000);
     } catch (e) {
       // a timeout or an unreachable bridge: tried again below
@@ -471,13 +542,6 @@ export const MuseMethods = {
     const fails = now.fails + 1;
     const wait = retryAfter > 0 ? retryAfter : backoff(fails);
     this.sql.exec("UPDATE mh SET fails = ?, due_at = ?, last_status = ?, last_error = ? WHERE member = ?", fails, t + wait, status, err, h.member);
-  },
-
-  /** The API suite's stand-in for an unset MUSE_BRIDGE_KEY in this room
-   *  (testMuse "nokey"): never set without TEST_HOOKS. */
-  museTestNoKey(): boolean {
-    if (!this.env || !this.env.TEST_HOOKS) return false;
-    return this.sql.exec<{ v: string }>("SELECT v FROM cfg WHERE k = 'test_muse_nokey'").toArray().some((r) => r.v === "1");
   },
 
   /**

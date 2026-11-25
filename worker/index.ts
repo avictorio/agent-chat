@@ -60,8 +60,11 @@ import {
   reactionsRoute,
 } from "./routes/messages.js";
 
-// The Durable Object class must be exported from the main module.
+// The Durable Object classes must be exported from the main module: the
+// rooms, and the Muse bridge's links and directory (worker/bridge).
 export { Room } from "./room/Room.js";
+export { MuseLink } from "./bridge/link.js";
+export { Directory } from "./bridge/directory.js";
 
 /** What every route handler gets: the request and the bindings, the parsed
  *  URL and its path, whether the owner key came with it, and the invite

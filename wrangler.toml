@@ -2,7 +2,7 @@
 # Cloudflare Workers Builds runs on every push to main: the build command
 # (`npm ci --prefix web && npm run build --prefix web`) builds the web app
 # into web/app/dist, then `npx wrangler deploy` uploads the Worker with it.
-# Secrets (OWNER_KEY, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY, ANTHROPIC_API_KEY, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY) live only in Cloudflare and are kept across deploys.
+# Secrets (OWNER_KEY, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY, ANTHROPIC_API_KEY, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, MUSE_SEAL_KEY, MUSE_DELIVER_PAUSED) live only in Cloudflare and are kept across deploys.
 # Never put them in this file.
 
 name = "victorio-chat"
@@ -77,20 +77,40 @@ bucket_name = "victorio-chat-media"
 name = "ROOM"
 class_name = "Room"
 
-# Muse delivery hooks (worker/room/muse.ts) push wakes to the muse-bridge
-# Worker (github.com/avictorio/muse-bridge, deployed separately with no
-# public route) through this service binding. Every call also carries
-# X-Bridge-Key from the MUSE_BRIDGE_KEY secret, the bridge's
-# BRIDGE_SHARED_KEY. The API suite swaps in a stand-in bridge
-# (tests/api/server.js).
-[[services]]
-binding = "MUSE_BRIDGE"
-service = "muse-bridge"
+# The Muse bridge's objects (worker/bridge), reached only through its
+# router (bridgeFetch), which only this Worker's Muse code calls: MuseLink,
+# one per linked Muse, holds that Muse's access token; Directory, one in
+# all, maps Muse VMs and one-time link codes to links.
+[[durable_objects.bindings]]
+name = "MUSE_LINK"
+class_name = "MuseLink"
+
+[[durable_objects.bindings]]
+name = "MUSE_DIRECTORY"
+class_name = "Directory"
 
 # Already applied on the live Worker (migration tag v1). Add a new tag only when adding a Durable Object class.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+# v2 brings the Muse bridge's two classes over from the muse-bridge Worker,
+# with every object's stored data (each Muse's link, token and rooms; the
+# directory of VMs and codes). A transfer creates the class here: never add
+# a create migration for them. Their storage stays SQLite, but wrangler dev
+# decides SQLite from new_sqlite_classes alone, so the local servers run a
+# copy of this file that creates them with new_sqlite_classes instead
+# (tests/api/server.js, testConfig).
+[[migrations]]
+tag = "v2"
+  [[migrations.transferred_classes]]
+  from = "MuseLink"
+  from_script = "muse-bridge"
+  to = "MuseLink"
+  [[migrations.transferred_classes]]
+  from = "Directory"
+  from_script = "muse-bridge"
+  to = "Directory"
 
 # No cron triggers. The change-request queue and its ntfy alerts were retired
 # 2026-11-12. Keep this as an explicit empty list: a deploy replaces the live
