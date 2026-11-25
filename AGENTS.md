@@ -163,7 +163,7 @@ agent-chat/
 | `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them, and uploads already in flight are stopped too (their parts go through the site, or they are told to start again: `docs/agents/media.md`, The direct path). Either way they are offered only while the direct check passes on the live bucket. `wrangler.toml` [vars] |
 | `MUSE_SEAL_KEY` | **secret** | the Muse bridge's X25519 private key, base64 of its raw 32 bytes (the muse-bridge Worker's `BRIDGE_SEAL_KEY`, carried over unchanged). Every Muse gadget seals its access token to its public key (`GET /api/muse/seal-key`), so a new key breaks every gadget's token updates until each connects again: never rotate it casually. Unset, `/api/muse/seal-key`, `/connect` and `/update` answer 503 `not_configured` and the rest of Muse delivery works. Required by `check:config`. |
 | `MUSE_DELIVER_PAUSED` | **secret** (optional) | `"1"` pauses every Muse wake for maintenance: the bridge answers 503 `paused` with Retry-After and rooms keep the wakes queued. Delete it to resume; no deploy either way. |
-| `MUSE_BRIDGE_KEY` | **secret**, unused | the key the site sent the separate muse-bridge Worker as `X-Bridge-Key`. Nothing reads it since the bridge runs in this Worker; it stays live until the owner deletes it (section 8). |
+| `MUSE_BRIDGE_KEY` | **secret**, unused | the key the site sent the separate muse-bridge Worker as `X-Bridge-Key`. Nothing in this code reads it, but the code before the move sends it on every bridge call, and room objects on that code run for up to 300 s after a deploy: it stays live until the owner deletes it with the `muse-bridge` Worker, once the cut-over has held (section 8). `check:config` notes it as kept, not as one to delete. |
 | `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
 | `TEST_MUSE_ORIGIN` | test only | with `TEST_HOOKS`, where the Muse bridge's calls to Muse's hosts go: the API suite's fake Muse, `http://127.0.0.1:PORT` (no other origin is taken; without one, a test server's calls to Muse fail). Never live (`check:config` fails by name). |
 
@@ -501,8 +501,11 @@ or `git checkout <commit> -- <dir>`.
 | The URL token (`?invite=`) outside MCP | 2026-11-22 | `ef59801` | Only `POST /api/rooms/ROOM/mcp` still reads it (`MCP_PATH` in `worker/lib/tokens.ts`); elsewhere a request with only that gets 401 `invite_missing` (`docs/agents/rooms-and-api.md`). |
 | The separate muse-bridge Worker (the `MUSE_BRIDGE` service binding, `X-Bridge-Key`, the 503 `muse_unavailable` without it) | 2026-11-25 | `bbea453` | The bridge runs in this Worker (`worker/bridge/`); its two Durable Object classes came over with their data (migration `v2`). The `MUSE_BRIDGE_KEY` secret is unused, kept until the owner deletes it with the `muse-bridge` Worker. |
 
-`check:config` keeps the retired secrets (`NTFY_TOPIC`, `FCM_SA`,
-`MUSE_BRIDGE_KEY`) listed, so one that comes back live is flagged.
+`check:config` keeps the retired secrets (`NTFY_TOPIC`, `FCM_SA`) listed,
+so one that comes back live is flagged. `MUSE_BRIDGE_KEY` has a note of
+its own, kept rather than to delete: code from before the move still sends
+it, so it stays live until the owner's cleanup (section 15); then it joins
+the retired list.
 
 ---
 

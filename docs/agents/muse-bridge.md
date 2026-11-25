@@ -405,8 +405,8 @@ sets or deletes a secret without the owner.
      after the post. Its invite is in no repo: ask the owner.
    - The Worker's logs show no 500 from Muse calls ("SQL is not
      enabled" would mean the classes came up without SQLite), and
-     `npm run check:config` passes, with `MUSE_BRIDGE_KEY` reported as a
-     retired secret still live.
+     `npm run check:config` passes, with `MUSE_BRIDGE_KEY` noted as
+     unused and kept (not as one to delete).
 7. **Leave the old Worker in place,** paused, and never delete it as an
    agent. Deleting it, and the `MUSE_BRIDGE_KEY` secret here, is the
    owner's call, once the step 6 checks have held for a while.

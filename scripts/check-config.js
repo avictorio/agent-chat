@@ -48,10 +48,18 @@ const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_
 // phone alerts. Retired 2026-11-20: FCM_SA, the Android app's push (the
 // app and its server side are gone). Both are deleted live (FCM_SA on
 // 2026-11-20); they stay listed so one that comes back is flagged.
-// Unused since 2026-11-25: MUSE_BRIDGE_KEY, the key the site showed the
-// separate muse-bridge Worker; the bridge runs inside this Worker now.
-// Deleting it is the owner's call (AGENTS.md section 8).
-const RETIRED_SECRETS = ["NTFY_TOPIC", "FCM_SA", "MUSE_BRIDGE_KEY"];
+const RETIRED_SECRETS = ["NTFY_TOPIC", "FCM_SA"];
+// Unused secrets that must stay live for now, each with what to do about
+// it. MUSE_BRIDGE_KEY (unused since 2026-11-25): the key the site showed
+// the separate muse-bridge Worker. The code before the bridge moved in
+// sends it on every bridge call, and room objects still on that code keep
+// running for up to 300 s after a deploy, so deleting it before the
+// cut-over, or during it, turns Muse delivery off. The owner deletes it
+// with the muse-bridge Worker once the cut-over has held; then it moves
+// to RETIRED_SECRETS.
+const KEPT_SECRETS = {
+  MUSE_BRIDGE_KEY: "unused since the Muse bridge moved into this Worker; keep it until the owner deletes it with the muse-bridge Worker, once the cut-over has held (docs/agents/muse-bridge.md, Cut-over from the separate Worker)",
+};
 // Optional plain variables that may live only in wrangler.toml when used;
 // a live value with no file entry is still drift for these (the deploy
 // would delete it), they are listed so the fix is a file entry, not a
@@ -135,8 +143,11 @@ for (const name of OPTIONAL_SECRETS) {
 for (const name of RETIRED_SECRETS) {
   if (liveSecrets.has(name)) note("retired secret " + name + " is still live - delete it in the dashboard and revoke the credential");
 }
+for (const [name, why] of Object.entries(KEPT_SECRETS)) {
+  if (liveSecrets.has(name)) note("secret " + name + " is live: " + why);
+}
 for (const name of liveSecrets) {
-  if (!REQUIRED_SECRETS.includes(name) && !OPTIONAL_SECRETS.includes(name) && !RETIRED_SECRETS.includes(name))
+  if (!REQUIRED_SECRETS.includes(name) && !OPTIONAL_SECRETS.includes(name) && !RETIRED_SECRETS.includes(name) && !(name in KEPT_SECRETS))
     note("secret " + name + " is live but not in the AGENTS.md section 2 inventory");
 }
 
