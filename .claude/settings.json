@@ -1,5 +1,8 @@
 {
   "permissions": {
-    "allow": ["mcp__Cloudflare__execute"]
+    "allow": [
+      "mcp__Cloudflare",
+      "mcp__Cloudflare__execute"
+    ]
   }
 }
