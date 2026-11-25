@@ -189,8 +189,9 @@ pgrep -af 'wrangler.*dev|workerd'
   going wrong, and on its value (`media.read`, `alarm.arm`, `push.send`)
   for one kind. Invocation logs also record each request's URL, the
   query included (`redact_query_string` is not set in `wrangler.toml`):
-  an MCP URL's `?invite=` token and the token in `DELETE
-  /invites/TOKEN` appear there, so treat the logs as holding secrets.
+  a `?invite=` token a client still sends (no route reads it, but its URL
+  is logged) and the token in `DELETE /invites/TOKEN` appear there, so
+  treat the logs as holding secrets.
 
 ### Checking every room
 
