@@ -291,6 +291,63 @@ test('museFetch: under TEST_HOOKS Muse hosts go to a loopback fake, or nowhere',
   ]);
 });
 
+// Every Muse call carries a credential (the access token or the VM
+// bearer), and under the chat Worker's compatibility date a followed
+// redirect took the Authorization header on to whatever host it named.
+test('museFetch: no call follows a redirect, live or under TEST_HOOKS; a 3xx fails the call', async () => {
+  const inits = [];
+  let status = 302;
+  deps.fetch = async (url, init) => {
+    inits.push(init);
+    return new Response(null, { status, headers: status === 200 ? {} : { Location: 'https://elsewhere.example/steal' } });
+  };
+  const go = (e, url) => museFetch(e)(url, { headers: { Authorization: 'Bearer x' }, redirect: 'follow' }).then((r) => r.status, (err) => err.name);
+  const t = { TEST_HOOKS: '1', TEST_MUSE_ORIGIN: 'http://127.0.0.1:9' };
+  for (const s of [301, 302, 303, 307, 308]) {
+    status = s;
+    assert.equal(await go({}, 'https://api.muse.ai/fetch_vms'), 'MuseConnectionError', String(s));
+    assert.equal(await go(t, 'https://hatch.metaaivm.com/v1/noise?vm_id=vm-A'), 'MuseConnectionError', String(s));
+  }
+  status = 200;
+  assert.equal(await go({}, 'https://api.muse.ai/fetch_vms'), 200);
+  assert.equal(inits.length, 11);
+  // the caller's own redirect mode is overridden; its headers go as they were
+  for (const i of inits) assert.deepEqual([i.redirect, i.headers.Authorization], ['manual', 'Bearer x']);
+});
+
+test('a redirect from Muse is never followed: the handover, a wake\'s lookup and the VM socket answer muse_unreachable', async () => {
+  const id = await linked();
+  const calls = [];
+  // Muse's hosts answer a redirect to a host off the allow-lists
+  deps.fetch = async (url, init) => {
+    calls.push({ url: String(url), redirect: init.redirect, upgrade: init.headers.Upgrade ?? null });
+    return new Response(null, { status: 302, headers: { Location: 'https://elsewhere.example/catch' } });
+  };
+  const c = await call('/connect', { sealed: await sealFor('tok-B'), termsVersion: 'v1' });
+  assert.deepEqual([c.status, c.body.code], [502, 'muse_unreachable']);
+  const u = await call('/update', { sealed: await sealFor('tok-A2') });
+  assert.deepEqual([u.status, u.body.code], [502, 'muse_unreachable']);
+  // a wake with no VM bearer cached asks fetch_vms first
+  env.MUSE_LINK.instance(id).sql.exec('UPDATE secret SET vm_auth_token = NULL');
+  const w = await call('/deliver', wake(id));
+  assert.deepEqual([w.status, w.body.code], [502, 'muse_unreachable']);
+  // a wake with its VM bearer goes to the socket: the real Workers factory,
+  // whose upgrade goes through the same fetch
+  env.MUSE_LINK.instance(id).sql.exec("UPDATE secret SET vm_auth_token = 'vmtok-A'");
+  deps.connect = null;
+  const s = await call('/deliver', wake(id));
+  assert.deepEqual([s.status, s.body.code], [502, 'muse_unreachable']);
+  assert.deepEqual(calls, [
+    { url: 'https://api.muse.ai/fetch_vms', redirect: 'manual', upgrade: null },
+    { url: 'https://api.muse.ai/fetch_vms', redirect: 'manual', upgrade: null },
+    { url: 'https://api.muse.ai/fetch_vms', redirect: 'manual', upgrade: null },
+    { url: 'https://hatch.metaaivm.com/v1/noise?vm_id=vm-A', redirect: 'manual', upgrade: 'websocket' },
+  ]);
+  // nothing was stored from a redirect, and the link still holds its token
+  assert.equal(env.MUSE_LINK.instance(id).secret().access_token, 'tok-A');
+  assertNoSecrets('tok-A', 'tok-A2', 'tok-B', 'vmtok-A');
+});
+
 test('update: a refreshed token for the same Muse replaces the stored one; another Muse is refused', async () => {
   const id = await linked();
   const u = await call('/update', { sealed: await sealFor('tok-A2') });

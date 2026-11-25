@@ -432,9 +432,11 @@ docs.txt section that owns its routes, caps and formats.
   its time (`MUSE_WAKE_BUDGET_MS`, in the `X-Wake-Budget-Ms` header),
   within which the bridge always answers, and the room waits
   `MUSE_WAKE_WAIT_MARGIN_MS` longer, so it never counts a wake that
-  landed as failed; any other call waits `MUSE_FETCH_MS`. A Muse token is
-  only ever sent to `MUSE_API_HOSTS` and `MUSE_NOISE_HOSTS`, constants
-  that no request, variable or stored row can widen. `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
+  landed as failed; any other call waits `MUSE_FETCH_MS`. A Muse access
+  token is only ever sent to `MUSE_API_HOSTS` and a VM bearer to
+  `MUSE_NOISE_HOSTS`, constants that no request, variable or stored row
+  can widen, and no call to Muse follows a redirect (`museFetch`).
+  `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
   takes a one-time link `code` and `{room, token, routing?}` pairs:
   each room checks its token first without opening the invite
   (`museVerify`), the code is claimed (`POST /claim {code}` ->

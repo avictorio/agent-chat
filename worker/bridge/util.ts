@@ -1,7 +1,7 @@
 // Shared helpers: the bridge's numbers, JSON responses, logging, test seams.
 
 import type { SocketFactory } from './muse/session.js';
-import { MuseTimeoutError } from './muse/errors.js';
+import { MuseConnectionError, MuseTimeoutError } from './muse/errors.js';
 import {
   MUSE_API_HOSTS,
   MUSE_CHAT_TIMEOUT_MS,
@@ -147,16 +147,39 @@ const TEST_MUSE_ORIGIN_RE = /^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/;
 
 /**
  * The fetch the bridge reaches Muse with: fetch_vms, and the VM's Noise
- * socket (workersWebSocketFactory upgrades through it). Under TEST_HOOKS a
- * call to a host on MUSE_API_HOSTS or MUSE_NOISE_HOSTS goes to
- * TEST_MUSE_ORIGIN, the API suite's fake Muse on 127.0.0.1
+ * socket (workersWebSocketFactory upgrades through it). Both carry an
+ * Authorization header, the member's access token or the VM bearer, so no
+ * call follows a redirect: each goes with redirect "manual", and a 3xx
+ * answer fails it as if Muse had not answered (muse_unreachable). Under
+ * this Worker's compatibility date workerd sends Authorization on to a
+ * redirect's target on another origin (it drops it only from 2025-09-01,
+ * strip_authorization_on_cross_origin_redirect), so an answer from Muse's
+ * host could have taken the token to a host off MUSE_API_HOSTS and
+ * MUSE_NOISE_HOSTS, which only ever see the URL the bridge asked for.
+ *
+ * Under TEST_HOOKS a call to a host on MUSE_API_HOSTS or MUSE_NOISE_HOSTS
+ * goes to TEST_MUSE_ORIGIN, the API suite's fake Muse on 127.0.0.1
  * (tests/api/server.js), and fails when that is not set: a test server
  * runs the real bridge and never reaches the real Muse. The origin must be
  * a loopback address, so even live the switch could send a token nowhere
  * but the Worker's own machine; check:config fails if either name is live.
  */
 export function museFetch(env: BridgeEnv): typeof fetch {
-  if (!env.TEST_HOOKS) return deps.fetch;
+  const send: typeof fetch = env.TEST_HOOKS ? toFakeMuse(env) : (input, init) => deps.fetch(input, init);
+  return async (input, init) => {
+    const r = await send(input, { ...init, redirect: 'manual' });
+    if (r.status < 300 || r.status > 399) return r;
+    try {
+      await r.body?.cancel();
+    } catch {
+      // the call fails below either way; the body only held the connection
+    }
+    throw new MuseConnectionError(`Muse answered HTTP ${r.status}, a redirect, which is never followed`);
+  };
+}
+
+/** TEST_HOOKS only: Muse's hosts swapped for the fake Muse (museFetch). */
+function toFakeMuse(env: BridgeEnv): typeof fetch {
   const origin = env.TEST_MUSE_ORIGIN && TEST_MUSE_ORIGIN_RE.test(env.TEST_MUSE_ORIGIN) ? env.TEST_MUSE_ORIGIN : null;
   return (input, init) => {
     const u = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);

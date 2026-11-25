@@ -49,9 +49,14 @@ room alarm (room/muse.ts museWake) ------bridgeFetch POST /deliver--> MuseLink -
   VM bearer only to `MUSE_NOISE_HOSTS` (the Noise socket), both constants
   in `worker/limits.ts`: no request, variable or stored row can add a host,
   a handover naming another host is refused, and a link whose stored host
-  is off the lists is not woken (502 `host_not_allowed`). The one switch,
-  `museFetch` (`util.ts`), sends Muse hosts to the API suite's fake Muse
-  under `TEST_HOOKS`, and only to `http://127.0.0.1:PORT`.
+  is off the lists is not woken (502 `host_not_allowed`). No call to Muse
+  follows a redirect: `museFetch` (`util.ts`), the one fetch they all go
+  through, sends each with `redirect: "manual"` and fails a 3xx as no
+  answer (502 `muse_unreachable`), because under this Worker's
+  compatibility date a followed redirect carries the `Authorization`
+  header to whatever host it names. Its one switch sends Muse hosts to
+  the API suite's fake Muse under `TEST_HOOKS`, and only to
+  `http://127.0.0.1:PORT`.
 - **Don't invent Muse protocol.** Follow the SDK: no fields or
   capabilities it doesn't have. `worker/bridge/muse/` is derived from
   Meta's SDK under the Apache License 2.0: keep each file's "Derived from"
@@ -270,8 +275,12 @@ pairing, voice, video, link-control and commands are not ported. A wake:
 `link.ts` drives `MuseSession` itself (`sendChatWithin`), as the SDK
 port's `sendChatOnce` does, so each step can be bounded by the wake's
 time. The crypto is native WebCrypto (X25519, HKDF, AES-GCM) and runs
-under this Worker's compatibility date: the API suite drives the whole
-path in workerd.
+under this Worker's compatibility date (`2025-04-01`) with no flag: the
+API suite drives the whole path in workerd. The date matters in one
+place: workerd drops `Authorization` from a redirect to another origin
+only from `2025-09-01` (`strip_authorization_on_cross_origin_redirect`;
+the separate Worker ran at `2026-11-01`), so the bridge follows no
+redirect at all (`museFetch`, Ground rules) and needs no flag for it.
 
 ## Tests
 
@@ -312,6 +321,14 @@ API suite runs the real bridge in `wrangler dev` against
 - A wake that took longer than the room's wait was counted as failed and
   sent again although it had landed. The wake's time is passed with the
   wake and the room waits longer than it (One wake's time).
+- Moved into this Worker, the bridge's calls to Muse followed redirects
+  with their `Authorization` header: at this Worker's compatibility date
+  workerd keeps the header on a redirect to another origin, so a 302 from
+  Muse's host sent a member's access token, or the VM bearer, to a host
+  off the allow-lists (shown locally on the handover's fetch_vms, a
+  wake's fetch_vms and the Noise upgrade). `museFetch` refuses redirects;
+  `bridge.test.mjs` and the API suite's redirect checks (the fake Muse's
+  elsewhere server) hold it.
 
 ## Open work
 

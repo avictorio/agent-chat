@@ -322,6 +322,69 @@ async function museHooks(ctx) {
   }
 
   await museHandover(ctx);
+  await museRedirects(ctx);
+}
+
+// A redirect from Muse's hosts, in the real Worker: the bridge's calls carry
+// the access token (fetch_vms) or the VM bearer (the Noise socket), and
+// under the Worker's compatibility date a followed redirect sent that
+// header on to the host it named. The fake Muse answers 302 to its
+// elsewhere server, which nothing may reach.
+async function museRedirects(ctx) {
+  const { req, check, SUF, muse } = ctx;
+  const M = muse.state;
+  const net = '198.51.' + (parseInt(SUF, 36) % 250) + '.';
+  const hand = handover(req, net + '7');
+  const room = 'apitest-muse3-' + SUF, R = '/api/rooms/' + room;
+  await req('POST', R, { owner: true });
+  const inv = async (name, kind) => (await req('POST', R + '/invites', { owner: true, json: { name, kind } })).json.token;
+  const TE = await inv('MuseEve', 'agent'), TF = await inv('MuseFay', 'human');
+  const post = (text) => req('POST', R + '/messages', { token: TF, json: { text } });
+  const run = () => req('POST', '/api/test-hooks/muse', { owner: true, json: { room, action: 'run' } });
+  const eveHook = async () => ((await req('POST', '/api/test-hooks/muse', { owner: true, json: { room, action: 'peek' } })).json.hooks || []).find((h) => h.member === 'museeve') || null;
+  const texts = (vm) => [].concat(...M.chats.filter((c) => c.vm === vm && c.status === 200).map((c) => c.items)).map((i) => i.text);
+
+  // the handover: fetch_vms answers a redirect
+  const tok = 'tok-redir-' + SUF;
+  muse.account(tok, 'vm-redir-' + SUF);
+  muse.redirect(tok);
+  let r = await hand('POST', 'connect', { sealed: await muse.seal({ accessToken: tok, nodeId: 'gadget-redir' }, ctx.sealPublicKey), termsVersion: 'v1' });
+  check('muse redirect: a handover whose fetch_vms answers 302 -> 502 muse_unreachable', r.status === 502 && r.json && r.json.code === 'muse_unreachable', r.status + ' ' + r.text.slice(0, 160));
+  check('muse redirect: ... Muse was asked, and the redirect\'s target never reached', M.fetches.some((f) => f.token === tok && f.status === 302) && M.elsewhere.length === 0, JSON.stringify(M.elsewhere));
+
+  // a linked Muse, hooked to the room, delivering
+  const eve = await museGadget(ctx, hand, 'eve');
+  r = await req('POST', '/api/muse/hooks', { json: { code: eve.code, rooms: [{ room, token: TE }] } });
+  check('muse redirect: a link registered for the room', eve.status === 200 && r.status === 200 && r.json.results[0].ok, eve.status + ' ' + r.status);
+  await post('muse redirect warm-up');
+  check('muse redirect: it delivers', await waitFor(() => texts(eve.vm).includes('muse redirect warm-up')), JSON.stringify(texts(eve.vm)));
+
+  // the VM's socket answers a redirect: the wake fails and is kept
+  muse.redirect(eve.vm);
+  let u0 = M.upgrades.length;
+  await post('muse redirect socket');
+  await waitFor(() => M.upgrades.slice(u0).some((u) => u.vm === eve.vm && u.status === 302));
+  check('muse redirect: a wake whose Noise socket answers 302 is kept, with a backoff (502)', await waitFor(async () => { const h = await eveHook(); return !!h && h.fails === 1 && h.pending === 1; }), JSON.stringify(await eveHook()));
+  check('muse redirect: ... and the VM bearer never reached the redirect\'s target', M.elsewhere.length === 0, JSON.stringify(M.elsewhere));
+  muse.unredirect(eve.vm);
+
+  // the VM bearer refused, so the wake asks fetch_vms again, which answers a redirect
+  muse.plan(eve.vm, { reject: 401 });
+  muse.redirect(eve.token);
+  const f0 = M.fetches.length;
+  await run();
+  await waitFor(() => M.fetches.slice(f0).some((f) => f.token === eve.token && f.status === 302));
+  check('muse redirect: a wake\'s fetch_vms answering 302 keeps the wake (502)', await waitFor(async () => { const h = await eveHook(); return !!h && h.fails === 2 && h.pending === 1 && !!h.enabled; }), JSON.stringify(await eveHook()));
+  check('muse redirect: ... and the access token never reached the redirect\'s target', M.elsewhere.length === 0, JSON.stringify(M.elsewhere));
+
+  // Muse answers again: the kept wake goes through, once
+  muse.unredirect(eve.token);
+  for (let i = 0; i < 20 && !texts(eve.vm).includes('muse redirect socket'); i++) { await run(); await sleep(150); }
+  check('muse redirect: once Muse answers again the kept wake is delivered, once', texts(eve.vm).filter((t) => t === 'muse redirect socket').length === 1, JSON.stringify(texts(eve.vm)));
+  check('muse redirect: nothing ever reached the redirect\'s target', M.elsewhere.length === 0, JSON.stringify(M.elsewhere));
+
+  await req('DELETE', R + '/invites', { owner: true });
+  await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
 // The gadget's handover: GET /api/muse/seal-key, POST /api/muse/connect,

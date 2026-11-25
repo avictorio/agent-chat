@@ -9,8 +9,12 @@
 //                            chat request a wake sends and answers it
 //
 // It records what reached it (state.fetches, upgrades, chats) and answers
-// as a test asks (account, refuse, plan). Loaded with the Worker's module
-// hooks (tests/unit/txt-hooks.mjs) for the bridge's TypeScript.
+// as a test asks (account, refuse, plan, redirect). A second server on
+// 127.0.0.1, "elsewhere", stands for a host off Muse's allow-lists: a
+// redirect points there, and state.elsewhere records anything that
+// reached it, which must stay empty (the bridge follows no redirect).
+// Loaded with the Worker's module hooks (tests/unit/txt-hooks.mjs) for
+// the bridge's TypeScript.
 import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { FakeVm } from '../bridge/helpers/fake-vm.mjs';
@@ -111,6 +115,12 @@ export function startFakeMuse() {
     chats: [],
     // every header and body that reached the fake, for "never sent" checks
     seen: [],
+    // access tokens (fetch_vms) and VM ids (the socket) answered with a
+    // redirect to the elsewhere server instead
+    redirects: new Set(),
+    // what reached the elsewhere server: {path, upgrade, auth (whether an
+    // Authorization header came)}
+    elsewhere: [],
   };
   let bearerN = 0;
   const sockets = new Set();
@@ -120,6 +130,18 @@ export function startFakeMuse() {
     return q.shift();
   };
 
+  // A host that is not Muse's: whatever reaches it is recorded and refused.
+  const elsewhere = http.createServer((q, res) => {
+    state.elsewhere.push({ path: q.url, upgrade: false, auth: !!q.headers.authorization });
+    res.writeHead(404);
+    res.end();
+  });
+  elsewhere.on('upgrade', (q, socket) => {
+    state.elsewhere.push({ path: q.url, upgrade: true, auth: !!q.headers.authorization });
+    socket.end('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+  });
+  const elsewhereAt = (path) => 'http://127.0.0.1:' + elsewhere.address().port + path;
+
   const server = http.createServer((q, res) => {
     const u = new URL(q.url, 'http://fake-muse');
     state.seen.push(JSON.stringify(q.headers) + ' ' + q.url);
@@ -128,6 +150,11 @@ export function startFakeMuse() {
       return res.end();
     }
     const token = String(q.headers.authorization || '').replace(/^Bearer /, '');
+    if (state.redirects.has(token)) {
+      state.fetches.push({ token, status: 302, path: u.pathname, at: Date.now() });
+      res.writeHead(302, { Location: elsewhereAt(u.pathname) });
+      return res.end();
+    }
     const a = state.accounts.get(token);
     const status = a ? a.status : 401;
     state.fetches.push({ token, status, path: u.pathname, at: Date.now() });
@@ -148,6 +175,11 @@ export function startFakeMuse() {
     const vm = u.searchParams.get('vm_id') || '';
     const auth = String(q.headers.authorization || '');
     state.seen.push(JSON.stringify(q.headers) + ' ' + q.url);
+    if (state.redirects.has(vm)) {
+      state.upgrades.push({ vm, auth, status: 302, at: Date.now() });
+      socket.end('HTTP/1.1 302 Found\r\nLocation: ' + elsewhereAt(u.pathname + u.search) + '\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+      return;
+    }
     const plan = nextPlan(vm, true);
     const status = u.pathname !== '/v1/noise' ? 404 : plan ? plan.reject : auth === 'Bearer ' + state.bearers.get(vm) ? 101 : 401;
     state.upgrades.push({ vm, auth, status, at: Date.now() });
@@ -216,17 +248,23 @@ export function startFakeMuse() {
     bearer(vm) {
       return state.bearers.get(vm);
     },
+    /** fetch_vms for this access token, or the socket of this VM, answers
+     *  302 to the elsewhere server until unredirect(key). */
+    redirect(key) {
+      state.redirects.add(key);
+    },
+    unredirect(key) {
+      state.redirects.delete(key);
+    },
   };
-  return new Promise((resolve) =>
-    server.listen(0, '127.0.0.1', () =>
-      resolve({
-        ...muse,
-        url: 'http://127.0.0.1:' + server.address().port,
-        close: () => {
-          for (const s of sockets) s.destroy();
-          server.close();
-        },
-      }),
-    ),
-  );
+  const listen = (s) => new Promise((resolve) => s.listen(0, '127.0.0.1', resolve));
+  return Promise.all([listen(server), listen(elsewhere)]).then(() => ({
+    ...muse,
+    url: 'http://127.0.0.1:' + server.address().port,
+    close: () => {
+      for (const s of sockets) s.destroy();
+      server.close();
+      elsewhere.close();
+    },
+  }));
 }

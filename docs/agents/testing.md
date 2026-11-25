@@ -87,8 +87,11 @@ Playwright); `tests/fixtures/` holds the files they share.
   server without one fails every call to a Muse host rather than reach
   the real Muse. A test links a Muse as the gadget does (seal its token
   to `GET /api/muse/seal-key`, `POST /api/muse/connect`), tells the fake
-  how to answer (`account`, `refuse`, `plan`) and reads what reached it
-  (`state.chats`, each wake's items parsed from its text). `server.js`
+  how to answer (`account`, `refuse`, `plan`, `redirect`) and reads what
+  reached it (`state.chats`, each wake's items parsed from its text). A
+  redirect points at a second loopback server, the fake's "elsewhere",
+  standing for a host off Muse's allow-lists; `state.elsewhere` must
+  stay empty, since the bridge follows no redirect. `server.js`
   runs a copy of `wrangler.toml` whose v2 migration creates the bridge's
   two classes with `new_sqlite_classes`: wrangler dev takes SQLite from
   that alone, and the production file's transfer left them without it

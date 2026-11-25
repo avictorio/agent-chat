@@ -351,12 +351,14 @@ export const MUSE_WAKE_DEDUPE_S = 600;
 export const MUSE_TOKEN_RETRY_AFTER_S = 900;
 export const MUSE_TOKEN_REFUSALS_MAX = 5;
 export const MUSE_TOKEN_GRACE_S = 21600;
-// The only hosts a Muse access token is ever sent to: fetch_vms on
-// MUSE_API_HOSTS, the VM's Noise socket on MUSE_NOISE_HOSTS ("*.example.com"
-// would take that domain's subdomains). A gadget's handover naming any other
-// host is refused, and a link whose stored host is not on them is not
-// woken. They are constants on purpose: no request, variable or stored
-// value can add a host.
+// Where the bridge's two credentials go, and nowhere else: a member's Muse
+// access token only to MUSE_API_HOSTS (fetch_vms), the VM bearer Muse
+// hands back only to MUSE_NOISE_HOSTS (the VM's Noise socket);
+// "*.example.com" would take that domain's subdomains. A gadget's handover
+// naming any other host is refused, a link whose stored host is not on
+// them is not woken, and a redirect is never followed (museFetch in
+// worker/bridge/util.ts). They are constants on purpose: no request,
+// variable or stored value can add a host.
 export const MUSE_API_HOSTS: readonly string[] = Object.freeze(["api.muse.ai"]);
 export const MUSE_NOISE_HOSTS: readonly string[] = Object.freeze(["hatch.metaaivm.com"]);
 // The gadget's handover (POST /api/muse/connect, /update, /disconnect,
