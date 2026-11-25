@@ -13,7 +13,8 @@ import { generateBridgeKey, seal } from "../../worker/bridge/seal.ts";
 import { deps } from "../../worker/bridge/util.ts";
 import { derivedSessionId } from "../../worker/bridge/wake.ts";
 import { ServiceFrame } from "../../worker/bridge/muse/envelope.ts";
-import { MUSE_WAKES_AT_ONCE } from "../../worker/limits.ts";
+import { museBridge } from "../../worker/room/muse.ts";
+import { MUSE_WAKE_WAIT_MARGIN_MS, MUSE_WAKES_AT_ONCE } from "../../worker/limits.ts";
 import { FakeNamespace } from "../bridge/helpers/fake-do.mjs";
 import { FakeVm } from "../bridge/helpers/fake-vm.mjs";
 
@@ -299,4 +300,69 @@ test("a wake that throws waits out a backoff instead of being picked again at on
   } finally {
     w.restore();
   }
+});
+
+// One wake's time: the room passes it with the wake, the link answers
+// within it whatever Muse does, and the room waits a little longer, so it
+// never has to guess whether a wake it gave up on landed.
+test("a wake that lands late in its time is counted delivered and not sent again", async () => {
+  const w = await museWorld({ ack: () => sleep(450), limits: { stepMinMs: 50 } });
+  try {
+    const h = makeRoom({ env: w.env });
+    for (const n of ["Ada", "Bob"]) h.member(n);
+    assert.equal(h.room.museSetHook("tok-Ada", w.link, "agent-chat", R).ok, true);
+    await h.room.post("Bob", "late, but it lands", R, false);
+    dueNow(h);
+    await h.room.museDeliver({ budgetMs: 600 });
+    const hook = h.room.museStatus("tok-Ada").hook;
+    assert.deepEqual([hook.pending, hook.last_status], [0, 200]);
+    dueNow(h);
+    await h.room.museDeliver({ budgetMs: 600 });
+    assert.equal(w.chats.length, 1, "Muse got it once");
+  } finally {
+    w.restore();
+  }
+});
+
+test("a wake Muse never answers is answered within its time and stays queued", async () => {
+  const held = gate();
+  const w = await museWorld({ ack: () => held.p, limits: { stepMinMs: 50 } });
+  try {
+    const h = makeRoom({ env: w.env });
+    for (const n of ["Ada", "Bob"]) h.member(n);
+    assert.equal(h.room.museSetHook("tok-Ada", w.link, "agent-chat", R).ok, true);
+    await h.room.post("Bob", "into the void", R, false);
+    dueNow(h);
+    const t0 = Date.now();
+    await h.room.museDeliver({ budgetMs: 400 });
+    assert.ok(Date.now() - t0 < 400 + MUSE_WAKE_WAIT_MARGIN_MS, "the room did not wait out its margin: " + (Date.now() - t0) + " ms");
+    const row = h.one("SELECT fails, due_at, last_status, last_error FROM mh WHERE member = 'ada'");
+    // the bridge's answer, not the room's guess ("the bridge did not answer")
+    assert.deepEqual([row.last_status, row.last_error, row.fails], [502, "HTTP 502", 1]);
+    assert.ok(row.due_at > Date.now(), "tried again after the backoff");
+    assert.equal(h.room.museStatus("tok-Ada").hook.pending, 1);
+  } finally {
+    held.open();
+    w.restore();
+  }
+});
+
+test("the room passes the wake's time and hears an answer that comes a little after it", async () => {
+  const seen = [];
+  const env = {
+    MUSE_LINK: {
+      idFromName: (name) => ({ name }),
+      get: () => ({
+        async fetch(input, init) {
+          seen.push(new Request(input, init).headers.get("X-Wake-Budget-Ms"));
+          await sleep(300 + 150);
+          return new Response(JSON.stringify({ ok: true, cursor: 1, delivered: 1 }), { headers: { "Content-Type": "application/json" } });
+        },
+      }),
+    },
+  };
+  const wake = { museLinkId: "ml_" + "0".repeat(32), room: R, member: "Ada", routing: "main", cursor: 1, items: [{ seq: 1, kind: "message", at: 1, data: {} }] };
+  const r = await museBridge(env)("/deliver", wake, 300);
+  assert.equal(r.status, 200);
+  assert.deepEqual(seen, ["300"]);
 });

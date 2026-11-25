@@ -22,12 +22,21 @@
 //   /connect, /update, /deliver, /disconnect, /rooms, /status
 // Every request runs one at a time (a chain), so a disconnect or update
 // never interleaves with a send.
+//
+// A wake (/deliver) has a time of its own (WAKE_BUDGET_HEADER, at most
+// MUSE_WAKE_BUDGET_MS), counted from when it arrives here, and answers
+// within it whatever Muse does: each step is bounded by its own cap or
+// what is left, and a wake still waiting its turn when its time is up
+// answers out_of_time at once and tries nothing when its turn comes. The
+// room waits a little longer than that time, so it always hears how the
+// wake went. The one case left for the dedupe (acked) is an answer lost on
+// its way back after the wake landed.
 
 import { fetchVmsWithStatus } from './muse/api.js';
-import { acknowledgement, sendChatOnce, vmIdOf, workersWebSocketFactory } from './muse/session.js';
-import type { ChatResult } from './muse/session.js';
+import { MuseSession, acknowledgement, vmIdOf, workersWebSocketFactory } from './muse/session.js';
+import type { ChatOptions, ChatResult, MuseSessionOptions } from './muse/session.js';
 import { UpgradeRejected, errName } from './muse/errors.js';
-import { apiRootAllowed, config, deps, json, log, museFetch, noiseHostAllowed, refuse, tag } from './util.js';
+import { WAKE_BUDGET_HEADER, apiRootAllowed, config, deps, json, log, museFetch, noiseHostAllowed, outOfTime, refuse, tag, wakeBudget, within } from './util.js';
 import type { BridgeConfig } from './util.js';
 import { sessionIdFor, wakeText } from './wake.js';
 
@@ -106,11 +115,48 @@ type FetchVmResult =
   | { code: 'muse_unreachable' | 'vm_missing'; museStatus?: number | null; gone?: undefined; vmAuthToken?: undefined }
   | { vmAuthToken: string; gone?: undefined; code?: undefined };
 
-/** send() result. */
+/** send() result. late: the wake's time ran out before its chat request
+ *  went to Muse (nothing landed). */
 type SendResult =
-  | { ok: true; gone?: undefined }
-  | { gone: true; why: string; ok?: undefined }
-  | { ok: false; code: string; museStatus?: number | null; gone?: undefined };
+  | { ok: true; gone?: undefined; late?: undefined }
+  | { gone: true; why: string; ok?: undefined; late?: undefined }
+  | { late: true; ok?: undefined; gone?: undefined }
+  | { ok: false; code: string; museStatus?: number | null; gone?: undefined; late?: undefined };
+
+const LATE: SendResult = { late: true };
+
+/** How far a send got: whether its chat request has gone to Muse. */
+interface SendStage {
+  sent: boolean;
+}
+
+/**
+ * sendChatOnce (muse/session.ts) bounded by the wake's time: opening the
+ * session (the upgrade and the Noise handshake) gets the handshake cap or
+ * what is left, whichever is less, and so does the chat request with its
+ * own cap. A step that runs past its bound closes the session, which ends
+ * whatever it was waiting on. The chat request goes only with stepMinMs
+ * left; stage.sent says whether it went.
+ */
+async function sendChatWithin(
+  options: MuseSessionOptions,
+  text: string,
+  chat: ChatOptions,
+  cfg: BridgeConfig,
+  left: () => number,
+  stage: SendStage,
+): Promise<ChatResult | null> {
+  const session = new MuseSession(options);
+  const stop = () => session.close();
+  try {
+    await within(session.open(), Math.min(cfg.handshakeTimeoutMs, left()), stop);
+    if (left() < cfg.stepMinMs) return null;
+    stage.sent = true;
+    return await within(session.sendChat(text, chat), Math.min(cfg.requestTimeoutMs, left()), stop);
+  } finally {
+    session.close();
+  }
+}
 
 export class MuseLink {
   ctx: DurableObjectState;
@@ -135,13 +181,30 @@ export class MuseLink {
   }
 
   fetch(request: Request): Promise<Response> {
-    const run = () => this.handle(request);
+    const arrived = Date.now();
+    const path = new URL(request.url).pathname;
+    // the router checked the header; a wake without one gets the default
+    const budget = path === '/deliver' ? (wakeBudget(request.headers.get(WAKE_BUDGET_HEADER), config()) ?? config().wakeBudgetMs) : null;
+    let started = false;
+    const run = () => {
+      started = true;
+      return this.handle(request, budget === null ? Infinity : arrived + budget);
+    };
     const p = this.chain.then(run, run);
     this.chain = p.catch(() => {}); // the caller gets p and its failure; the chain only keeps the order
-    return p;
+    if (budget === null) return p;
+    // A wake still waiting its turn when its time is up answers now; when
+    // its turn comes it finds no time left and tries nothing. One that has
+    // started bounds itself (deliver).
+    return new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (!started) resolve(outOfTime(config()));
+      }, budget);
+      p.then(resolve, reject).finally(() => clearTimeout(timer));
+    });
   }
 
-  async handle(request: Request): Promise<Response> {
+  async handle(request: Request, deadline: number): Promise<Response> {
     const path = new URL(request.url).pathname;
     const body: unknown = await request.json().catch(() => ({}));
     // Each body is one the Worker (index.ts) built or checked for this route.
@@ -152,7 +215,7 @@ export class MuseLink {
         case '/update':
           return this.update(body as UpdateBody);
         case '/deliver':
-          return await this.deliver(body as DeliverBody);
+          return await this.deliver(body as DeliverBody, deadline);
         case '/disconnect':
           return this.disconnect();
         case '/rooms':
@@ -252,10 +315,15 @@ export class MuseLink {
     return json({ museLinkId: link.id, connected: true, rooms: this.roomCount(), termsVersion: link.terms_version, tokenHeld: !!this.secret() });
   }
 
-  /** The Worker has checked the payload's shape (index.ts deliverError). */
-  async deliver(p: DeliverBody): Promise<Response> {
+  /**
+   * The Worker has checked the payload's shape (index.ts deliverError).
+   * deadline: when the wake's time is up (Date.now() time; deps.now is the
+   * bridge's calendar for the rate window and the dedupe, which tests stop).
+   */
+  async deliver(p: DeliverBody, deadline: number): Promise<Response> {
     const t0 = deps.now();
     const cfg = config();
+    const left = () => deadline - Date.now();
     const link = this.row();
     const sec = link && link.id === p.museLinkId ? this.secret() : null;
     const done = (resp: Response, fields: Record<string, unknown> = {}): Response => {
@@ -278,13 +346,17 @@ export class MuseLink {
       const retry = Math.max(1, Math.ceil((oldest! + cfg.rateWindowMs - t0) / 1000));
       return done(refuse(429, 'rate_limited', 'too many wakes for this link', { 'Retry-After': String(retry) }));
     }
+    // Its time went waiting behind other wakes for this link: nothing is
+    // tried, and nothing counts against the rate cap.
+    if (left() < cfg.stepMinMs) return done(outOfTime(cfg), { why: 'out_of_time' });
     this.sql.exec('INSERT INTO wakes (at) VALUES (?)', t0);
 
     // sec is only non-null when link is (see above).
     const sessionId = await sessionIdFor(link!.id, p.routing, p.room);
     const text = wakeText({ room: p.room, items, skipped: p.skipped ?? 0 });
 
-    const r = await this.send(link!, sec, text, sessionId, cfg);
+    const r = await this.send(link!, sec, text, sessionId, cfg, left);
+    if (r.late) return done(outOfTime(cfg), { why: 'out_of_time' });
     if (r.gone) {
       const now = deps.now();
       this.sql.exec('UPDATE secret SET refused_first = COALESCE(refused_first, ?), refused_n = refused_n + 1 WHERE k = 1', now);
@@ -310,8 +382,8 @@ export class MuseLink {
   }
 
   /** Fresh VM credentials for this link's VM: {vmAuthToken} | {gone} | {code}. */
-  async fetchVm(link: LinkRow, sec: SecretRow): Promise<FetchVmResult> {
-    const { vms, status } = await fetchVmsWithStatus(sec.access_token, { root: link.api_root, fetch: museFetch(this.env) });
+  async fetchVm(link: LinkRow, sec: SecretRow, timeoutMs: number): Promise<FetchVmResult> {
+    const { vms, status } = await fetchVmsWithStatus(sec.access_token, { root: link.api_root, fetch: museFetch(this.env), timeoutMs });
     if (status === 401 || status === 403) return { gone: true, why: 'token_refused' };
     if (status === null || status >= 400) return { code: 'muse_unreachable', museStatus: status };
     const vm = vms.find((v) => vmIdOf(v) === link.vm_id);
@@ -322,9 +394,13 @@ export class MuseLink {
 
   /**
    * One session, one text, close on the ack. A cached VM bearer refused at
-   * the upgrade (401/403) or by the request is re-fetched once.
+   * the upgrade (401/403) or by the request is re-fetched once. Each step
+   * is bounded by its cap or by left(), the wake's time, and none starts
+   * with less than cfg.stepMinMs left (LATE). A step that ends without an
+   * answer as the time runs out is LATE too, unless the chat request had
+   * gone: then the wake may have landed, and the answer is the step's own.
    */
-  async send(link: LinkRow, sec: SecretRow, text: string, sessionId: string | null, cfg: BridgeConfig): Promise<SendResult> {
+  async send(link: LinkRow, sec: SecretRow, text: string, sessionId: string | null, cfg: BridgeConfig, left: () => number): Promise<SendResult> {
     // The hosts were checked when a handover stored them, and are checked
     // again here, so that no stored row, whatever wrote it, sends the access
     // token or the VM bearer to a host off MUSE_API_HOSTS / MUSE_NOISE_HOSTS.
@@ -333,18 +409,21 @@ export class MuseLink {
     let vmAuthToken = sec.vm_auth_token;
     let refetched = false;
     for (;;) {
+      if (left() < cfg.stepMinMs) return LATE;
       if (!vmAuthToken) {
         if (refetched) return { ok: false, code: 'vm_refused' };
-        const f = await this.fetchVm(link, sec);
+        const f = await this.fetchVm(link, sec, Math.min(cfg.lookupTimeoutMs, left()));
         refetched = true;
         if (f.gone) return f;
+        if (f.code === 'muse_unreachable' && left() < cfg.stepMinMs) return LATE;
         if (f.code) return { ok: false, ...f };
         vmAuthToken = f.vmAuthToken;
+        if (left() < cfg.stepMinMs) return LATE;
       }
-      let result: ChatResult;
-
+      let result: ChatResult | null;
+      const stage: SendStage = { sent: false };
       try {
-        result = await sendChatOnce(
+        result = await sendChatWithin(
           {
             noiseHost: link.noise_host,
             vmId: link.vm_id,
@@ -356,6 +435,9 @@ export class MuseLink {
           },
           text,
           { sessionId },
+          cfg,
+          left,
+          stage,
         );
       } catch (err) {
         if (err instanceof UpgradeRejected) {
@@ -364,8 +446,10 @@ export class MuseLink {
           if (!refetched) continue;
           return { ok: false, code: 'vm_refused', museStatus: err.status };
         }
+        if (!stage.sent && left() < cfg.stepMinMs) return LATE;
         return { ok: false, code: 'muse_unreachable' };
       }
+      if (result === null) return LATE;
       if (result.ok) {
         try {
           acknowledgement(result);

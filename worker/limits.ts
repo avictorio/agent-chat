@@ -280,8 +280,9 @@ export const VIDEO_STREAM_TOO_BIG = "Videos streamed through the site can be up 
 // most MUSE_QUEUE_MAX items waiting; past that the oldest go, and the next
 // wake says how many. An item's JSON past MUSE_ITEM_MAX has its long
 // strings cut to MUSE_ITEM_CUT. One registration covers up to
-// MUSE_BATCH_MAX rooms. A call to the bridge gives up after MUSE_FETCH_MS
-// (the bridge's own wake can take a Noise handshake and a request to Muse).
+// MUSE_BATCH_MAX rooms. A call to the bridge other than a wake (a claim, a
+// room count, the gadget's handover) gives up after MUSE_FETCH_MS; a wake
+// has its own time (MUSE_WAKE_BUDGET_MS, below).
 export const MUSE_GRACE_MS = 500;
 export const MUSE_PER_WAKE = 10;
 export const MUSE_RETRY_FIRST_MS = 5000;
@@ -302,12 +303,33 @@ export const MUSE_FETCH_MS = 30000;
 // deadlines it carries, for long.
 export const MUSE_WAKES_AT_ONCE = 4;
 export const MUSE_ALARM_WAKES_MS = 20000;
+// One wake's time. The room passes MUSE_WAKE_BUDGET_MS with each wake and
+// waits MUSE_WAKE_WAIT_MARGIN_MS longer for its answer (the trip to the
+// link and back); the link counts the time from when it takes the wake,
+// so it always answers first: delivered, try later or link gone, and the
+// room never has to guess whether a wake it gave up on landed. Each step
+// gets its own cap or what is left, whichever is less: the Muse lookup
+// (fetch_vms) MUSE_LOOKUP_TIMEOUT_MS, opening the session (the upgrade and
+// the Noise handshake) MUSE_HANDSHAKE_TIMEOUT_MS, the chat request
+// MUSE_CHAT_TIMEOUT_MS (below, with the bridge's numbers). No step starts
+// with less than MUSE_WAKE_STEP_MIN_MS left: the wake stops before its
+// chat request goes to Muse and answers 503 out_of_time with a
+// Retry-After of MUSE_WAKE_LATE_RETRY_S. Without one limit for the whole
+// wake, a wake that outlasted the room's wait was counted as failed and
+// sent again although it had landed.
+export const MUSE_WAKE_BUDGET_MS = 25000;
+export const MUSE_WAKE_WAIT_MARGIN_MS = 2000;
+export const MUSE_LOOKUP_TIMEOUT_MS = 8000;
+export const MUSE_WAKE_STEP_MIN_MS = 2000;
+export const MUSE_WAKE_LATE_RETRY_S = 5;
 // The Muse bridge's own numbers (worker/bridge; they were the muse-bridge
 // Worker's [vars]). A link is woken at most MUSE_LINK_WAKES_MAX times per
 // MUSE_LINK_WAKES_WINDOW_S (past that 429 with Retry-After). A one-time
-// link code is good for MUSE_LINK_CODE_TTL_S. A wake gives up on the Noise
-// handshake after MUSE_HANDSHAKE_TIMEOUT_MS and on Muse's answer to the
-// chat request after MUSE_CHAT_TIMEOUT_MS. The last item a link delivered
+// link code is good for MUSE_LINK_CODE_TTL_S. A wake gives up on opening
+// its session to the VM (the upgrade and the Noise handshake) after
+// MUSE_HANDSHAKE_TIMEOUT_MS and on Muse's answer to the chat request after
+// MUSE_CHAT_TIMEOUT_MS, or sooner when its time runs out (MUSE_WAKE_BUDGET_MS,
+// above). The last item a link delivered
 // for a room is remembered for MUSE_WAKE_DEDUPE_S, so a retry of a wake
 // that landed is not sent twice. Muse refusing a link's access token
 // answers 503 with a Retry-After of MUSE_TOKEN_RETRY_AFTER_S and keeps the

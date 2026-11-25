@@ -1,6 +1,7 @@
 // Shared helpers: the bridge's numbers, JSON responses, logging, test seams.
 
 import type { SocketFactory } from './muse/session.js';
+import { MuseTimeoutError } from './muse/errors.js';
 import {
   MUSE_API_HOSTS,
   MUSE_CHAT_TIMEOUT_MS,
@@ -8,11 +9,15 @@ import {
   MUSE_LINK_CODE_TTL_S,
   MUSE_LINK_WAKES_MAX,
   MUSE_LINK_WAKES_WINDOW_S,
+  MUSE_LOOKUP_TIMEOUT_MS,
   MUSE_NOISE_HOSTS,
   MUSE_TOKEN_GRACE_S,
   MUSE_TOKEN_REFUSALS_MAX,
   MUSE_TOKEN_RETRY_AFTER_S,
+  MUSE_WAKE_BUDGET_MS,
   MUSE_WAKE_DEDUPE_S,
+  MUSE_WAKE_LATE_RETRY_S,
+  MUSE_WAKE_STEP_MIN_MS,
 } from '../limits.js';
 
 /** The bridge's numbers (worker/limits.ts), in the units its code counts in. */
@@ -26,6 +31,10 @@ export interface BridgeConfig {
   tokenRefusals: number;
   tokenGraceMs: number;
   tokenRetryS: number;
+  wakeBudgetMs: number;
+  lookupTimeoutMs: number;
+  stepMinMs: number;
+  lateRetryS: number;
 }
 
 export interface Deps {
@@ -62,8 +71,53 @@ export function config(): BridgeConfig {
     tokenRefusals: MUSE_TOKEN_REFUSALS_MAX,
     tokenGraceMs: MUSE_TOKEN_GRACE_S * 1000,
     tokenRetryS: MUSE_TOKEN_RETRY_AFTER_S,
+    wakeBudgetMs: MUSE_WAKE_BUDGET_MS,
+    lookupTimeoutMs: MUSE_LOOKUP_TIMEOUT_MS,
+    stepMinMs: MUSE_WAKE_STEP_MIN_MS,
+    lateRetryS: MUSE_WAKE_LATE_RETRY_S,
     ...deps.limits,
   };
+}
+
+/**
+ * The header a wake's time comes in, in milliseconds: the room sets it on
+ * its /deliver (worker/room/muse.ts museBridge), the router passes it on to
+ * the link (index.ts deliverRoute), and the link counts it from when it
+ * takes the wake (link.ts). A header, not a body field, so the link reads
+ * it as the wake arrives, before the wake waits its turn.
+ */
+export const WAKE_BUDGET_HEADER = 'X-Wake-Budget-Ms';
+
+/** A wake's time from that header: cfg.wakeBudgetMs without one, and never
+ *  more; null when the header is not a whole number of milliseconds. */
+export function wakeBudget(header: string | null, cfg: BridgeConfig): number | null {
+  if (header === null) return cfg.wakeBudgetMs;
+  if (!/^[0-9]{1,10}$/.test(header) || Number(header) < 1) return null;
+  return Math.min(Number(header), cfg.wakeBudgetMs);
+}
+
+/** A wake that stopped for lack of time before its chat request went to
+ *  Muse: nothing landed, so it can be tried again soon. */
+export function outOfTime(cfg: BridgeConfig): Response {
+  return refuse(503, 'out_of_time', 'the wake ran out of time before it reached Muse; retry later', { 'Retry-After': String(cfg.lateRetryS) });
+}
+
+/**
+ * p, or a MuseTimeoutError once ms have passed; onLate runs then, to stop
+ * what p waits on (a session's close() ends its pending steps). p runs on
+ * either way.
+ */
+export function within<T>(p: Promise<T>, ms: number, onLate: () => void): Promise<T> {
+  // a loser that fails after the race is over has no one left to tell
+  p.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      onLate();
+      reject(new MuseTimeoutError('out of time'));
+    }, Math.max(0, ms));
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 /** host matches an allowlist entry: exact, or "*.example.com" for its subdomains. */

@@ -10,7 +10,8 @@ import { bridgeFetch, deliverError, checkHandover } from '../../worker/bridge/in
 import { MuseLink } from '../../worker/bridge/link.ts';
 import { Directory, normaliseCode } from '../../worker/bridge/directory.ts';
 import { generateBridgeKey, seal } from '../../worker/bridge/seal.ts';
-import { deps, hostAllowed, museFetch } from '../../worker/bridge/util.ts';
+import { WAKE_BUDGET_HEADER, deps, hostAllowed, museFetch } from '../../worker/bridge/util.ts';
+import { MUSE_WAKE_BUDGET_MS, MUSE_WAKE_LATE_RETRY_S } from '../../worker/limits.ts';
 import { sessionIdFor } from '../../worker/bridge/wake.ts';
 import { ServiceFrame } from '../../worker/bridge/muse/envelope.ts';
 import { FakeVm } from './helpers/fake-vm.mjs';
@@ -45,6 +46,7 @@ function makeFleet() {
       const fr = await vm.nextFrame();
       f.requests.push(JSON.parse(text(fr.value.body)));
       if (plan.hang) return;
+      if (plan.delay) await new Promise((r) => setTimeout(r, plan.delay));
       const body = utf8(plan.body ?? '{"result":{"message_id":"m-1"}}');
       await vm.sendFrame(ServiceFrame.response(fr.streamId, { status: plan.status ?? 200, body, endBody: true }));
     })().catch((e) => f.errors.push(e));
@@ -75,8 +77,8 @@ beforeEach(() => {
   env.MUSE_DIRECTORY = new FakeNamespace(Directory, env);
 });
 
-async function call(path, body, { method = 'POST' } = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+async function call(path, body, { method = 'POST', headers: extra = {} } = {}) {
+  const headers = { 'Content-Type': 'application/json', ...extra };
   const r = await bridgeFetch(
     new Request('https://muse-bridge' + path, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : JSON.stringify(body) }),
     env,
@@ -461,6 +463,89 @@ test('deliver: 502 when Muse is unreachable, refuses, or does not ack', async ()
   assert.deepEqual(await call('/deliver', one(13)).then((r) => [r.status, r.body.code]), [502, 'no_ack']);
   // Nothing was marked delivered: the same item goes out again.
   assert.equal((await call('/deliver', one(10))).status, 200);
+});
+
+// A wake's time (X-Wake-Budget-Ms, at most MUSE_WAKE_BUDGET_MS) bounds
+// every step, so the link answers within it whatever Muse does; the room
+// waits a little longer and never has to guess. Before, a 15 s lookup, a
+// 5 s handshake, an 8 s request and one repeat after a 401 could outlast
+// the room's wait, and a wake that had landed was counted as failed.
+const budget = (ms) => ({ headers: { [WAKE_BUDGET_HEADER]: String(ms) } });
+test('deliver: a slow Muse lookup answers try later, within the wake\'s time', async () => {
+  const id = await linked();
+  // no VM bearer kept: the wake looks the VM up first
+  env.MUSE_LINK.instance(id).sql.exec('UPDATE secret SET vm_auth_token = NULL');
+  // Muse's API answers nothing until the call gives up
+  deps.fetch = (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
+  deps.limits = { ...deps.limits, stepMinMs: 50, lookupTimeoutMs: 150 };
+  // the lookup's own cap comes first: Muse did not answer (the room backs off)
+  let t0 = Date.now();
+  let r = await call('/deliver', wake(id));
+  assert.deepEqual([r.status, r.body.code], [502, 'muse_unreachable']);
+  assert.ok(Date.now() - t0 < 1000, Date.now() - t0);
+  // the wake's time comes first: out of time, with a Retry-After, inside it
+  deps.limits.lookupTimeoutMs = 8000;
+  t0 = Date.now();
+  r = await call('/deliver', wake(id), budget(400));
+  const took = Date.now() - t0;
+  assert.deepEqual([r.status, r.body.code], [503, 'out_of_time']);
+  assert.equal(r.headers.get('Retry-After'), String(MUSE_WAKE_LATE_RETRY_S));
+  assert.ok(took >= 350 && took < 650, 'answered as its time ran out: ' + took + ' ms');
+  assert.equal(fleet.conns.length, 0, 'no session was opened');
+});
+
+test('deliver: a chat request Muse never answers is given up as the wake\'s time runs out', async () => {
+  const id = await linked();
+  deps.limits = { ...deps.limits, stepMinMs: 50, requestTimeoutMs: 8000 };
+  fleet.plans.push({ hang: true });
+  const t0 = Date.now();
+  const r = await call('/deliver', wake(id), budget(500));
+  const took = Date.now() - t0;
+  // the request had gone, so it may have landed: Muse did not answer, not out of time
+  assert.deepEqual([r.status, r.body.code], [502, 'muse_unreachable']);
+  assert.ok(took < 750, 'within the wake\'s time, not the request\'s cap: ' + took + ' ms');
+  assert.equal(fleet.requests.length, 1);
+});
+
+test('deliver: a wake still waiting behind another for its link answers when its time is up, and tries nothing', async () => {
+  const id = await linked();
+  deps.limits = { ...deps.limits, stepMinMs: 50, requestTimeoutMs: 8000 };
+  fleet.plans.push({ hang: true });
+  const first = call('/deliver', wake(id), budget(700));
+  const t0 = Date.now();
+  const second = await call('/deliver', wake(id, { room: 'den', cursor: 9, items: [{ seq: 9, kind: 'message', at: 1, data: {} }] }), budget(200));
+  const took = Date.now() - t0;
+  assert.deepEqual([second.status, second.body.code], [503, 'out_of_time']);
+  assert.equal(second.headers.get('Retry-After'), String(MUSE_WAKE_LATE_RETRY_S));
+  assert.ok(took < 450, 'answered at its own time, not after the wake ahead of it: ' + took + ' ms');
+  assert.equal((await first).status, 502);
+  // its turn came after the first: it opened no session and used no wake of the rate cap
+  await env.MUSE_LINK.instance(id).chain;
+  assert.equal(fleet.conns.length, 1);
+  assert.equal(env.MUSE_LINK.instance(id).sql.exec('SELECT COUNT(*) AS n FROM wakes').one().n, 1);
+});
+
+test('deliver: a wake that lands late in its time is answered delivered, and its retry is not sent again', async () => {
+  const id = await linked();
+  deps.limits = { ...deps.limits, stepMinMs: 50, requestTimeoutMs: 8000 };
+  fleet.plans.push({ delay: 450 });
+  const r = await call('/deliver', wake(id), budget(600));
+  assert.deepEqual([r.status, r.body.delivered], [200, 2]);
+  const again = await call('/deliver', wake(id), budget(600));
+  assert.deepEqual([again.status, again.body.duplicate], [200, true]);
+  assert.equal(fleet.requests.length, 1);
+});
+
+test('deliver: the wake\'s time is MUSE_WAKE_BUDGET_MS at most; a malformed one is refused', async () => {
+  const id = await linked();
+  for (const bad of ['0', '-5', '1.5', 'soon', '99999999999']) {
+    const r = await call('/deliver', wake(id), budget(bad));
+    assert.deepEqual([r.status, r.body.code], [400, 'bad_request'], bad);
+  }
+  assert.equal(fleet.conns.length, 0);
+  // more than the most is cut to it: the wake still goes
+  const r = await call('/deliver', wake(id), budget(MUSE_WAKE_BUDGET_MS * 10));
+  assert.equal(r.status, 200, JSON.stringify(r.body));
 });
 
 test('deliver: per-link rate cap answers 429 with Retry-After', async () => {

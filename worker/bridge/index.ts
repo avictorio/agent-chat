@@ -11,10 +11,13 @@
 //   POST /claim       {code}                          -> {museLinkId}
 //   POST /update      {sealed, museLinkId?}           -> {museLinkId, updated}
 //   POST /deliver     {museLinkId, room, member, routing, cursor, items, skipped?} -> {ok, cursor, delivered}
+//                     (header X-Wake-Budget-Ms: the wake's time, at most MUSE_WAKE_BUDGET_MS)
 //   POST /disconnect  {museLinkId}                    -> {museLinkId, removed}
 //   POST /rooms       {museLinkId, room, hooked}      -> {museLinkId, rooms}
 //   POST /status      {museLinkId}                    -> {museLinkId, connected, rooms, termsVersion, tokenHeld}
 //
+// A wake always answers within its time (link.ts): delivered, try later
+// (429, 503 with Retry-After, 502) or link gone (410).
 // Refusals are {code, error}. Without MUSE_SEAL_KEY, /seal-key, /connect
 // and /update answer 503 not_configured and the rest work. Logs carry link
 // id prefixes, statuses, counts and timings: never a token, a code or
@@ -26,7 +29,7 @@ import { vmIdOf, DEFAULT_NOISE_HOST } from './muse/session.js';
 import { importBridgeKey, openJson, SealError, SEAL_ALG, SEAL_INFO, b64encode } from './seal.js';
 import type { BridgeKey } from './seal.js';
 import { ROOM_RE, validRouting } from './wake.js';
-import { LINK_ID_RE, apiRootAllowed, callDo, deps, json, log, museFetch, noiseHostAllowed, readJson, refuse, tag } from './util.js';
+import { LINK_ID_RE, WAKE_BUDGET_HEADER, apiRootAllowed, callDo, config, deps, json, log, museFetch, noiseHostAllowed, readJson, refuse, tag, wakeBudget } from './util.js';
 import type { VmCredentials } from './link.js';
 
 const SMALL_MAX = 32 * 1024;
@@ -221,9 +224,11 @@ export function deliverError(p: Record<string, unknown>): string | null {
   return null;
 }
 
-async function deliverRoute(env: BridgeEnv, body: Record<string, unknown>): Promise<Response> {
+async function deliverRoute(env: BridgeEnv, body: Record<string, unknown>, headers: Headers): Promise<Response> {
   const err = deliverError(body);
   if (err) return refuse(400, 'bad_request', err);
+  const budget = wakeBudget(headers.get(WAKE_BUDGET_HEADER), config());
+  if (budget === null) return refuse(400, 'bad_request', `"${WAKE_BUDGET_HEADER}" must be a whole number of milliseconds`);
   // Maintenance switch: with the MUSE_DELIVER_PAUSED secret set to "1", every
   // wake is refused as busy and the room keeps it queued, retrying after
   // Retry-After. Deleting the secret resumes delivery (no code deploy).
@@ -231,11 +236,12 @@ async function deliverRoute(env: BridgeEnv, body: Record<string, unknown>): Prom
     log('deliver.paused', { link: tag(body.museLinkId) });
     return refuse(503, 'paused', 'Delivery is paused; retry later', { 'Retry-After': '30' });
   }
-  // The link object answers as is: 200, 410 link_gone, 429 + Retry-After, 502.
+  // The link object answers as is: 200, 410 link_gone, 429 + Retry-After,
+  // 503 token_refused or out_of_time + Retry-After, 502.
   // deliverError() checked museLinkId: a string matching LINK_ID_RE.
   return linkStub(env, body.museLinkId as string).fetch('https://do/deliver', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [WAKE_BUDGET_HEADER]: String(budget) },
     body: JSON.stringify(body),
   });
 }
@@ -259,7 +265,7 @@ export async function bridgeFetch(request: Request, env: BridgeEnv): Promise<Res
     '/connect': (b) => connectRoute(env, b),
     '/claim': (b) => claimRoute(env, b),
     '/update': (b) => updateRoute(env, b),
-    '/deliver': (b) => deliverRoute(env, b),
+    '/deliver': (b) => deliverRoute(env, b, request.headers),
     '/disconnect': (b) => disconnectRoute(env, b),
     '/rooms': (b) => roomsRoute(env, b),
     '/status': (b) => statusRoute(env, b),

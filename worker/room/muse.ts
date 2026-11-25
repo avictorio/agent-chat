@@ -40,10 +40,11 @@ import { nameFold } from "../lib/text.js";
 import { warn } from "../lib/log.js";
 import { webhookCall } from "../lib/webhook.js";
 import { bridgeFetch } from "../bridge/index.js";
+import { WAKE_BUDGET_HEADER } from "../bridge/util.js";
 import {
   WEBHOOK_ERROR_MAX, WEBHOOK_MIN_GAP_MS,
   MUSE_ALARM_WAKES_MS, MUSE_FETCH_MS, MUSE_GRACE_MS, MUSE_ITEM_CUT, MUSE_ITEM_MAX, MUSE_PER_WAKE, MUSE_QUEUE_MAX,
-  MUSE_RETRY_AFTER_MAX_MS, MUSE_RETRY_FIRST_MS, MUSE_RETRY_MAX_MS, MUSE_WAKES_AT_ONCE,
+  MUSE_RETRY_AFTER_MAX_MS, MUSE_RETRY_FIRST_MS, MUSE_RETRY_MAX_MS, MUSE_WAKE_BUDGET_MS, MUSE_WAKE_WAIT_MARGIN_MS, MUSE_WAKES_AT_ONCE,
 } from "../limits.js";
 import type { Refusal, Room } from "./Room.js";
 
@@ -72,19 +73,26 @@ export type MuseHookView = { kind: HookKind, url?: string, routing?: string, ena
   last_status: number | null, last_error: string | null, created: number, updated: number, off_reason: string | null };
 
 /** A call to the Muse bridge: a path ("/claim"), and a body to POST as
- *  JSON (none: a GET), answered as the bridge's router answers it. */
-export type MuseBridge = (path: string, body?: unknown) => Promise<Response>;
+ *  JSON (none: a GET), answered as the bridge's router answers it. A wake
+ *  (/deliver) also passes its time, budgetMs. */
+export type MuseBridge = (path: string, body?: unknown, budgetMs?: number) => Promise<Response>;
 
-/** The bridge (worker/bridge/index.ts bridgeFetch), in this Worker. A call
- *  that has not answered after MUSE_FETCH_MS rejects with a TimeoutError:
- *  the caller tries again later, and a wake that lands after all is the
- *  bridge's dedupe to catch, so it is not sent twice. */
+/** The bridge (worker/bridge/index.ts bridgeFetch), in this Worker. A wake
+ *  carries its time (WAKE_BUDGET_HEADER), within which the bridge always
+ *  answers; the room waits MUSE_WAKE_WAIT_MARGIN_MS longer than that, for
+ *  the trip to the link and back. Any other call waits MUSE_FETCH_MS. A
+ *  call that has not answered by then rejects with a TimeoutError: the
+ *  caller tries again later, and a wake whose answer was lost after it
+ *  landed is the bridge's dedupe to catch, so it is not sent twice. */
 export function museBridge(env: Env): MuseBridge {
-  return (path, body) => {
+  return (path, body, budgetMs) => {
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (budgetMs !== undefined) headers[WAKE_BUDGET_HEADER] = String(budgetMs);
     const request = new Request("https://muse-bridge" + path, body === undefined
-      ? { method: "GET" }
-      : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    return withTimeout(bridgeFetch(request, env), MUSE_FETCH_MS);
+      ? { method: "GET", headers }
+      : { method: "POST", headers, body: JSON.stringify(body) });
+    return withTimeout(bridgeFetch(request, env), budgetMs === undefined ? MUSE_FETCH_MS : budgetMs + MUSE_WAKE_WAIT_MARGIN_MS);
   };
 }
 
@@ -375,13 +383,16 @@ export const MuseMethods = {
    * after another with nothing but a round cap, so one slow Muse held every
    * other member's wake, and the room's alarm, for as long as it took. One
    * run per room: a second call while one runs leaves the wakes to it.
-   * @param limits a shorter allowance, for tests
+   * Each wake gets its own time, MUSE_WAKE_BUDGET_MS, whenever in the
+   * allowance it starts.
+   * @param limits a shorter allowance and wake time, for tests
    */
-  async museDeliver(limits: { allowanceMs?: number } = {}) {
+  async museDeliver(limits: { allowanceMs?: number, budgetMs?: number } = {}) {
     if (this.museBusy) return;
     this.museBusy = true;
     const gen = this.gen;
     const until = Date.now() + (limits.allowanceMs ?? MUSE_ALARM_WAKES_MS);
+    const budget = limits.budgetMs ?? MUSE_WAKE_BUDGET_MS;
     /** members with a wake out, or whose wake failed this run */
     const taken = new Set<string>();
     const next = (): MhRow | null => {
@@ -393,7 +404,7 @@ export const MuseMethods = {
       for (let h = next(); h; h = next()) {
         taken.add(h.member);
         try {
-          await this.museWake(h, gen);
+          await this.museWake(h, gen, budget);
           taken.delete(h.member);
         } catch (e) {
           // A wake that threw left its hook due: picked again at once, it
@@ -424,8 +435,9 @@ export const MuseMethods = {
     }
   },
 
-  /** One wake for one hook: its oldest waiting items, to the bridge or the URL. */
-  async museWake(h: MhRow, gen: number) {
+  /** One wake for one hook: its oldest waiting items, to the bridge (with
+   *  budgetMs, the wake's time) or the URL. */
+  async museWake(h: MhRow, gen: number, budgetMs: number = MUSE_WAKE_BUDGET_MS) {
     const items = this.sql.exec<MqRow>("SELECT n, member, kind, at, data FROM mq WHERE member = ? AND n > ? ORDER BY n LIMIT ?", h.member, h.cursor, MUSE_PER_WAKE).toArray();
     if (!items.length) { this.sql.exec("UPDATE mh SET due_at = NULL WHERE member = ?", h.member); return; }
     if (h.kind === "webhook") return this.webhookWake(h, items, gen);
@@ -444,14 +456,14 @@ export const MuseMethods = {
     let gone = false;
     let retryAfter = 0;
     try {
-      const r = await bridge("/deliver", payload);
+      const r = await bridge("/deliver", payload, budgetMs);
       status = r.status;
       const text = await r.text();
       if (status === 410) gone = true;
       else if (status >= 400 && status < 500) {
         try { const j = JSON.parse(text) as { code?: unknown, error?: unknown }; gone = j.code === "link_gone" || /link gone/i.test(String(j.error || "")); } catch { /* not JSON: an ordinary refusal */ }
       }
-      // 429 (rate cap) and 503 (the bridge waiting out a refused token) say how long to wait
+      // 429 (rate cap) and 503 (a refused token, a pause, a wake out of time) say how long to wait
       if (status === 429 || status === 503) retryAfter = Math.min(MUSE_RETRY_AFTER_MAX_MS, (parseInt(r.headers.get("Retry-After") || "", 10) || 0) * 1000);
     } catch (e) {
       // a timeout or an unreachable bridge: tried again below
