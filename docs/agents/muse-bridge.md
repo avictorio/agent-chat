@@ -259,8 +259,8 @@ there changes the terms, which may need a new `MUSE_TERMS_VERSION` and a
 firmware release.
 
 Secrets (`AGENTS.md` section 2): `MUSE_SEAL_KEY`, base64 of the raw
-32-byte X25519 private key (the muse-bridge Worker's `BRIDGE_SEAL_KEY`,
-carried over unchanged), and `MUSE_DELIVER_PAUSED` (optional).
+32-byte X25519 private key (made inside Cloudflare at the cut-over; no
+copy exists outside it), and `MUSE_DELIVER_PAUSED` (optional).
 
 ## The Muse send path (`worker/bridge/muse/`)
 
@@ -375,8 +375,9 @@ API suite runs the real bridge in `wrangler dev` against
 ## Cut-over from the separate Worker
 
 For the lead and the owner: the first deploy of this code to the live
-account, once. An agent never deletes the `muse-bridge` Worker and never
-sets or deletes a secret without the owner.
+account, once. An agent never deletes the `muse-bridge` Worker, and sets
+a secret only on the owner's word (here: the new seal key and the two
+pause switches below).
 
 1. **Note what to compare after.** `GET /api/muse/seal-key` on the live
    site (it still relays the old Worker) answers `{alg, info,
@@ -384,28 +385,29 @@ sets or deletes a secret without the owner.
    reading only, note the `muse-bridge` script's Durable Object
    namespaces for `MuseLink` and `Directory`: their ids and how many
    objects each holds.
-2. **Set `MUSE_SEAL_KEY` on `victorio-chat`** (a dashboard Secret) to the
-   exact value of the muse-bridge Worker's `BRIDGE_SEAL_KEY`. Cloudflare
-   never shows a secret again, so this is the owner's copy from where the
-   key was made. Without it the gadget's handover answers 503
-   `not_configured` after the deploy, and `npm run check:config` fails on
-   its absence. If the value is lost, stop and ask the owner, with what
-   a new key costs (Ground rules): links and stored tokens are kept and
-   wakes go on; each gadget's next token update fails once
-   with `seal_invalid`, fetches the key again and goes through on its
-   retry; a connect running at that moment fails once. The public key in
-   step 1 then differs, as it should. A new key is the owner's to make
-   and set, never an agent's (`npm run bridge:keygen` is for local runs).
+2. **Set `MUSE_SEAL_KEY` on `victorio-chat`: a new key.** Carrying the
+   muse-bridge Worker's `BRIDGE_SEAL_KEY` over would need a copy of it,
+   Cloudflare never shows a secret again, and the owner held none. So
+   the key is made inside one Cloudflare API call (32 random bytes,
+   base64) that stores it as the secret without returning it: no copy
+   exists outside Cloudflare. What a new key costs (Ground rules): links
+   and stored tokens are kept and wakes go on; each gadget's next token
+   update fails once with `seal_invalid`, fetches the key again and goes
+   through on its retry; a connect running at that moment fails once.
+   The public key in step 1 differs afterwards, as it should. Without
+   the secret the gadget's handover answers 503 `not_configured` after
+   the deploy, and `npm run check:config` fails on its absence.
 3. **Pause the old Worker's wakes:** set the secret `DELIVER_PAUSED` to
    `1` on `muse-bridge`, before the deploy. Room objects still running
    the old code after the deploy (step 5) then get 503 `paused` with
    Retry-After 30 from it, before it touches its objects, and keep their
    wakes queued. Setting a secret on `muse-bridge` after its classes have
    moved may fail, so do it first.
-   Optional, the owner's call: also set `MUSE_DELIVER_PAUSED` to `1` on
-   `victorio-chat` (the code before the move does not read it), so the
-   new code's wakes wait too, queued, until step 6 has shown the moved
-   objects with their data. Without it, if the classes ever came up
+   Also set `MUSE_DELIVER_PAUSED` to `1` on `victorio-chat` (the code
+   before the move does not read it), so the new code's wakes wait too,
+   queued, until step 6 has shown the moved objects with their data.
+   Both switches pause only on the exact value `1`: setting one to `0`
+   lifts it as deleting it does. Without it, if the classes ever came up
    without their rows, the first wakes would answer 410 `link_gone`, and
    each room would turn that hook off and drop its queue before anyone
    looked.
@@ -423,10 +425,10 @@ sets or deletes a secret without the owner.
    section 7, Before pushing, step 5). The live code still sends every
    wake to the paused `muse-bridge`, which answers each 503 `paused`; the
    rooms retry every 30 s while each hook's queue fills to
-   `MUSE_QUEUE_MAX` and drops its oldest items. So, at once: delete
-   `DELIVER_PAUSED` on `muse-bridge` (wakes resume over the old binding;
-   delete `MUSE_DELIVER_PAUSED` on `victorio-chat` too if step 3 set it),
-   then revert the merge on `main`. The revert is safe because `v2` never
+   `MUSE_QUEUE_MAX` and drops its oldest items. So, at once: lift
+   `DELIVER_PAUSED` on `muse-bridge` (wakes resume over the old binding)
+   and `MUSE_DELIVER_PAUSED` on `victorio-chat`, then revert the merge on
+   `main`. The revert is safe because `v2` never
    applied, and needed because every later push would carry `v2` again:
    it would fail the same way, or go out outside this runbook. Find the
    cause before starting again from step 3.
@@ -450,13 +452,12 @@ sets or deletes a secret without the owner.
      status, or that sends a token update, reads the moved objects
      whatever is paused, and forgets its link on 410 `link_gone` or 404
      `no_link`, so this check comes first.
-   - `GET /api/muse/seal-key` answers the same `alg`, `info` and
-     `publicKey` as in step 1.
+   - `GET /api/muse/seal-key` answers the same `alg` and `info` as in
+     step 1, and the new key's `publicKey`.
    - The gadget's Settings, Agent Chat page shows "Connected, N rooms"
      with the room count it had (`POST /api/muse/status` read a moved
      `MuseLink`).
-   - Only then delete `MUSE_DELIVER_PAUSED` on `victorio-chat`, if step 3
-     set it.
+   - Only then lift `MUSE_DELIVER_PAUSED` on `victorio-chat`.
    - After 300 s, post in the test room `bridge-test` and read
      `GET /api/rooms/bridge-test/muse-hook` as the Muse's member:
      `last_status` 200, `pending` 0, `last_delivered_at` a few seconds
@@ -483,5 +484,5 @@ sets or deletes a secret without the owner.
 `MUSE_DELIVER_PAUSED` to `1`. Every wake answers 503 `paused` with
 Retry-After and rooms keep their wakes queued (up to `MUSE_QUEUE_MAX` per
 hook; older items drop and the next wake says how many). Delete the
-secret to resume. No deploy either way; the gadget's handover and
-registration keep working.
+secret, or set it to anything else, to resume. No deploy either way; the
+gadget's handover and registration keep working.

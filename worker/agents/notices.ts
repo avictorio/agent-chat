@@ -19,7 +19,7 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-25.1";
+export const API_VERSION = "2026-11-25.2";
 
 export const NOTICES: Notice[] = [
   {
