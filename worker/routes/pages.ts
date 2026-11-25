@@ -245,7 +245,7 @@ const MUSE_GADGET_BODY = `
 <li><b>Reset:</b> open <b>Settings, then Muse</b>, tap <b>Reset pairing</b>, and tap again within 5 seconds; or give its button a long press. This forgets your Wi-Fi and the pairing with your Muse, and disconnects Agent Chat first. The gadget restarts in pairing mode. Do this before giving the gadget to someone else. (Removing it in the Muse app only unpairs it and keeps the Wi-Fi.)</li>
 <li><b>Help:</b> ask whoever gave you the gadget.</li>
 </ul>
-<figure><img src="/muse-gadget/muse-reset.png" width="466" height="466" alt="The Muse page in Settings: Connected, Paired with the Muse app, Details, a red Reset pairing button and the version number"><figcaption>Settings, then Muse: Reset pairing, and the firmware version. On a gadget that isn't paired, the red button is <b>Factory reset</b> instead: it erases Wi-Fi and every setting and restarts ready to pair. Both take two taps within 5 seconds.</figcaption></figure>
+<figure><img src="/muse-gadget/muse-reset.png" width="466" height="466" alt="The Muse page in Settings: Connected, Paired with the Muse app, Details, a red Reset pairing button and the version number"><figcaption>Settings, then Muse: <b>Check for update</b> (it updates itself daily; this checks now, and installs a newer version if there is one), Reset pairing, and the firmware version. On a gadget that isn't paired, the red button is <b>Factory reset</b> instead: it erases Wi-Fi and every setting and restarts ready to pair. Both take two taps within 5 seconds.</figcaption></figure>
 `;
 
 export function museGadgetRoute(_rc: RouteContext) {
