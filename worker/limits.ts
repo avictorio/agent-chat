@@ -293,6 +293,15 @@ export const MUSE_ITEM_MAX = 30000;
 export const MUSE_ITEM_CUT = 2000;
 export const MUSE_BATCH_MAX = 50;
 export const MUSE_FETCH_MS = 30000;
+// The room's alarm sends the wakes that are due after it has advanced the
+// match clocks (room/muse.ts museDeliver): wakes for different members go
+// out together, at most MUSE_WAKES_AT_ONCE at a time, one at a time per
+// member, and new ones start only within MUSE_ALARM_WAKES_MS of the run's
+// start. What is still due then stays queued for the alarm armed right
+// after, so a slow Muse cannot hold the room's alarm, and the match
+// deadlines it carries, for long.
+export const MUSE_WAKES_AT_ONCE = 4;
+export const MUSE_ALARM_WAKES_MS = 20000;
 // The Muse bridge's own numbers (worker/bridge; they were the muse-bridge
 // Worker's [vars]). A link is woken at most MUSE_LINK_WAKES_MAX times per
 // MUSE_LINK_WAKES_WINDOW_S (past that 429 with Retry-After). A one-time

@@ -42,8 +42,8 @@ import { webhookCall } from "../lib/webhook.js";
 import { bridgeFetch } from "../bridge/index.js";
 import {
   WEBHOOK_ERROR_MAX, WEBHOOK_MIN_GAP_MS,
-  MUSE_FETCH_MS, MUSE_GRACE_MS, MUSE_ITEM_CUT, MUSE_ITEM_MAX, MUSE_PER_WAKE, MUSE_QUEUE_MAX,
-  MUSE_RETRY_AFTER_MAX_MS, MUSE_RETRY_FIRST_MS, MUSE_RETRY_MAX_MS,
+  MUSE_ALARM_WAKES_MS, MUSE_FETCH_MS, MUSE_GRACE_MS, MUSE_ITEM_CUT, MUSE_ITEM_MAX, MUSE_PER_WAKE, MUSE_QUEUE_MAX,
+  MUSE_RETRY_AFTER_MAX_MS, MUSE_RETRY_FIRST_MS, MUSE_RETRY_MAX_MS, MUSE_WAKES_AT_ONCE,
 } from "../limits.js";
 import type { Refusal, Room } from "./Room.js";
 
@@ -364,25 +364,63 @@ export const MuseMethods = {
     }
   },
 
-  /** Sends every wake that is due (the alarm calls it). One at a time per
-   *  room: a second call while one runs leaves it to that one. */
-  async museDeliver() {
+  /**
+   * Sends the wakes that are due (the alarm calls it, after the match
+   * clocks). Wakes for different members go out together, at most
+   * MUSE_WAKES_AT_ONCE at a time; a member's wakes go one at a time (a busy
+   * hook's next wake starts once its last has settled). New wakes start only
+   * within the run's allowance, MUSE_ALARM_WAKES_MS: what is still due when
+   * it is used up stays queued and due, and the alarm the caller re-arms
+   * (armGameAlarm, museDueAt) comes right after for it. Wakes used to go one
+   * after another with nothing but a round cap, so one slow Muse held every
+   * other member's wake, and the room's alarm, for as long as it took. One
+   * run per room: a second call while one runs leaves the wakes to it.
+   * @param limits a shorter allowance, for tests
+   */
+  async museDeliver(limits: { allowanceMs?: number } = {}) {
     if (this.museBusy) return;
     this.museBusy = true;
     const gen = this.gen;
-    try {
-      // a busy hook may need several wakes; the round cap keeps one alarm bounded
-      for (let round = 0; round < 20; round++) {
-        if (!this.alive(gen)) return;
-        const due = this.sql.exec<MhRow>("SELECT * FROM mh WHERE enabled = 1 AND muted = 0 AND due_at IS NOT NULL AND due_at <= ? ORDER BY due_at", Date.now()).toArray();
-        if (!due.length) return;
-        for (const h of due) {
-          if (!this.alive(gen)) return;
+    const until = Date.now() + (limits.allowanceMs ?? MUSE_ALARM_WAKES_MS);
+    /** members with a wake out, or whose wake failed this run */
+    const taken = new Set<string>();
+    const next = (): MhRow | null => {
+      if (!this.alive(gen) || Date.now() >= until) return null;
+      const due = this.sql.exec<MhRow>("SELECT * FROM mh WHERE enabled = 1 AND muted = 0 AND due_at IS NOT NULL AND due_at <= ? ORDER BY due_at", Date.now()).toArray();
+      return due.find((h) => !taken.has(h.member)) || null;
+    };
+    const lane = async () => {
+      for (let h = next(); h; h = next()) {
+        taken.add(h.member);
+        try {
           await this.museWake(h, gen);
+          taken.delete(h.member);
+        } catch (e) {
+          // A wake that threw left its hook due: picked again at once, it
+          // would spin until the allowance ran out, and every run after.
+          // It waits out a backoff instead, and sits out this run.
+          warn("muse.wake", e, { room: h.room });
+          this.museDefer(h.member, gen);
         }
       }
+    };
+    try {
+      await Promise.all(Array.from({ length: MUSE_WAKES_AT_ONCE }, lane));
     } finally {
       this.museBusy = false;
+    }
+  },
+
+  /** A hook whose wake failed outside museSettle (a throw): tried again
+   *  after the backoff, as a refused wake is. */
+  museDefer(member: string, gen: number) {
+    try {
+      if (!this.alive(gen)) return;
+      const h = this.museRow(member);
+      if (!h) return;
+      this.sql.exec("UPDATE mh SET fails = ?, due_at = ? WHERE member = ?", h.fails + 1, Date.now() + backoff(h.fails + 1), member);
+    } catch (e) {
+      warn("muse.defer", e, { room: this.roomName });
     }
   },
 
