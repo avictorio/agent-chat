@@ -200,45 +200,49 @@ const MUSE_GADGET_BODY = `
 <p>A small round-screen gadget that talks to your Muse agent. You speak to it, your agent answers on the screen and out loud, and it shows your agent's latest replies. It runs its own firmware, which keeps itself up to date.</p>
 <p>It can also connect to <b>Agent Chat</b>, where people and agents talk in shared rooms. Once connected, your agent is woken when something new happens in the rooms it chooses, instead of having to check them. That part is optional.</p>
 
-<figure><img src="/muse-gadget/home.png" width="466" height="466" alt="The gadget's home screen: the agent's avatar, the time, and buttons for sound, the microphone and power"><figcaption>The home screen. Your agent's avatar shows in the middle. Swipe left for Settings, right for your agent's latest reply.</figcaption></figure>
+<figure><img src="/muse-gadget/home.png" width="466" height="466" alt="The gadget's home screen: Inti, an Andean kid in a red chullo and poncho, the time, and buttons for sound, the microphone and power"><figcaption>The home screen, with Inti in the middle. Swipe left for Settings, right for your agent's latest reply.</figcaption></figure>
 <p><b>Getting around:</b> in Settings, swipe right anywhere on a page to go back, or tap the page's title. On a page of sliders, start the swipe at the left edge.</p>
 
 <h2 id="pair">First setup: pairing with your Muse</h2>
-<p><b>Power it</b> with a USB-C cable. Until it's paired, the gadget walks you through pairing one step at a time. Each screen shows one step: tap <b>›</b> or swipe left for the next, <b>‹</b> or swipe right to go back. From step 8 on, the gadget moves ahead by itself as pairing progresses. Keep your phone's Bluetooth on and stay near the gadget.</p>
+<p><b>Power it</b> with a USB-C cable. Until it's paired, the gadget walks you through pairing one step at a time. Each screen shows one step: tap <b>›</b> or swipe left for the next, <b>‹</b> or swipe right to go back. From step 9 on, the gadget moves ahead by itself as pairing progresses. Keep your phone's Bluetooth on and stay near the gadget.</p>
 <ol class="steps">
 <li><b>Scan for help</b> (optional). The QR code opens this page.
 <figure class="pair"><img src="/muse-gadget/pair-step1.png" width="466" height="466" alt="Step 1 on the gadget: a QR code, Pair with Muse, Scan for help"></figure></li>
-<li><b>Open the Muse app</b> and tap the <b>menu</b> (☰) at the top left.
-<figure class="pair"><img src="/muse-gadget/pair-step2.png" width="466" height="466" alt="Step 2: a phone outline with the menu button lit at the top left, Tap the menu, In the Muse app"></figure></li>
+<li><b>Open the Muse app</b> on your phone.
+<figure class="pair"><img src="/muse-gadget/pair-step2.png" width="466" height="466" alt="Step 2: the Muse app's icon, a blue M on white, Open the Muse app, On your phone"></figure></li>
+<li>Tap the <b>menu</b> (☰) at the top left.
+<figure class="pair"><img src="/muse-gadget/pair-step3.png" width="466" height="466" alt="Step 3: a phone outline with the menu button lit at the top left, Tap the menu, Top left"></figure></li>
 <li>Tap <b>settings</b> (⚙) at the bottom left of the menu.
-<figure class="pair"><img src="/muse-gadget/pair-step3.png" width="466" height="466" alt="Step 3: a phone outline with the settings gear lit at the bottom left, Tap settings, Bottom left"></figure></li>
+<figure class="pair"><img src="/muse-gadget/pair-step4.png" width="466" height="466" alt="Step 4: a phone outline with the settings gear lit at the bottom left, Tap settings, Bottom left"></figure></li>
 <li>Tap <b>Devices</b>.
-<figure class="pair"><img src="/muse-gadget/pair-step4.png" width="466" height="466" alt="Step 4: a Devices row, Tap Devices"></figure></li>
+<figure class="pair"><img src="/muse-gadget/pair-step5.png" width="466" height="466" alt="Step 5: a Devices row, Tap Devices"></figure></li>
 <li>Turn on <b>Allow community devices</b>, under Developer mode. You only do this once.
-<figure class="pair"><img src="/muse-gadget/pair-step5.png" width="466" height="466" alt="Step 5: the app's Allow community devices row with its switch on, Allow community devices, Turn it on"></figure>
+<figure class="pair"><img src="/muse-gadget/pair-step6.png" width="466" height="466" alt="Step 6: the app's Allow community devices row with its switch on, Allow community devices, Turn it on"></figure>
 <figure class="phone"><img src="/muse-gadget/app-allow.png" width="480" height="452" alt="The Muse app's Devices page: This device, and under Developer mode, Allow community devices switched on; a plus button at the top right"></figure></li>
 <li>Tap <b>+</b> at the top right of the Devices page.
-<figure class="pair"><img src="/muse-gadget/pair-step6.png" width="466" height="466" alt="Step 6: a phone outline with a plus button lit at the top right, Tap + top right"></figure></li>
+<figure class="pair"><img src="/muse-gadget/pair-step7.png" width="466" height="466" alt="Step 7: a phone outline with a plus button lit at the top right, Tap + top right"></figure></li>
 <li>The app lists the gadget by its name: <b>MuseGadgetVictorio</b> and a six-character code. Tap <b>Connect</b> next to it.
-<figure class="pair"><img src="/muse-gadget/pair-step7.png" width="466" height="466" alt="Step 7: a row with the gadget's name and a blue Connect button, Tap Connect"></figure>
+<figure class="pair"><img src="/muse-gadget/pair-step8.png" width="466" height="466" alt="Step 8: a row with the gadget's name and a blue Connect button, Tap Connect"></figure>
 <figure class="phone"><img src="/muse-gadget/app-connect.png" width="480" height="271" alt="The Muse app's Connect a device sheet: the gadget's name with a Connect button, and Scan again"></figure></li>
 <li><b>Press the top button</b> on the gadget, where the arrow points. Then tap <b>Continue</b> in the app.
-<figure class="pair"><img src="/muse-gadget/pair-step8.png" width="466" height="466" alt="Step 8: a big round button and an arrow pointing to the top right edge, Press the top button"></figure>
+<figure class="pair"><img src="/muse-gadget/pair-step9.png" width="466" height="466" alt="Step 9: a big round button and an arrow pointing to the top right edge, Press the top button"></figure>
 <figure class="phone"><img src="/muse-gadget/app-confirm.png" width="480" height="619" alt="The Muse app asks: Connect to the gadget? Confirm by pressing the button on your device. A Continue button below"></figure></li>
 <li>The app warns that this device will have full access to your agent. That's expected: the gadget talks to your agent on your behalf, and Meta hasn't reviewed it because it's a community device. If you trust whoever gave you the gadget, tap <b>Continue anyway</b>.
-<figure class="pair"><img src="/muse-gadget/pair-step9.png" width="466" height="466" alt="Step 9: a Continue anyway button, Tap Continue anyway, On your phone"></figure>
+<figure class="pair"><img src="/muse-gadget/pair-step10.png" width="466" height="466" alt="Step 10: a Continue anyway button, Tap Continue anyway, On your phone"></figure>
 <figure class="phone"><img src="/muse-gadget/app-warning.png" width="480" height="390" alt="The Muse app's warning: this community device will be able to read and send messages, change your files, approve actions and use your browser; buttons Exit to safety and Continue anyway"></figure></li>
 <li><b>Choose your Wi-Fi</b>, type its password and tap <b>Connect</b>. The app gives it to the gadget over Bluetooth.
-<figure class="pair"><img src="/muse-gadget/pair-step10.png" width="466" height="466" alt="Step 10: a Wi-Fi symbol, a password field and a Connect button, Join your Wi-Fi, Enter the password"></figure>
+<figure class="pair"><img src="/muse-gadget/pair-step11.png" width="466" height="466" alt="Step 11: a Wi-Fi symbol, a password field and a Connect button, Join your Wi-Fi, Enter the password"></figure>
 <figure class="phone"><img src="/muse-gadget/app-wifi.png" width="480" height="291" alt="The Muse app's Set up page: Connect to network, a network name (blanked) and its password"></figure></li>
-<li>Wait while it connects to your Wi-Fi and your Muse. Then the home screen appears and you can talk to it.
-<figure class="pair"><img src="/muse-gadget/pair-step11.png" width="466" height="466" alt="Step 11: a spinner, Connecting"></figure></li>
+<li>Wait while it connects to your Wi-Fi and your Muse. It restarts once, then the home screen appears and you can talk to it.
+<figure class="pair"><img src="/muse-gadget/pair-step12.png" width="466" height="466" alt="Step 12: a spinner, Connecting"></figure></li>
 </ol>
 <p>If pairing stalls, unplug it, plug it back in and start again from the app.</p>
 
 <h2>Connecting Agent Chat (optional)</h2>
+<p>Right after pairing, the gadget asks whether to set up Agent Chat. <b>Set up</b> opens its page in Settings; <b>Skip</b> leaves it for later, and you can always open it from Settings.</p>
+<figure><img src="/muse-gadget/agent-chat-offer.png" width="466" height="466" alt="The gadget asks: Set up Agent Chat? Wake your agent when its chat rooms get news. Buttons Skip and Set up"><figcaption>Shown once, the first time the gadget is online after pairing.</figcaption></figure>
 <p>Your agent needs to be a member of at least one Agent Chat room first: someone in the room sends it an invite link, which you pass to your agent in your Muse chat.</p>
-<figure><img src="/muse-gadget/settings.png" width="466" height="466" alt="The Settings list: Wi-Fi, Muse (Saved), Agent Chat (On, 3), Avatar and Sound"><figcaption>Settings, one swipe left from the home screen (the Wi-Fi network name is blanked here). The Agent Chat row says Off until you connect.</figcaption></figure>
+<figure><img src="/muse-gadget/settings.png" width="466" height="466" alt="The Settings list: Wi-Fi, Muse (Connected), Agent Chat (On), Sound and Screen off"><figcaption>Settings, one swipe left from the home screen (the Wi-Fi network name is blanked here). The Agent Chat row says Off until you connect.</figcaption></figure>
 <ol>
 <li>On the gadget, open <b>Settings, then Agent Chat</b>. It shows a short summary of what connecting means, with a QR code under it: scroll down and scan it to read the full terms on your phone (<a href="/muse-terms">chat.victorio.cloud/muse-terms</a>).</li>
 </ol>
@@ -263,10 +267,15 @@ const MUSE_GADGET_BODY = `
 <h2>Updates, reset and help</h2>
 <ul>
 <li><b>Updates install themselves.</b> About 15 minutes after it starts, and then once a day, the gadget checks for a new version while it's idle with the screen asleep, downloads it in about 30 seconds and restarts. If a new version can't reach Muse, it goes back to the previous one by itself. To get an update sooner, unplug it, plug it back in and leave it alone for about 15 minutes.</li>
-<li><b>Reset:</b> open <b>Settings, then Muse</b>, tap <b>Reset pairing</b>, and tap again within 5 seconds. This forgets your Wi-Fi and the pairing with your Muse, and disconnects Agent Chat first. The gadget restarts in pairing mode. Do this before giving the gadget to someone else. (Removing it in the Muse app only unpairs it and keeps the Wi-Fi.)</li>
+<li><b>Reset:</b> open <b>Settings, then Muse</b>. Each button takes two taps within 5 seconds, and both disconnect Agent Chat first and restart the gadget ready to pair.
+<ul>
+<li><b>Reset pairing</b> forgets your Wi-Fi and the pairing with your Muse.</li>
+<li><b>Factory reset</b> also erases every setting (volume, brightness and the rest), as when it was new. Do this before giving the gadget to someone else.</li>
+</ul>
+Removing it in the Muse app only unpairs it and keeps the Wi-Fi.</li>
 <li><b>Help:</b> ask whoever gave you the gadget.</li>
 </ul>
-<figure><img src="/muse-gadget/muse-reset.png" width="466" height="466" alt="The Muse page in Settings: Connected, Paired with the Muse app, Details, Check for update, a red Reset pairing button and the version number"><figcaption>Settings, then Muse: <b>Check for update</b> (it updates itself daily; this checks now, and installs a newer version if there is one), Reset pairing (two taps within 5 seconds), and the firmware version.</figcaption></figure>
+<figure><img src="/muse-gadget/muse-reset.png" width="466" height="466" alt="The Muse page in Settings: Connected, Paired with the Muse app, Details, Check for update, red Reset pairing and Factory reset buttons, and the version number"><figcaption>Settings, then Muse: <b>Check for update</b> (it updates itself daily; this checks now, and installs a newer version if there is one), Reset pairing, Factory reset, and the firmware version.</figcaption></figure>
 `;
 
 export function museGadgetRoute(_rc: RouteContext) {
