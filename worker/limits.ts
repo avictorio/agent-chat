@@ -273,7 +273,7 @@ export const VIDEO_STREAM_TOO_BIG = "Videos streamed through the site can be up 
 
 
 // Muse delivery hooks (room/muse.ts): a member's Muse agent woken through
-// the muse-bridge Worker. Items that arrive within MUSE_GRACE_MS of the
+// the Muse bridge (worker/bridge). Items that arrive within MUSE_GRACE_MS of the
 // first go out in one wake, at most MUSE_PER_WAKE to a wake (the laptop
 // watcher's numbers). A wake the bridge did not take is tried again after
 // MUSE_RETRY_FIRST_MS, doubling up to MUSE_RETRY_MAX_MS. A hook holds at
@@ -293,8 +293,37 @@ export const MUSE_ITEM_MAX = 30000;
 export const MUSE_ITEM_CUT = 2000;
 export const MUSE_BATCH_MAX = 50;
 export const MUSE_FETCH_MS = 30000;
-// The gadget's handover (POST /api/muse/connect, /update, /disconnect, GET
-// /api/muse/seal-key): no member token, so each network (networkKey) gets
+// The Muse bridge's own numbers (worker/bridge; they were the muse-bridge
+// Worker's [vars]). A link is woken at most MUSE_LINK_WAKES_MAX times per
+// MUSE_LINK_WAKES_WINDOW_S (past that 429 with Retry-After). A one-time
+// link code is good for MUSE_LINK_CODE_TTL_S. A wake gives up on the Noise
+// handshake after MUSE_HANDSHAKE_TIMEOUT_MS and on Muse's answer to the
+// chat request after MUSE_CHAT_TIMEOUT_MS. The last item a link delivered
+// for a room is remembered for MUSE_WAKE_DEDUPE_S, so a retry of a wake
+// that landed is not sent twice. Muse refusing a link's access token
+// answers 503 with a Retry-After of MUSE_TOKEN_RETRY_AFTER_S and keeps the
+// token, so a passing glitch cannot switch every room off; only
+// MUSE_TOKEN_REFUSALS_MAX refusals spread over at least MUSE_TOKEN_GRACE_S
+// delete it (410).
+export const MUSE_LINK_WAKES_MAX = 30;
+export const MUSE_LINK_WAKES_WINDOW_S = 600;
+export const MUSE_LINK_CODE_TTL_S = 1800;
+export const MUSE_HANDSHAKE_TIMEOUT_MS = 5000;
+export const MUSE_CHAT_TIMEOUT_MS = 8000;
+export const MUSE_WAKE_DEDUPE_S = 600;
+export const MUSE_TOKEN_RETRY_AFTER_S = 900;
+export const MUSE_TOKEN_REFUSALS_MAX = 5;
+export const MUSE_TOKEN_GRACE_S = 21600;
+// The only hosts a Muse access token is ever sent to: fetch_vms on
+// MUSE_API_HOSTS, the VM's Noise socket on MUSE_NOISE_HOSTS ("*.example.com"
+// would take that domain's subdomains). A gadget's handover naming any other
+// host is refused, and a link whose stored host is not on them is not
+// woken. They are constants on purpose: no request, variable or stored
+// value can add a host.
+export const MUSE_API_HOSTS: readonly string[] = Object.freeze(["api.muse.ai"]);
+export const MUSE_NOISE_HOSTS: readonly string[] = Object.freeze(["hatch.metaaivm.com"]);
+// The gadget's handover (POST /api/muse/connect, /update, /disconnect,
+// /status, GET /api/muse/seal-key): no member token, so each network (networkKey) gets
 // MUSE_HANDOVER_PER_IP calls per MUSE_HANDOVER_WINDOW_S, counted by the
 // MUSE_QUOTA_ROOM object (a Room no room name can reach, as
 // CREATE_QUOTA_ROOM). A sealed blob is a few KB: bodies over

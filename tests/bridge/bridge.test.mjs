@@ -1,21 +1,21 @@
-// The Worker end to end in Node: Durable Objects on node:sqlite
+// The bridge end to end in Node: its router (bridgeFetch, as the chat
+// Worker calls it), both Durable Objects on node:sqlite
 // (helpers/fake-do.mjs), the Muse API as a stub fetch, the VM as the fake
 // Noise VM (helpers/fake-vm.mjs). Nothing leaves the process.
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { handle, deliverError, checkHandover } from '../../worker/bridge/index.ts';
+import { bridgeFetch, deliverError, checkHandover } from '../../worker/bridge/index.ts';
 import { MuseLink } from '../../worker/bridge/link.ts';
 import { Directory, normaliseCode } from '../../worker/bridge/directory.ts';
 import { generateBridgeKey, seal } from '../../worker/bridge/seal.ts';
-import { deps, config } from '../../worker/bridge/util.ts';
+import { deps, hostAllowed, museFetch } from '../../worker/bridge/util.ts';
 import { sessionIdFor } from '../../worker/bridge/wake.ts';
 import { ServiceFrame } from '../../worker/bridge/muse/envelope.ts';
 import { FakeVm } from './helpers/fake-vm.mjs';
 import { FakeNamespace } from './helpers/fake-do.mjs';
 
-const SHARED = 'shared-key-for-tests';
 const KEYS = await generateBridgeKey();
 const utf8 = (s) => new TextEncoder().encode(s);
 const text = (b) => new TextDecoder().decode(b);
@@ -68,16 +68,17 @@ beforeEach(() => {
     if (a.status !== 200) return new Response('no', { status: a.status });
     return new Response(JSON.stringify({ vm_list: a.vms }), { status: 200 });
   };
-  env = { BRIDGE_SEAL_KEY: KEYS.privateKey, BRIDGE_SHARED_KEY: SHARED, HANDSHAKE_TIMEOUT_MS: '2000', REQUEST_TIMEOUT_MS: '300' };
-  env.LINK = new FakeNamespace(MuseLink, env);
-  env.DIRECTORY = new FakeNamespace(Directory, env);
+  // a wake that hangs gives up in a moment, not after MUSE_CHAT_TIMEOUT_MS
+  deps.limits = { handshakeTimeoutMs: 2000, requestTimeoutMs: 300 };
+  env = { MUSE_SEAL_KEY: KEYS.privateKey };
+  env.MUSE_LINK = new FakeNamespace(MuseLink, env);
+  env.MUSE_DIRECTORY = new FakeNamespace(Directory, env);
 });
 
-async function call(path, body, { key = SHARED, method = 'POST' } = {}) {
+async function call(path, body, { method = 'POST' } = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  if (key !== null) headers['X-Bridge-Key'] = key;
-  const r = await handle(
-    new Request('https://muse-bridge' + path, { method, headers, body: method === 'GET' ? undefined : JSON.stringify(body) }),
+  const r = await bridgeFetch(
+    new Request('https://muse-bridge' + path, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : JSON.stringify(body) }),
     env,
   );
   const t = await r.text();
@@ -118,15 +119,39 @@ function assertNoSecrets(...secrets) {
   for (const s of secrets) assert.ok(!all.includes(s), `log leaked ${s.slice(0, 6)}`);
 }
 
-test('every request needs X-Bridge-Key; none at all without BRIDGE_SHARED_KEY', async () => {
-  assert.equal((await call('/seal-key', null, { method: 'GET', key: null })).status, 401);
-  assert.equal((await call('/seal-key', null, { method: 'GET', key: 'wrong' })).status, 401);
+test('seal-key: the public key, with the alg and info the gadget checks', async () => {
   const k = await call('/seal-key', null, { method: 'GET' });
   assert.equal(k.status, 200);
-  assert.equal(k.body.publicKey, KEYS.publicKey);
-  assert.equal(k.body.info, 'muse-bridge seal v1');
-  delete env.BRIDGE_SHARED_KEY;
-  assert.equal((await call('/seal-key', null, { method: 'GET' })).status, 503);
+  // the gadget's firmware compares these two strings byte for byte
+  assert.deepEqual(k.body, { alg: 'X25519-HKDF-SHA256-AES-256-GCM', info: 'muse-bridge seal v1', publicKey: KEYS.publicKey });
+  assert.equal(k.headers.get('Content-Type'), 'application/json');
+  assert.equal(k.headers.get('Cache-Control'), 'no-store');
+  assert.equal((await call('/seal-key', null, { method: 'HEAD' })).status, 200);
+});
+
+test('without MUSE_SEAL_KEY: seal-key, connect and update answer 503 not_configured; the rest work', async () => {
+  const id = await linked();
+  delete env.MUSE_SEAL_KEY;
+  const notConfigured = { code: 'not_configured', error: 'bridge key not set' };
+  const k = await call('/seal-key', null, { method: 'GET' });
+  assert.deepEqual([k.status, k.body], [503, notConfigured]);
+  const c = await call('/connect', { sealed: await sealFor('tok-A'), termsVersion: 'v1' });
+  assert.deepEqual([c.status, c.body], [503, notConfigured]);
+  const u = await call('/update', { sealed: await sealFor('tok-A2'), museLinkId: id });
+  assert.deepEqual([u.status, u.body], [503, notConfigured]);
+  assert.equal(env.MUSE_LINK.instance(id).secret().access_token, 'tok-A', 'nothing replaced');
+  // a code from before is claimed; the link is woken, counted and shown
+  const c2 = await (async () => {
+    env.MUSE_SEAL_KEY = KEYS.privateKey;
+    const r = await connect();
+    delete env.MUSE_SEAL_KEY;
+    return r;
+  })();
+  assert.equal((await call('/claim', { code: c2.code })).status, 200);
+  assert.equal((await call('/deliver', wake(id))).status, 200);
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'lobby', hooked: true })).body.rooms, 1);
+  assert.equal((await call('/status', { museLinkId: id })).body.tokenHeld, true);
+  assert.equal((await call('/disconnect', { museLinkId: id })).body.removed, true);
 });
 
 test('connect -> claim: one-time code, single use; same Muse reuses its link', async () => {
@@ -145,7 +170,7 @@ test('connect -> claim: one-time code, single use; same Muse reuses its link', a
   assert.equal((await call('/claim', { code: 'short' })).status, 404);
 
   // The acceptance is recorded in the link.
-  const row = env.LINK.instance(c.museLinkId).row();
+  const row = env.MUSE_LINK.instance(c.museLinkId).row();
   assert.equal(row.terms_version, '2026-11');
   assert.equal(row.terms_at, clock);
   assert.equal(row.vm_id, 'vm-A');
@@ -188,27 +213,88 @@ test('connect refuses: bad seal, refused token, no VM, foreign hosts, missing te
   // Nothing refused above reached the Muse API with a foreign host.
   assert.ok(apiCalls.every((c) => c.url.startsWith('https://api.muse.ai/')));
   // An allowed apiUrlV2 is used as the root.
+  assert.equal((await call('/connect', { ...t, sealed: await sealFor('tok-A', { apiUrlV2: 'https://api.muse.ai/base/' }) })).status, 200);
+  assert.equal(apiCalls.at(-1).url, 'https://api.muse.ai/base/fetch_vms');
+  // The allow-lists are constants: the names that were the muse-bridge
+  // Worker's variables widen nothing now.
   env.MUSE_API_HOSTS = 'api.muse.ai,*.muse.example';
-  assert.equal((await call('/connect', { ...t, sealed: await sealFor('tok-A', { apiUrlV2: 'https://v2.muse.example/base/' }) })).status, 200);
-  assert.equal(apiCalls.at(-1).url, 'https://v2.muse.example/base/fetch_vms');
+  env.MUSE_NOISE_HOSTS = 'evil.example';
+  const calls = apiCalls.length;
+  const v2 = await call('/connect', { ...t, sealed: await sealFor('tok-A', { apiUrlV2: 'https://v2.muse.example/base/' }) });
+  assert.deepEqual([v2.status, v2.body.code], [400, 'host_not_allowed']);
+  const n2 = await call('/connect', { ...t, sealed: await sealFor('tok-A', { noiseHost: 'evil.example' }) });
+  assert.deepEqual([n2.status, n2.body.code], [400, 'host_not_allowed']);
+  assert.equal(apiCalls.length, calls);
 });
 
 test('handover checks', () => {
-  const cfg = config({});
-  assert.equal(checkHandover({ accessToken: 'a', nodeId: 'homelink-1a2b3c' }, cfg).noiseHost, 'hatch.metaaivm.com');
-  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'homelink-1a2b3c', apiUrlV2: 'http://api.muse.ai' }, cfg).error);
-  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', apiUrlV2: 'https://u:p@api.muse.ai' }, cfg).error);
-  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', noiseHost: 'hatch.metaaivm.com/evil' }, cfg).error);
-  assert.ok(!checkHandover({ accessToken: 'a', nodeId: 'x', noiseHost: 'hatch.metaaivm.com:443' }, cfg).error);
-  assert.ok(checkHandover({ accessToken: 'a', nodeId: '' }, cfg).error);
+  assert.equal(checkHandover({ accessToken: 'a', nodeId: 'homelink-1a2b3c' }).noiseHost, 'hatch.metaaivm.com');
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'homelink-1a2b3c', apiUrlV2: 'http://api.muse.ai' }).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', apiUrlV2: 'https://u:p@api.muse.ai' }).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', apiUrlV2: 'https://api.muse.ai.evil.example' }).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', noiseHost: 'hatch.metaaivm.com/evil' }).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', noiseHost: 'evil.hatch.metaaivm.com' }).error);
+  assert.ok(!checkHandover({ accessToken: 'a', nodeId: 'x', noiseHost: 'hatch.metaaivm.com:443' }).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: '' }).error);
+  // A "*." entry takes its subdomains only (no list holds one today).
+  assert.ok(hostAllowed('v2.muse.example', ['*.muse.example']));
+  assert.ok(!hostAllowed('muse.example', ['*.muse.example']));
+  assert.ok(!hostAllowed('evilmuse.example', ['*.muse.example']));
+});
+
+test('a link whose stored hosts are off the allow-lists is not woken, and Muse never sees its token', async () => {
+  const id = await linked();
+  const row = env.MUSE_LINK.instance(id).sql;
+  for (const [apiRoot, noiseHost] of [['https://evil.example', 'hatch.metaaivm.com'], ['https://api.muse.ai', 'evil.example'], ['http://api.muse.ai', 'hatch.metaaivm.com']]) {
+    row.exec('UPDATE link SET api_root = ?, noise_host = ?', apiRoot, noiseHost);
+    row.exec('UPDATE secret SET vm_auth_token = NULL');
+    const calls = apiCalls.length;
+    const r = await call('/deliver', wake(id));
+    assert.deepEqual([r.status, r.body.code], [502, 'host_not_allowed'], apiRoot + ' ' + noiseHost);
+    assert.equal(apiCalls.length, calls);
+    assert.equal(fleet.conns.length, 0);
+  }
+  // the gadget's next update stores checked hosts again
+  assert.equal((await call('/update', { sealed: await sealFor('tok-A2') })).status, 200);
+  assert.equal((await call('/deliver', wake(id))).status, 200);
+  assertNoSecrets('tok-A', 'vmtok-A');
+});
+
+test('museFetch: under TEST_HOOKS Muse hosts go to a loopback fake, or nowhere', async () => {
+  const seen = [];
+  deps.fetch = async (url) => {
+    seen.push(String(url));
+    return new Response('{}');
+  };
+  const go = (e, url) => museFetch(e)(url, {}).then(() => 'sent', (err) => err.name);
+  // production: as asked
+  assert.equal(await go({}, 'https://api.muse.ai/fetch_vms'), 'sent');
+  assert.equal(await go({ TEST_MUSE_ORIGIN: 'http://127.0.0.1:9' }, 'https://api.muse.ai/fetch_vms'), 'sent');
+  // a test server: a Muse host goes to the fake, or is refused without one
+  const t = (o) => ({ TEST_HOOKS: '1', TEST_MUSE_ORIGIN: o });
+  assert.equal(await go(t('http://127.0.0.1:9'), 'https://api.muse.ai/base/fetch_vms'), 'sent');
+  assert.equal(await go(t('http://127.0.0.1:9'), 'https://hatch.metaaivm.com/v1/noise?vm_id=vm-A'), 'sent');
+  assert.equal(await go(t(undefined), 'https://api.muse.ai/fetch_vms'), 'TypeError');
+  assert.equal(await go(t('https://evil.example'), 'https://api.muse.ai/fetch_vms'), 'TypeError');
+  assert.equal(await go(t('http://127.0.0.1:9.evil.example'), 'https://hatch.metaaivm.com/v1/noise'), 'TypeError');
+  assert.equal(await go(t('http://localhost:9'), 'https://api.muse.ai/fetch_vms'), 'TypeError');
+  // any other host is not the switch's business
+  assert.equal(await go(t('http://127.0.0.1:9'), 'https://elsewhere.example/x'), 'sent');
+  assert.deepEqual(seen, [
+    'https://api.muse.ai/fetch_vms',
+    'https://api.muse.ai/fetch_vms',
+    'http://127.0.0.1:9/base/fetch_vms',
+    'http://127.0.0.1:9/v1/noise?vm_id=vm-A',
+    'https://elsewhere.example/x',
+  ]);
 });
 
 test('update: a refreshed token for the same Muse replaces the stored one; another Muse is refused', async () => {
   const id = await linked();
   const u = await call('/update', { sealed: await sealFor('tok-A2') });
   assert.deepEqual([u.status, u.body], [200, { museLinkId: id, updated: true }]);
-  assert.equal(env.LINK.instance(id).secret().access_token, 'tok-A2');
-  assert.equal(env.LINK.instance(id).secret().vm_auth_token, 'vmtok-A2');
+  assert.equal(env.MUSE_LINK.instance(id).secret().access_token, 'tok-A2');
+  assert.equal(env.MUSE_LINK.instance(id).secret().vm_auth_token, 'vmtok-A2');
 
   // tok-B's Muse has no link: refused, nothing replaced.
   assert.equal((await call('/update', { sealed: await sealFor('tok-B') })).status, 404);
@@ -216,11 +302,11 @@ test('update: a refreshed token for the same Muse replaces the stored one; anoth
   const idB = await linked('tok-B');
   const x = await call('/update', { sealed: await sealFor('tok-B'), museLinkId: id });
   assert.deepEqual([x.status, x.body.code], [409, 'vm_mismatch']);
-  assert.equal(env.LINK.instance(id).secret().access_token, 'tok-A2');
-  assert.equal(env.LINK.instance(idB).secret().access_token, 'tok-B');
+  assert.equal(env.MUSE_LINK.instance(id).secret().access_token, 'tok-A2');
+  assert.equal(env.MUSE_LINK.instance(idB).secret().access_token, 'tok-B');
   // A token Muse refuses is not stored.
   assert.equal((await call('/update', { sealed: await sealFor('tok-dead') })).status, 403);
-  assert.equal(env.LINK.instance(id).secret().access_token, 'tok-A2');
+  assert.equal(env.MUSE_LINK.instance(id).secret().access_token, 'tok-A2');
   assertNoSecrets('tok-A2', 'vmtok-A2', 'tok-B');
 });
 
@@ -266,14 +352,14 @@ test('deliver: one session, one text, 2xx on the ack; no title line', async () =
 
 test('deliver: paused answers 503 + Retry-After and sends nothing; unpaused delivers', async () => {
   const id = await linked();
-  env.DELIVER_PAUSED = '1';
+  env.MUSE_DELIVER_PAUSED = '1';
   try {
     const r = await call('/deliver', wake(id));
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'paused');
     assert.equal(fleet.conns.length, 0);
   } finally {
-    delete env.DELIVER_PAUSED;
+    delete env.MUSE_DELIVER_PAUSED;
   }
   assert.equal((await call('/deliver', wake(id))).status, 200);
   assert.equal(fleet.requests.length, 1);
@@ -309,7 +395,7 @@ test('deliver: an upgrade refused (401) re-fetches the VM bearer once', async ()
 test('deliver: a refused access token waits out a grace period before 410', async () => {
   const id = await linked();
   // The device token went stale: the VM bearer is refused, and so is the re-fetch.
-  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
+  env.MUSE_LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
   const refusedOnce = async () => {
     fleet.plans.push({ reject: 401 });
     return call('/deliver', wake(id));
@@ -320,15 +406,15 @@ test('deliver: a refused access token waits out a grace period before 410', asyn
     assert.deepEqual([r.status, r.body.code, r.headers.get('Retry-After')], [503, 'token_refused', '900']);
     clock += 15 * 60 * 1000;
   }
-  assert.notEqual(env.LINK.instance(id).secret(), null);
+  assert.notEqual(env.MUSE_LINK.instance(id).secret(), null);
   // Enough refusals, but not yet over six hours: still waiting.
   assert.equal((await refusedOnce()).status, 503);
-  assert.notEqual(env.LINK.instance(id).secret(), null);
+  assert.notEqual(env.MUSE_LINK.instance(id).secret(), null);
   // Six hours after the first refusal: gone, and the token deleted.
   clock += 6 * 3600 * 1000;
   const r = await refusedOnce();
   assert.deepEqual([r.status, r.body.code], [410, 'link_gone']);
-  assert.equal(env.LINK.instance(id).secret(), null);
+  assert.equal(env.MUSE_LINK.instance(id).secret(), null);
   // From now on 410 without calling Muse at all.
   const calls = apiCalls.length;
   const conns = fleet.conns.length;
@@ -344,20 +430,20 @@ test('deliver: a refused access token waits out a grace period before 410', asyn
 
 test('deliver: a success clears earlier token refusals', async () => {
   const id = await linked();
-  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
+  env.MUSE_LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
   const one = (seq) => wake(id, { items: [{ seq, kind: 'message', at: 1, data: {} }], cursor: seq });
   // The cached VM bearer is refused once; after that every try goes straight to fetch_vms.
   fleet.plans.push({ reject: 401 });
   for (let i = 0; i < 4; i++) assert.equal((await call('/deliver', one(20 + i))).status, 503);
   assert.equal(fleet.plans.length, 0);
   // Muse takes the token again (the refusals were a glitch): delivered, and the count resets.
-  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-A'");
+  env.MUSE_LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-A'");
   const ok = await call('/deliver', one(30));
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
-  assert.equal(env.LINK.instance(id).sql.exec('SELECT refused_n FROM secret').one().refused_n, 0);
+  assert.equal(env.MUSE_LINK.instance(id).sql.exec('SELECT refused_n FROM secret').one().refused_n, 0);
   // Long after, one refusal again: counted afresh, so not gone.
   clock += 7 * 3600 * 1000;
-  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
+  env.MUSE_LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
   fleet.plans.push({ reject: 401 });
   assert.equal((await call('/deliver', one(31))).status, 503, 'one refusal after a success is not gone');
 });
@@ -378,8 +464,7 @@ test('deliver: 502 when Muse is unreachable, refuses, or does not ack', async ()
 });
 
 test('deliver: per-link rate cap answers 429 with Retry-After', async () => {
-  env.RATE_WAKES = '3';
-  env.RATE_WINDOW_S = '600';
+  deps.limits = { ...deps.limits, rateWakes: 3, rateWindowMs: 600_000 };
   const id = await linked();
   for (let s = 1; s <= 3; s++) {
     assert.equal((await call('/deliver', wake(id, { items: [{ seq: s, kind: 'message', at: 1, data: {} }], cursor: s }))).status, 200);
@@ -401,8 +486,8 @@ test('disconnect: link and token gone, deliver 410, the Muse can link again', as
   const id = await linked();
   const d = await call('/disconnect', { museLinkId: id });
   assert.deepEqual([d.status, d.body], [200, { museLinkId: id, removed: true }]);
-  assert.equal(env.LINK.instance(id).secret(), null);
-  assert.equal(env.LINK.instance(id).row(), null);
+  assert.equal(env.MUSE_LINK.instance(id).secret(), null);
+  assert.equal(env.MUSE_LINK.instance(id).row(), null);
   assert.equal((await call('/deliver', wake(id))).status, 410);
   assert.equal((await call('/update', { sealed: await sealFor('tok-A') })).status, 404);
   assert.equal((await call('/disconnect', { museLinkId: id })).body.removed, false);
@@ -444,7 +529,7 @@ test('rooms and status: a count of hooked rooms, kept across connect, gone on di
   await call('/disconnect', { museLinkId: id });
   assert.equal((await call('/status', { museLinkId: id })).status, 410);
   assert.equal((await call('/rooms', { museLinkId: id, room: 'lobby', hooked: true })).status, 410);
-  assert.equal(env.LINK.instance(id).sql.exec('SELECT COUNT(*) AS n FROM rooms').one().n, 0);
+  assert.equal(env.MUSE_LINK.instance(id).sql.exec('SELECT COUNT(*) AS n FROM rooms').one().n, 0);
   assertNoSecrets(id, 'tok-A');
 });
 
@@ -477,4 +562,5 @@ test('bad requests', async () => {
 
 test.after(() => {
   deps.now = realNow;
+  deps.limits = {};
 });

@@ -6,9 +6,10 @@
 //          terms_at, created, updated
 //   secret (k=1) access_token, vm_auth_token (cached from fetch_vms), updated,
 //          refused_first / refused_n: Muse refusing the token. It is dropped
-//          only once refusals reach TOKEN_REFUSALS over at least TOKEN_GRACE_S
-//          (a glitch must not switch every room off); until then a wake gets
-//          503 with Retry-After. A success, /update or /connect resets it.
+//          only once refusals reach MUSE_TOKEN_REFUSALS_MAX over at least
+//          MUSE_TOKEN_GRACE_S (a glitch must not switch every room off);
+//          until then a wake gets 503 with Retry-After. A success, /update
+//          or /connect resets it.
 //   wakes  at: send attempts, for the per-link rate cap
 //   acked  room -> seq, at: the last item of the last acknowledged wake
 //          per room, so a retry of a wake that did land (Agent Chat gave up
@@ -17,7 +18,7 @@
 //          reports each hook set or removed), so the gadget can show a
 //          count. Kept across /connect (connecting again adds rooms).
 //
-// Internal routes (POST, JSON), called by the Worker only:
+// Internal routes (POST, JSON), called by the bridge's router (index.ts) only:
 //   /connect, /update, /deliver, /disconnect, /rooms, /status
 // Every request runs one at a time (a chain), so a disconnect or update
 // never interleaves with a send.
@@ -26,7 +27,7 @@ import { fetchVmsWithStatus } from './muse/api.js';
 import { acknowledgement, sendChatOnce, vmIdOf, workersWebSocketFactory } from './muse/session.js';
 import type { ChatResult } from './muse/session.js';
 import { UpgradeRejected, errName } from './muse/errors.js';
-import { config, deps, json, log, refuse, tag } from './util.js';
+import { apiRootAllowed, config, deps, json, log, museFetch, noiseHostAllowed, refuse, tag } from './util.js';
 import type { BridgeConfig } from './util.js';
 import { sessionIdFor, wakeText } from './wake.js';
 
@@ -254,7 +255,7 @@ export class MuseLink {
   /** The Worker has checked the payload's shape (index.ts deliverError). */
   async deliver(p: DeliverBody): Promise<Response> {
     const t0 = deps.now();
-    const cfg = config(this.env);
+    const cfg = config();
     const link = this.row();
     const sec = link && link.id === p.museLinkId ? this.secret() : null;
     const done = (resp: Response, fields: Record<string, unknown> = {}): Response => {
@@ -310,7 +311,7 @@ export class MuseLink {
 
   /** Fresh VM credentials for this link's VM: {vmAuthToken} | {gone} | {code}. */
   async fetchVm(link: LinkRow, sec: SecretRow): Promise<FetchVmResult> {
-    const { vms, status } = await fetchVmsWithStatus(sec.access_token, { root: link.api_root, fetch: deps.fetch });
+    const { vms, status } = await fetchVmsWithStatus(sec.access_token, { root: link.api_root, fetch: museFetch(this.env) });
     if (status === 401 || status === 403) return { gone: true, why: 'token_refused' };
     if (status === null || status >= 400) return { code: 'muse_unreachable', museStatus: status };
     const vm = vms.find((v) => vmIdOf(v) === link.vm_id);
@@ -324,6 +325,11 @@ export class MuseLink {
    * the upgrade (401/403) or by the request is re-fetched once.
    */
   async send(link: LinkRow, sec: SecretRow, text: string, sessionId: string | null, cfg: BridgeConfig): Promise<SendResult> {
+    // The hosts were checked when a handover stored them, and are checked
+    // again here, so that no stored row, whatever wrote it, sends the access
+    // token or the VM bearer to a host off MUSE_API_HOSTS / MUSE_NOISE_HOSTS.
+    // A gadget's next /update stores checked hosts again.
+    if (!apiRootAllowed(link.api_root) || !noiseHostAllowed(link.noise_host)) return { ok: false, code: 'host_not_allowed' };
     let vmAuthToken = sec.vm_auth_token;
     let refetched = false;
     for (;;) {
@@ -344,7 +350,7 @@ export class MuseLink {
             vmId: link.vm_id,
             vmAuthToken,
             deviceId: link.node_id,
-            connect: deps.connect ?? workersWebSocketFactory(),
+            connect: deps.connect ?? workersWebSocketFactory({ fetch: museFetch(this.env) }),
             handshakeTimeoutMs: cfg.handshakeTimeoutMs,
             requestTimeoutMs: cfg.requestTimeoutMs,
           },

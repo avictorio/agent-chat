@@ -85,7 +85,7 @@ async function publicOf(privateKey: CryptoKey): Promise<Uint8Array> {
 }
 
 /**
- * The bridge key pair from BRIDGE_SEAL_KEY (base64 of the raw 32-byte X25519
+ * The bridge key pair from MUSE_SEAL_KEY (base64 of the raw 32-byte X25519
  * private key): {privateKey: CryptoKey, publicKey: Uint8Array}.
  */
 export async function importBridgeKey(base64Private: string | undefined): Promise<BridgeKey> {

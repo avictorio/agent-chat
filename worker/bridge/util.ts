@@ -1,44 +1,21 @@
-// Shared helpers: config from env, JSON responses, logging, test seams.
+// Shared helpers: the bridge's numbers, JSON responses, logging, test seams.
 
-import { DEFAULT_NOISE_HOST } from './muse/session.js';
 import type { SocketFactory } from './muse/session.js';
+import {
+  MUSE_API_HOSTS,
+  MUSE_CHAT_TIMEOUT_MS,
+  MUSE_HANDSHAKE_TIMEOUT_MS,
+  MUSE_LINK_CODE_TTL_S,
+  MUSE_LINK_WAKES_MAX,
+  MUSE_LINK_WAKES_WINDOW_S,
+  MUSE_NOISE_HOSTS,
+  MUSE_TOKEN_GRACE_S,
+  MUSE_TOKEN_REFUSALS_MAX,
+  MUSE_TOKEN_RETRY_AFTER_S,
+  MUSE_WAKE_DEDUPE_S,
+} from '../limits.js';
 
-export interface Deps {
-  fetch: typeof fetch;
-  connect: SocketFactory | null;
-  now: () => number;
-  log: (line: string) => void;
-}
-
-/**
- * Seams the tests replace: the fetch the Muse API is called with, the
- * WebSocket factory (null: workersWebSocketFactory()), the clock.
- */
-export const deps: Deps = {
-  fetch: (...args) => globalThis.fetch(...args),
-  connect: null,
-  now: () => Date.now(),
-  log: (line) => console.log(line),
-};
-
-/** The [vars] tunables config() reads; a missing or malformed one takes its default. */
-export type Tunables = Partial<
-  Record<
-    | 'RATE_WAKES'
-    | 'RATE_WINDOW_S'
-    | 'CODE_TTL_S'
-    | 'HANDSHAKE_TIMEOUT_MS'
-    | 'REQUEST_TIMEOUT_MS'
-    | 'DEDUPE_S'
-    | 'TOKEN_REFUSALS'
-    | 'TOKEN_GRACE_S'
-    | 'TOKEN_RETRY_S'
-    | 'MUSE_API_HOSTS'
-    | 'MUSE_NOISE_HOSTS',
-    string
-  >
->;
-
+/** The bridge's numbers (worker/limits.ts), in the units its code counts in. */
 export interface BridgeConfig {
   rateWakes: number;
   rateWindowMs: number;
@@ -49,35 +26,43 @@ export interface BridgeConfig {
   tokenRefusals: number;
   tokenGraceMs: number;
   tokenRetryS: number;
-  apiHosts: string[];
-  noiseHosts: string[];
 }
 
-function int(v: string | undefined, def: number, min: number, max: number): number {
-  const n = Number.parseInt(String(v ?? ''), 10);
-  return Number.isFinite(n) && n >= min && n <= max ? n : def;
+export interface Deps {
+  fetch: typeof fetch;
+  connect: SocketFactory | null;
+  now: () => number;
+  log: (line: string) => void;
+  limits: Partial<BridgeConfig>;
 }
 
-function hostList(v: string | undefined, def: string[]): string[] {
-  const list = String(v ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  return list.length ? list : def;
-}
+/**
+ * Seams the tests replace: the fetch the Muse API is called with, the
+ * WebSocket factory (null: workersWebSocketFactory()), the clock, the log,
+ * and numbers to shorten (a timeout, the rate cap) so a test need not wait
+ * them out. Nothing in the Worker sets them. The host allow-lists are not
+ * among them: no seam widens those.
+ */
+export const deps: Deps = {
+  fetch: (...args) => globalThis.fetch(...args),
+  connect: null,
+  now: () => Date.now(),
+  log: (line) => console.log(line),
+  limits: {},
+};
 
-export function config(env: Tunables = {}): BridgeConfig {
+export function config(): BridgeConfig {
   return {
-    rateWakes: int(env.RATE_WAKES, 30, 1, 100_000),
-    rateWindowMs: int(env.RATE_WINDOW_S, 600, 1, 86_400) * 1000,
-    codeTtlMs: int(env.CODE_TTL_S, 1800, 60, 86_400) * 1000,
-    handshakeTimeoutMs: int(env.HANDSHAKE_TIMEOUT_MS, 5000, 100, 60_000),
-    requestTimeoutMs: int(env.REQUEST_TIMEOUT_MS, 8000, 100, 120_000),
-    dedupeMs: int(env.DEDUPE_S, 600, 0, 86_400) * 1000,
-    // A refused access token counts as gone only after this many refusals
-    // spread over at least this long; until then the room waits and retries.
-    tokenRefusals: int(env.TOKEN_REFUSALS, 5, 1, 1000),
-    tokenGraceMs: int(env.TOKEN_GRACE_S, 21_600, 0, 30 * 86_400) * 1000,
-    tokenRetryS: int(env.TOKEN_RETRY_S, 900, 1, 86_400),
-    apiHosts: hostList(env.MUSE_API_HOSTS, ['api.muse.ai']),
-    noiseHosts: hostList(env.MUSE_NOISE_HOSTS, [DEFAULT_NOISE_HOST]),
+    rateWakes: MUSE_LINK_WAKES_MAX,
+    rateWindowMs: MUSE_LINK_WAKES_WINDOW_S * 1000,
+    codeTtlMs: MUSE_LINK_CODE_TTL_S * 1000,
+    handshakeTimeoutMs: MUSE_HANDSHAKE_TIMEOUT_MS,
+    requestTimeoutMs: MUSE_CHAT_TIMEOUT_MS,
+    dedupeMs: MUSE_WAKE_DEDUPE_S * 1000,
+    tokenRefusals: MUSE_TOKEN_REFUSALS_MAX,
+    tokenGraceMs: MUSE_TOKEN_GRACE_S * 1000,
+    tokenRetryS: MUSE_TOKEN_RETRY_AFTER_S,
+    ...deps.limits,
   };
 }
 
@@ -85,6 +70,46 @@ export function config(env: Tunables = {}): BridgeConfig {
 export function hostAllowed(host: string, list: readonly string[]): boolean {
   const h = host.toLowerCase();
   return list.some((e) => (e.startsWith('*.') ? h.endsWith(e.slice(1)) && h.length > e.length - 1 : h === e));
+}
+
+/** The API root a link stored is on MUSE_API_HOSTS (https only). */
+export function apiRootAllowed(root: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(root);
+  } catch {
+    return false;
+  }
+  return u.protocol === 'https:' && hostAllowed(u.hostname, MUSE_API_HOSTS);
+}
+
+/** The Noise host a link stored ("host" or "host:port") is on MUSE_NOISE_HOSTS. */
+export function noiseHostAllowed(host: string): boolean {
+  return hostAllowed(host.replace(/:[0-9]+$/, ''), MUSE_NOISE_HOSTS);
+}
+
+// A loopback http origin and nothing else: the API suite's fake Muse.
+const TEST_MUSE_ORIGIN_RE = /^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/;
+
+/**
+ * The fetch the bridge reaches Muse with: fetch_vms, and the VM's Noise
+ * socket (workersWebSocketFactory upgrades through it). Under TEST_HOOKS a
+ * call to a host on MUSE_API_HOSTS or MUSE_NOISE_HOSTS goes to
+ * TEST_MUSE_ORIGIN, the API suite's fake Muse on 127.0.0.1
+ * (tests/api/server.js), and fails when that is not set: a test server
+ * runs the real bridge and never reaches the real Muse. The origin must be
+ * a loopback address, so even live the switch could send a token nowhere
+ * but the Worker's own machine; check:config fails if either name is live.
+ */
+export function museFetch(env: BridgeEnv): typeof fetch {
+  if (!env.TEST_HOOKS) return deps.fetch;
+  const origin = env.TEST_MUSE_ORIGIN && TEST_MUSE_ORIGIN_RE.test(env.TEST_MUSE_ORIGIN) ? env.TEST_MUSE_ORIGIN : null;
+  return (input, init) => {
+    const u = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
+    if (!hostAllowed(u.hostname, MUSE_API_HOSTS) && !hostAllowed(u.hostname, MUSE_NOISE_HOSTS)) return deps.fetch(input, init);
+    if (!origin) return Promise.reject(new TypeError('a test server reaches no real Muse, and TEST_MUSE_ORIGIN names no fake'));
+    return deps.fetch(origin + u.pathname + u.search, init);
+  };
 }
 
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -98,7 +123,7 @@ export function refuse(status: number, code: string, error: string, headers?: Re
   return json({ code, error }, status, headers);
 }
 
-/** Link id prefix for logs. */
+/** Link id prefix for logs: "ml_" and 8 of its 32 hex digits, never the whole id (a bearer secret). */
 export function tag(linkId: unknown): string {
   return typeof linkId === 'string' ? linkId.slice(0, 11) : '';
 }
@@ -118,14 +143,6 @@ export function newLinkId(): string {
 export async function sha256Hex(text: string): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
   return [...d].map((x) => x.toString(16).padStart(2, '0')).join('');
-}
-
-/** Equal-time comparison of two strings (through their hashes, so lengths do not leak). */
-export async function sameSecret(a: string, b: string): Promise<boolean> {
-  const [x, y] = await Promise.all([sha256Hex(String(a)), sha256Hex(String(b))]);
-  let diff = 0;
-  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
-  return diff === 0;
 }
 
 /** Reads a JSON object body of at most max bytes; null when it is not one. */

@@ -8,7 +8,7 @@
 //         one-time link codes, stored as SHA-256 of the normalised code.
 //         One live code per link: a new code replaces the link's others.
 //
-// Internal routes (POST, JSON), called by the Worker only:
+// Internal routes (POST, JSON), called by the bridge's router (index.ts) only:
 //   /vm-link   {vmId}          -> {museLinkId, created}
 //   /vm-find   {vmIds: [..]}   -> {museLinkId, vmId} | 404
 //   /code-new  {museLinkId}    -> {code, expiresAt}
@@ -88,7 +88,7 @@ export class Directory {
   async codeNew(link: string): Promise<Response> {
     if (!link) return refuse(400, 'bad_request', 'museLinkId is required');
     const now = deps.now();
-    const ttl = config(this.env).codeTtlMs;
+    const ttl = config().codeTtlMs;
     const code = newCode();
     const hash = await sha256Hex(normaliseCode(code));
     // Codes gone past their expiry for a day are no longer worth a "used" answer.

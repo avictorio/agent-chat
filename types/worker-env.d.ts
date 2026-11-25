@@ -47,32 +47,20 @@ interface Env {
   MUSE_BRIDGE_KEY?: string;
 }
 
-// What the Muse bridge's code (worker/bridge) reads from its env: the
-// muse-bridge Worker's bindings, secrets and [vars], under their names
-// there. Nothing in the chat Worker builds one: the bridge's tests
-// (tests/bridge) do, with Durable Objects on node:sqlite. Every [vars]
-// value is a string that config() (worker/bridge/util.ts) parses and
-// clamps, a missing one taking its default.
+// What the Muse bridge's code (worker/bridge) reads from its env, under the
+// names it has in the chat Worker's Env once this Worker serves it. Until
+// then only the bridge's tests (tests/bridge) build one, with Durable
+// Objects on node:sqlite. Its numbers are constants (worker/limits.ts).
 interface BridgeEnv {
-  LINK: DurableObjectFetchNamespace;
-  DIRECTORY: DurableObjectFetchNamespace;
-  /** base64 of the raw 32-byte X25519 private key the gadget seals to */
-  BRIDGE_SEAL_KEY?: string;
-  /** what every caller sends as X-Bridge-Key; unset, every route answers 503 */
-  BRIDGE_SHARED_KEY?: string;
+  MUSE_LINK: DurableObjectFetchNamespace;
+  MUSE_DIRECTORY: DurableObjectFetchNamespace;
+  /** base64 of the raw 32-byte X25519 private key the gadget seals to; unset, /seal-key, /connect and /update answer 503 not_configured */
+  MUSE_SEAL_KEY?: string;
   /** "1" pauses /deliver (503 paused, Retry-After) */
-  DELIVER_PAUSED?: string;
-  RATE_WAKES?: string;
-  RATE_WINDOW_S?: string;
-  CODE_TTL_S?: string;
-  HANDSHAKE_TIMEOUT_MS?: string;
-  REQUEST_TIMEOUT_MS?: string;
-  DEDUPE_S?: string;
-  TOKEN_REFUSALS?: string;
-  TOKEN_GRACE_S?: string;
-  TOKEN_RETRY_S?: string;
-  MUSE_API_HOSTS?: string;
-  MUSE_NOISE_HOSTS?: string;
+  MUSE_DELIVER_PAUSED?: string;
+  TEST_HOOKS?: string;
+  /** test only, with TEST_HOOKS: the API suite's fake Muse (http://127.0.0.1:PORT), where the bridge's calls to Muse hosts go (worker/bridge/util.ts museFetch) */
+  TEST_MUSE_ORIGIN?: string;
 }
 
 // The parts of the Workers runtime the Worker uses, after

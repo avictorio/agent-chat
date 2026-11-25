@@ -1,6 +1,10 @@
-// The muse-bridge Worker. No public route: Agent Chat (victorio-chat) calls
-// it over a service binding, and every request must also carry
-// X-Bridge-Key = BRIDGE_SHARED_KEY. Routes:
+// The Muse bridge's router, called in-process: bridgeFetch(request, env)
+// answers a path and a JSON body as the muse-bridge Worker answered them
+// over its service binding, so the chat side (worker/room/muse.ts
+// museBridge, worker/routes/muse.ts) and this router's tests keep that
+// contract one to one. Only that Muse code calls it, each call with a path
+// of its own (no request names the path), and nothing else reaches
+// MuseLink or Directory. Routes:
 //
 //   GET  /seal-key    -> {alg, info, publicKey}
 //   POST /connect     {sealed, termsVersion}          -> {code, museLinkId, expiresAt}
@@ -11,8 +15,10 @@
 //   POST /rooms       {museLinkId, room, hooked}      -> {museLinkId, rooms}
 //   POST /status      {museLinkId}                    -> {museLinkId, connected, rooms, termsVersion, tokenHeld}
 //
-// Refusals are {code, error}. Logs carry link id prefixes, statuses, counts
-// and timings: never a token, a code or message text.
+// Refusals are {code, error}. Without MUSE_SEAL_KEY, /seal-key, /connect
+// and /update answer 503 not_configured and the rest work. Logs carry link
+// id prefixes, statuses, counts and timings: never a token, a code or
+// message text.
 
 import { fetchVmsWithStatus, apiRoot } from './muse/api.js';
 import { errName } from './muse/errors.js';
@@ -20,12 +26,8 @@ import { vmIdOf, DEFAULT_NOISE_HOST } from './muse/session.js';
 import { importBridgeKey, openJson, SealError, SEAL_ALG, SEAL_INFO, b64encode } from './seal.js';
 import type { BridgeKey } from './seal.js';
 import { ROOM_RE, validRouting } from './wake.js';
-import { LINK_ID_RE, callDo, config, deps, hostAllowed, json, log, readJson, refuse, sameSecret, tag } from './util.js';
-import type { BridgeConfig } from './util.js';
+import { LINK_ID_RE, apiRootAllowed, callDo, deps, json, log, museFetch, noiseHostAllowed, readJson, refuse, tag } from './util.js';
 import type { VmCredentials } from './link.js';
-
-export { MuseLink } from './link.js';
-export { Directory } from './directory.js';
 
 const SMALL_MAX = 32 * 1024;
 const DELIVER_MAX = 2 * 1024 * 1024;
@@ -49,28 +51,29 @@ type Refusable<T> = { error: Response } | (T & { error?: undefined });
 
 let keyCache: { secret: string | null | undefined; key: BridgeKey | null } = { secret: null, key: null };
 async function bridgeKey(env: BridgeEnv): Promise<BridgeKey> {
-  if (keyCache.secret !== env.BRIDGE_SEAL_KEY) {
-    keyCache = { secret: env.BRIDGE_SEAL_KEY, key: await importBridgeKey(env.BRIDGE_SEAL_KEY) };
+  if (keyCache.secret !== env.MUSE_SEAL_KEY) {
+    keyCache = { secret: env.MUSE_SEAL_KEY, key: await importBridgeKey(env.MUSE_SEAL_KEY) };
   }
   // Set with the secret it came from: a secret is a string or undefined, never the initial null.
   return keyCache.key!;
 }
 
 function directory(env: BridgeEnv) {
-  return env.DIRECTORY.get(env.DIRECTORY.idFromName('directory'));
+  return env.MUSE_DIRECTORY.get(env.MUSE_DIRECTORY.idFromName('directory'));
 }
 
 function linkStub(env: BridgeEnv, id: string) {
-  return env.LINK.get(env.LINK.idFromName(id));
+  return env.MUSE_LINK.get(env.MUSE_LINK.idFromName(id));
 }
 
 /**
  * The opened handover, checked: {accessToken, nodeId, apiRoot, noiseHost},
  * or {error: Response}. apiUrlV2 and noiseHost must be https hosts on the
- * allowlists (MUSE_API_HOSTS, MUSE_NOISE_HOSTS): the token is only ever sent
- * to Muse, and the VM id a link is keyed by only ever comes from Muse.
+ * allowlists (MUSE_API_HOSTS, MUSE_NOISE_HOSTS in worker/limits.ts): the
+ * token is only ever sent to Muse, and the VM id a link is keyed by only
+ * ever comes from Muse.
  */
-export function checkHandover(p: Record<string, unknown>, cfg: BridgeConfig): Refusable<Handover> {
+export function checkHandover(p: Record<string, unknown>): Refusable<Handover> {
   const bad = (code: string, error: string) => ({ error: refuse(400, code, error) });
   if (typeof p.accessToken !== 'string' || !TOKEN_RE.test(p.accessToken)) return bad('bad_handover', 'accessToken is missing or malformed');
   if (typeof p.nodeId !== 'string' || !NODE_ID_RE.test(p.nodeId)) return bad('bad_handover', 'nodeId is missing or malformed');
@@ -83,21 +86,21 @@ export function checkHandover(p: Record<string, unknown>, cfg: BridgeConfig): Re
       return bad('bad_handover', 'apiUrlV2 is not a URL');
     }
     if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return bad('host_not_allowed', 'apiUrlV2 must be a plain https URL');
-    if (!hostAllowed(u.hostname, cfg.apiHosts)) return bad('host_not_allowed', 'apiUrlV2 is not a Muse host');
     root = apiRoot(u.origin + u.pathname);
+    if (!apiRootAllowed(root)) return bad('host_not_allowed', 'apiUrlV2 is not a Muse host');
   }
   let noiseHost = DEFAULT_NOISE_HOST;
   if (p.noiseHost !== undefined && p.noiseHost !== null && p.noiseHost !== '') {
     const h = String(p.noiseHost);
     if (!HOST_RE.test(h)) return bad('bad_handover', 'noiseHost is not a host name');
-    if (!hostAllowed(h.replace(/:[0-9]+$/, ''), cfg.noiseHosts)) return bad('host_not_allowed', 'noiseHost is not a Muse host');
+    if (!noiseHostAllowed(h)) return bad('host_not_allowed', 'noiseHost is not a Muse host');
     noiseHost = h.toLowerCase();
   }
   return { accessToken: p.accessToken, nodeId: p.nodeId, apiRoot: root, noiseHost };
 }
 
 /** Opens and checks a sealed handover, then asks Muse for its VMs. */
-async function handover(env: BridgeEnv, sealed: unknown, cfg: BridgeConfig): Promise<Refusable<{ h: Handover; vms: VmCredentials[] }>> {
+async function handover(env: BridgeEnv, sealed: unknown): Promise<Refusable<{ h: Handover; vms: VmCredentials[] }>> {
   if (typeof sealed !== 'string' || !sealed) return { error: refuse(400, 'bad_request', '"sealed" is required') };
   let key;
   try {
@@ -113,10 +116,10 @@ async function handover(env: BridgeEnv, sealed: unknown, cfg: BridgeConfig): Pro
     if (err instanceof SealError) return { error: refuse(400, 'seal_invalid', 'sealed blob does not open') };
     throw err;
   }
-  const h = checkHandover(p, cfg);
+  const h = checkHandover(p);
   if (h.error) return h;
   const t0 = deps.now();
-  const { vms, status } = await fetchVmsWithStatus(h.accessToken, { root: h.apiRoot, fetch: deps.fetch });
+  const { vms, status } = await fetchVmsWithStatus(h.accessToken, { root: h.apiRoot, fetch: museFetch(env) });
   log('muse.fetch_vms', { status, vms: vms.length, ms: deps.now() - t0 });
   if (status === null || status >= 500) return { error: refuse(502, 'muse_unreachable', 'Muse did not answer') };
   if (status >= 400) return { error: refuse(403, 'token_refused', 'Muse refused that token') };
@@ -126,10 +129,10 @@ async function handover(env: BridgeEnv, sealed: unknown, cfg: BridgeConfig): Pro
   return { h, vms: ordered.map((v) => ({ vmId: vmIdOf(v), vmAuthToken: v.vm_auth_token })).filter((v) => v.vmId) };
 }
 
-async function connectRoute(env: BridgeEnv, body: Record<string, unknown>, cfg: BridgeConfig): Promise<Response> {
+async function connectRoute(env: BridgeEnv, body: Record<string, unknown>): Promise<Response> {
   const termsVersion = body.termsVersion;
   if (typeof termsVersion !== 'string' || !TERMS_RE.test(termsVersion)) return refuse(400, 'bad_request', '"termsVersion" is required');
-  const r = await handover(env, body.sealed, cfg);
+  const r = await handover(env, body.sealed);
   if (r.error) return r.error;
   if (!r.vms.length) return refuse(422, 'no_vm', 'that Muse account has no VM');
   const vm = r.vms[0];
@@ -145,11 +148,11 @@ async function connectRoute(env: BridgeEnv, body: Record<string, unknown>, cfg: 
   return json({ code: code.data.code, museLinkId, expiresAt: code.data.expiresAt });
 }
 
-async function updateRoute(env: BridgeEnv, body: Record<string, unknown>, cfg: BridgeConfig): Promise<Response> {
+async function updateRoute(env: BridgeEnv, body: Record<string, unknown>): Promise<Response> {
   if (body.museLinkId !== undefined && !(typeof body.museLinkId === 'string' && LINK_ID_RE.test(body.museLinkId))) {
     return refuse(400, 'bad_request', '"museLinkId" is malformed');
   }
-  const r = await handover(env, body.sealed, cfg);
+  const r = await handover(env, body.sealed);
   if (r.error) return r.error;
   const f = await callDo<{ museLinkId: string; vmId: string }>(directory(env), '/vm-find', { vmIds: r.vms.map((v) => v.vmId) });
   if (f.status === 404) return refuse(404, 'no_link', 'no link for that Muse: connect first');
@@ -221,10 +224,10 @@ export function deliverError(p: Record<string, unknown>): string | null {
 async function deliverRoute(env: BridgeEnv, body: Record<string, unknown>): Promise<Response> {
   const err = deliverError(body);
   if (err) return refuse(400, 'bad_request', err);
-  // Maintenance switch: with the DELIVER_PAUSED secret set to "1", every wake
-  // is refused as busy and Agent Chat keeps it queued, retrying after
+  // Maintenance switch: with the MUSE_DELIVER_PAUSED secret set to "1", every
+  // wake is refused as busy and the room keeps it queued, retrying after
   // Retry-After. Deleting the secret resumes delivery (no code deploy).
-  if (env.DELIVER_PAUSED === '1') {
+  if (env.MUSE_DELIVER_PAUSED === '1') {
     log('deliver.paused', { link: tag(body.museLinkId) });
     return refuse(503, 'paused', 'Delivery is paused; retry later', { 'Retry-After': '30' });
   }
@@ -246,26 +249,16 @@ async function sealKeyRoute(env: BridgeEnv): Promise<Response> {
   }
 }
 
-export async function handle(request: Request, env: BridgeEnv): Promise<Response> {
+export async function bridgeFetch(request: Request, env: BridgeEnv): Promise<Response> {
   const url = new URL(request.url);
-  if (!env.BRIDGE_SHARED_KEY) {
-    log('request', { path: url.pathname, status: 503, why: 'no_shared_key' });
-    return refuse(503, 'not_configured', 'bridge not configured');
-  }
-  const presented = request.headers.get('X-Bridge-Key');
-  if (!presented || !(await sameSecret(presented, env.BRIDGE_SHARED_KEY))) {
-    log('request', { path: url.pathname, status: 401 });
-    return refuse(401, 'unauthorized', 'unauthorized');
-  }
-  const cfg = config(env);
   if (url.pathname === '/seal-key') {
     if (request.method !== 'GET' && request.method !== 'HEAD') return refuse(405, 'method', 'method not allowed');
     return sealKeyRoute(env);
   }
   const routes: Record<string, (b: Record<string, unknown>) => Promise<Response>> = {
-    '/connect': (b) => connectRoute(env, b, cfg),
+    '/connect': (b) => connectRoute(env, b),
     '/claim': (b) => claimRoute(env, b),
-    '/update': (b) => updateRoute(env, b, cfg),
+    '/update': (b) => updateRoute(env, b),
     '/deliver': (b) => deliverRoute(env, b),
     '/disconnect': (b) => disconnectRoute(env, b),
     '/rooms': (b) => roomsRoute(env, b),
@@ -284,4 +277,3 @@ export async function handle(request: Request, env: BridgeEnv): Promise<Response
     return refuse(500, 'internal', 'internal error');
   }
 }
-
