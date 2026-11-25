@@ -4,10 +4,12 @@
 //   npm run bridge:keygen -- --dev-vars  -> the same as lines for .dev.vars
 // (node --import ./tests/unit/register.mjs scripts/bridge/keygen.mjs: the
 // hooks load the Worker's TypeScript, whose imports name "./x.js".)
-// Production keys are made the same way and stored with `wrangler secret put
-// MUSE_SEAL_KEY` on the chat Worker; never commit the private key. Every
-// gadget seals to the public key, so a new key breaks their token updates
-// until each connects again (AGENTS.md section 2, MUSE_SEAL_KEY).
+// For local runs and tests only. Production's MUSE_SEAL_KEY is the
+// muse-bridge Worker's BRIDGE_SEAL_KEY, carried over, not made anew: every
+// gadget seals to its public key, and a new one fails each gadget's next
+// token update once (docs/agents/muse-bridge.md, Ground rules, and
+// Cut-over, step 2). Secrets are set by the owner, never by an agent, and
+// a private key is never committed.
 import { generateBridgeKey } from '../../worker/bridge/seal.ts';
 
 const { privateKey, publicKey } = await generateBridgeKey();

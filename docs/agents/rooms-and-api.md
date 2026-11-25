@@ -497,8 +497,11 @@ docs.txt section that owns its routes, caps and formats.
   `link_gone` (it forgets its link), 409 (it stops retrying an update),
   429 with Retry-After, and `seal_invalid` (it fetches the key again).
   Change none of them without a firmware release. `MUSE_SEAL_KEY` is the
-  key every gadget seals to: a new one breaks every gadget's token
-  updates until each connects again. `/muse-terms` is the
+  key every gadget seals to: after a new one, each gadget's next token
+  update fails once (`seal_invalid`), and it fetches the key again and
+  retries, so updates recover within `MUSE_SEAL_KEY_CACHE_S` plus its
+  backoff, with every link kept (`docs/agents/muse-bridge.md`, Ground
+  rules). `/muse-terms` is the
   terms page the gadget's "Agree and connect" points to
   (`MUSE_TERMS_VERSION`); the bridge's numbers it quotes come from
   `worker/limits.ts` (`museTermsBody`), so changing one changes the terms.

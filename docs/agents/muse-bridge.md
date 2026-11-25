@@ -41,10 +41,17 @@ room alarm (room/muse.ts museWake) ------bridgeFetch POST /deliver--> MuseLink -
 - **Never commit a key.** `MUSE_SEAL_KEY` exists only as a secret of
   `victorio-chat`. Tests make their keys at run time; for a local run,
   `npm run bridge:keygen` prints a throwaway one.
-- **Rotating `MUSE_SEAL_KEY` breaks token updates.** An update sealed to
-  the old key is refused (`seal_invalid`) and the gadget stops retrying,
-  so every member must Disconnect and Agree and connect again. Don't
-  rotate it casually.
+- **Don't rotate `MUSE_SEAL_KEY` casually.** Every gadget seals to its
+  public key. After a change, an update sealed to the old key is refused
+  (`seal_invalid`); the gadget's firmware (muse-gadget's patch, `do_update`)
+  then drops the key it had, fetches it again on its next try and keeps
+  retrying on its own backoff (minutes, growing to an hour), so its
+  updates recover within `MUSE_SEAL_KEY_CACHE_S` (how long the relay
+  serves the key it last saw) plus that backoff. Links and the tokens
+  `MuseLink` holds are not touched, and wakes go on meanwhile with the
+  stored token. A connect running at that moment answers `seal_invalid`
+  ("Agent Chat couldn't open the handover. Try again.") and works when
+  tried again, within `MUSE_SEAL_KEY_CACHE_S` at worst.
 - **Muse only.** A token goes only to `MUSE_API_HOSTS` (fetch_vms) and a
   VM bearer only to `MUSE_NOISE_HOSTS` (the Noise socket), both constants
   in `worker/limits.ts`: no request, variable or stored row can add a host,
@@ -365,8 +372,13 @@ sets or deletes a secret without the owner.
    never shows a secret again, so this is the owner's copy from where the
    key was made. Without it the gadget's handover answers 503
    `not_configured` after the deploy, and `npm run check:config` fails on
-   its absence. If the value is lost, a new key means every gadget's
-   token updates fail until each connects again: stop and ask the owner.
+   its absence. If the value is lost, stop and ask the owner, with what
+   a new key costs (Ground rules): links and stored tokens are kept and
+   wakes go on; each gadget's next token update fails once
+   with `seal_invalid`, fetches the key again and goes through on its
+   retry; a connect running at that moment fails once. The public key in
+   step 1 then differs, as it should. A new key is the owner's to make
+   and set, never an agent's (`npm run bridge:keygen` is for local runs).
 3. **Pause the old Worker's wakes:** set the secret `DELIVER_PAUSED` to
    `1` on `muse-bridge`, before the deploy. Room objects still running
    the old code after the deploy (step 5) then get 503 `paused` with
