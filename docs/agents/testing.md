@@ -31,9 +31,9 @@ Topic file of `AGENTS.md` (read that first; `AGENTS.md` sections 9 and
 
 ### The suites
 
-They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
-`web/tests/` (the UI suite, on the web workspace's Playwright);
-`tests/fixtures/` holds the files they share.
+They live in `tests/api/`, `tests/unit/`, `tests/bridge/`,
+`tests/upgrade/` and `web/tests/` (the UI suite, on the web workspace's
+Playwright); `tests/fixtures/` holds the files they share.
 
 - **Unit tests:** `npm run test:unit` (`node:test`, a second or two)
   covers the pure logic: the Light Cycles timeline model the arena
@@ -42,6 +42,21 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   way wrangler's Text rule does, and its TypeScript with the types
   stripped (a `./x.js` import finds `x.ts`, as wrangler's bundler does).
   Add a test there with any new pure helper.
+- **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
+  in the same `npm run test:unit`, with the same hook, and need no
+  network and no Python. `bridge.test.mjs` runs the bridge's router and
+  both of its Durable Objects in Node, on `node:sqlite`
+  (`helpers/fake-do.mjs`), against a stub of Muse's `fetch_vms` and a
+  fake Noise VM (`helpers/fake-vm.mjs`); `sdk-fixtures.test.mjs` holds
+  the port to the bytes the Python SDK produced
+  (`tests/bridge/fixtures/sdk-fixtures.json`; regenerate it with
+  `scripts/bridge/extract_sdk.sh` and `scripts/bridge/gen_fixtures.py`,
+  which need the SDK checkout and Python's `cryptography`). The live
+  handshake against the Python SDK stays opt-in:
+  `MUSE_SDK_SRC=<the SDK's linux/src> npm run test:bridge-interop`
+  (skipped without it; `MUSE_INTEROP_CMD` names another interpreter as
+  a JSON argv). `npm run bridge:keygen` and `npm run bridge:seal` make a
+  throwaway seal key and seal a handover to it, for local runs.
 - **The API suite:** `npm run test:api` boots `wrangler dev` through
   `tests/api/server.js` (the port `API_PORT` names, else a free one; its
   own temp state per run through `--persist-to`; the start fails unless

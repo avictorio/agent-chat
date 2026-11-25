@@ -1,0 +1,480 @@
+// The Worker end to end in Node: Durable Objects on node:sqlite
+// (helpers/fake-do.mjs), the Muse API as a stub fetch, the VM as the fake
+// Noise VM (helpers/fake-vm.mjs). Nothing leaves the process.
+
+import { test, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { handle, deliverError, checkHandover } from '../../worker/bridge/index.ts';
+import { MuseLink } from '../../worker/bridge/link.ts';
+import { Directory, normaliseCode } from '../../worker/bridge/directory.ts';
+import { generateBridgeKey, seal } from '../../worker/bridge/seal.ts';
+import { deps, config } from '../../worker/bridge/util.ts';
+import { sessionIdFor } from '../../worker/bridge/wake.ts';
+import { ServiceFrame } from '../../worker/bridge/muse/envelope.ts';
+import { FakeVm } from './helpers/fake-vm.mjs';
+import { FakeNamespace } from './helpers/fake-do.mjs';
+
+const SHARED = 'shared-key-for-tests';
+const KEYS = await generateBridgeKey();
+const utf8 = (s) => new TextEncoder().encode(s);
+const text = (b) => new TextDecoder().decode(b);
+const realNow = deps.now;
+
+// The Muse API: access token -> fetch_vms answer.
+const MUSE = {
+  'tok-A': { status: 200, vms: [{ vm_id: 'vm-A', vm_auth_token: 'vmtok-A', vm_ws_url: 'wss://x', default: true }] },
+  'tok-A2': { status: 200, vms: [{ vm_id: 'vm-A', vm_auth_token: 'vmtok-A2', vm_ws_url: 'wss://x', default: true }] },
+  'tok-B': { status: 200, vms: [{ vm_id: 'vm-B', vm_auth_token: 'vmtok-B', vm_ws_url: 'wss://x', default: true }] },
+  'tok-none': { status: 200, vms: [] },
+  'tok-dead': { status: 401 },
+};
+
+let env, apiCalls, fleet, logs, clock;
+
+function makeFleet() {
+  const f = { plans: [], conns: [], requests: [], errors: [] };
+  f.connect = async (url, headers) => {
+    const plan = f.plans.shift() ?? {};
+    f.conns.push({ url, auth: headers.Authorization });
+    if (plan.unreachable) throw new Error('connect failed');
+    const vm = new FakeVm({ rejectStatus: plan.reject ?? null });
+    const socket = await vm.connect(url, headers);
+    (async () => {
+      await vm.handshakeDone;
+      const fr = await vm.nextFrame();
+      f.requests.push(JSON.parse(text(fr.value.body)));
+      if (plan.hang) return;
+      const body = utf8(plan.body ?? '{"result":{"message_id":"m-1"}}');
+      await vm.sendFrame(ServiceFrame.response(fr.streamId, { status: plan.status ?? 200, body, endBody: true }));
+    })().catch((e) => f.errors.push(e));
+    return socket;
+  };
+  return f;
+}
+
+beforeEach(() => {
+  apiCalls = [];
+  logs = [];
+  clock = 1_800_000_000_000;
+  fleet = makeFleet();
+  deps.now = () => clock;
+  deps.log = (line) => logs.push(line);
+  deps.connect = fleet.connect;
+  deps.fetch = async (url, init) => {
+    const token = init.headers.Authorization.replace(/^Bearer /, '');
+    apiCalls.push({ url, token });
+    const a = MUSE[token] ?? { status: 401 };
+    if (a.status !== 200) return new Response('no', { status: a.status });
+    return new Response(JSON.stringify({ vm_list: a.vms }), { status: 200 });
+  };
+  env = { BRIDGE_SEAL_KEY: KEYS.privateKey, BRIDGE_SHARED_KEY: SHARED, HANDSHAKE_TIMEOUT_MS: '2000', REQUEST_TIMEOUT_MS: '300' };
+  env.LINK = new FakeNamespace(MuseLink, env);
+  env.DIRECTORY = new FakeNamespace(Directory, env);
+});
+
+async function call(path, body, { key = SHARED, method = 'POST' } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (key !== null) headers['X-Bridge-Key'] = key;
+  const r = await handle(
+    new Request('https://muse-bridge' + path, { method, headers, body: method === 'GET' ? undefined : JSON.stringify(body) }),
+    env,
+  );
+  const t = await r.text();
+  return { status: r.status, body: t ? JSON.parse(t) : null, headers: r.headers };
+}
+
+const sealFor = (accessToken, extra = {}) => seal({ accessToken, nodeId: 'gadget-abc123', ...extra }, KEYS.publicKey);
+
+async function connect(token = 'tok-A') {
+  const r = await call('/connect', { sealed: await sealFor(token), termsVersion: '2026-11' });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.body;
+}
+
+async function linked(token = 'tok-A') {
+  const c = await connect(token);
+  assert.equal((await call('/claim', { code: c.code })).status, 200);
+  return c.museLinkId;
+}
+
+function wake(museLinkId, extra = {}) {
+  return {
+    museLinkId,
+    room: 'lobby',
+    member: 'Ada',
+    routing: 'per-room',
+    cursor: 5,
+    items: [
+      { seq: 4, kind: 'message', at: 1, data: { id: 11, from: 'bob', text: 'secret room text ``` here' } },
+      { seq: 5, kind: 'game', at: 2, data: { type: 'game', game: { id: 'g1' } } },
+    ],
+    ...extra,
+  };
+}
+
+function assertNoSecrets(...secrets) {
+  const all = logs.join('\n');
+  for (const s of secrets) assert.ok(!all.includes(s), `log leaked ${s.slice(0, 6)}`);
+}
+
+test('every request needs X-Bridge-Key; none at all without BRIDGE_SHARED_KEY', async () => {
+  assert.equal((await call('/seal-key', null, { method: 'GET', key: null })).status, 401);
+  assert.equal((await call('/seal-key', null, { method: 'GET', key: 'wrong' })).status, 401);
+  const k = await call('/seal-key', null, { method: 'GET' });
+  assert.equal(k.status, 200);
+  assert.equal(k.body.publicKey, KEYS.publicKey);
+  assert.equal(k.body.info, 'muse-bridge seal v1');
+  delete env.BRIDGE_SHARED_KEY;
+  assert.equal((await call('/seal-key', null, { method: 'GET' })).status, 503);
+});
+
+test('connect -> claim: one-time code, single use; same Muse reuses its link', async () => {
+  const c = await connect();
+  assert.match(c.museLinkId, /^ml_[0-9a-f]{32}$/);
+  assert.match(c.code, /^[0-9A-Z]{5}-[0-9A-Z]{5}$/);
+  assert.equal(c.expiresAt, clock + 30 * 60 * 1000);
+  assert.deepEqual(apiCalls.map((x) => x.url), ['https://api.muse.ai/fetch_vms']);
+
+  // Relayed sloppily (lowercase, no dash): still the code.
+  const first = await call('/claim', { code: c.code.toLowerCase().replace('-', ' ') });
+  assert.deepEqual([first.status, first.body], [200, { museLinkId: c.museLinkId }]);
+  const again = await call('/claim', { code: c.code });
+  assert.deepEqual([again.status, again.body.code], [410, 'code_used']);
+  assert.equal((await call('/claim', { code: 'ZZZZZ-ZZZZZ' })).status, 404);
+  assert.equal((await call('/claim', { code: 'short' })).status, 404);
+
+  // The acceptance is recorded in the link.
+  const row = env.LINK.instance(c.museLinkId).row();
+  assert.equal(row.terms_version, '2026-11');
+  assert.equal(row.terms_at, clock);
+  assert.equal(row.vm_id, 'vm-A');
+
+  // The same Muse again (a refreshed token): same link, new code, old code dead.
+  const c2 = await connect('tok-A2');
+  assert.equal(c2.museLinkId, c.museLinkId);
+  assert.notEqual(c2.code, c.code);
+  // A different Muse: a different link.
+  const c3 = await connect('tok-B');
+  assert.notEqual(c3.museLinkId, c.museLinkId);
+
+  assertNoSecrets('tok-A', 'vmtok-A', c.code, c2.code, normaliseCode(c.code));
+});
+
+test('codes expire after 30 minutes, and a new code replaces the old', async () => {
+  const c = await connect();
+  clock += 30 * 60 * 1000;
+  const r = await call('/claim', { code: c.code });
+  assert.deepEqual([r.status, r.body.code], [410, 'code_expired']);
+  const c2 = await connect();
+  const c3 = await connect();
+  assert.equal((await call('/claim', { code: c2.code })).status, 404, 'replaced');
+  assert.equal((await call('/claim', { code: c3.code })).status, 200);
+});
+
+test('connect refuses: bad seal, refused token, no VM, foreign hosts, missing terms', async () => {
+  const t = { termsVersion: '1' };
+  assert.equal((await call('/connect', { ...t, sealed: 'AAAA' })).body.code, 'seal_invalid');
+  const other = await generateBridgeKey();
+  assert.equal((await call('/connect', { ...t, sealed: await seal({ accessToken: 'tok-A', nodeId: 'g' }, other.publicKey) })).body.code, 'seal_invalid');
+  assert.equal((await call('/connect', { ...t, sealed: await sealFor('tok-dead') })).status, 403);
+  assert.equal((await call('/connect', { ...t, sealed: await sealFor('tok-none') })).status, 422);
+  const evil = await call('/connect', { ...t, sealed: await sealFor('tok-A', { apiUrlV2: 'https://evil.example/api' }) });
+  assert.deepEqual([evil.status, evil.body.code], [400, 'host_not_allowed']);
+  const evilNoise = await call('/connect', { ...t, sealed: await sealFor('tok-A', { noiseHost: 'evil.example' }) });
+  assert.deepEqual([evilNoise.status, evilNoise.body.code], [400, 'host_not_allowed']);
+  assert.equal((await call('/connect', { sealed: await sealFor('tok-A') })).status, 400);
+  assert.equal((await call('/connect', { ...t, sealed: await seal({ accessToken: 'tok A\n', nodeId: 'g' }, KEYS.publicKey) })).status, 400);
+  // Nothing refused above reached the Muse API with a foreign host.
+  assert.ok(apiCalls.every((c) => c.url.startsWith('https://api.muse.ai/')));
+  // An allowed apiUrlV2 is used as the root.
+  env.MUSE_API_HOSTS = 'api.muse.ai,*.muse.example';
+  assert.equal((await call('/connect', { ...t, sealed: await sealFor('tok-A', { apiUrlV2: 'https://v2.muse.example/base/' }) })).status, 200);
+  assert.equal(apiCalls.at(-1).url, 'https://v2.muse.example/base/fetch_vms');
+});
+
+test('handover checks', () => {
+  const cfg = config({});
+  assert.equal(checkHandover({ accessToken: 'a', nodeId: 'homelink-1a2b3c' }, cfg).noiseHost, 'hatch.metaaivm.com');
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'homelink-1a2b3c', apiUrlV2: 'http://api.muse.ai' }, cfg).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', apiUrlV2: 'https://u:p@api.muse.ai' }, cfg).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: 'x', noiseHost: 'hatch.metaaivm.com/evil' }, cfg).error);
+  assert.ok(!checkHandover({ accessToken: 'a', nodeId: 'x', noiseHost: 'hatch.metaaivm.com:443' }, cfg).error);
+  assert.ok(checkHandover({ accessToken: 'a', nodeId: '' }, cfg).error);
+});
+
+test('update: a refreshed token for the same Muse replaces the stored one; another Muse is refused', async () => {
+  const id = await linked();
+  const u = await call('/update', { sealed: await sealFor('tok-A2') });
+  assert.deepEqual([u.status, u.body], [200, { museLinkId: id, updated: true }]);
+  assert.equal(env.LINK.instance(id).secret().access_token, 'tok-A2');
+  assert.equal(env.LINK.instance(id).secret().vm_auth_token, 'vmtok-A2');
+
+  // tok-B's Muse has no link: refused, nothing replaced.
+  assert.equal((await call('/update', { sealed: await sealFor('tok-B') })).status, 404);
+  // tok-B's Muse has a link of its own, but the caller names A's.
+  const idB = await linked('tok-B');
+  const x = await call('/update', { sealed: await sealFor('tok-B'), museLinkId: id });
+  assert.deepEqual([x.status, x.body.code], [409, 'vm_mismatch']);
+  assert.equal(env.LINK.instance(id).secret().access_token, 'tok-A2');
+  assert.equal(env.LINK.instance(idB).secret().access_token, 'tok-B');
+  // A token Muse refuses is not stored.
+  assert.equal((await call('/update', { sealed: await sealFor('tok-dead') })).status, 403);
+  assert.equal(env.LINK.instance(id).secret().access_token, 'tok-A2');
+  assertNoSecrets('tok-A2', 'vmtok-A2', 'tok-B');
+});
+
+test('deliver: one session, one text, 2xx on the ack; no title line', async () => {
+  const id = await linked();
+  const before = apiCalls.length;
+  const r = await call('/deliver', wake(id));
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body, { ok: true, cursor: 5, delivered: 2 });
+  assert.equal(apiCalls.length, before, 'the VM bearer from connect was cached');
+  assert.equal(fleet.conns.length, 1);
+  assert.equal(fleet.conns[0].url, 'wss://hatch.metaaivm.com/v1/noise?vm_id=vm-A');
+  assert.equal(fleet.conns[0].auth, 'Bearer vmtok-A');
+
+  const sent = fleet.requests[0];
+  assert.equal(sent.device_id, 'gadget-abc123');
+  assert.equal(sent.session_id, await sessionIdFor(id, 'per-room', 'lobby'));
+  assert.ok(sent.message.startsWith('[Agent Chat]\n````\n{\n  "room": "lobby",'), sent.message);
+  assert.ok(sent.message.includes('"text": "secret room text ``` here"'));
+  assert.ok(sent.message.endsWith('\n```'));
+
+  // The next wake into that chat.
+  await call('/deliver', wake(id, { cursor: 6, items: [{ seq: 6, kind: 'message', at: 3, data: { id: 12 } }] }));
+  assert.ok(fleet.requests[1].message.startsWith('[Agent Chat]\n```\n{\n  "room": "lobby",'));
+  // Another room per-room: its own chat.
+  await call('/deliver', wake(id, { room: 'games', items: [{ seq: 1, kind: 'message', at: 3, data: {} }], cursor: 1 }));
+  assert.equal(fleet.requests[2].session_id, await sessionIdFor(id, 'per-room', 'games'));
+  assert.ok(fleet.requests[2].message.includes('"room": "games"'));
+  // Main chat: no session id.
+  await call('/deliver', wake(id, { routing: 'main', items: [{ seq: 7, kind: 'message', at: 3, data: {} }], cursor: 7 }));
+  assert.equal(fleet.requests[3].session_id, undefined);
+  assert.ok(fleet.requests[3].message.includes('"room": "lobby"'));
+  // agent-chat routing: one shared chat.
+  await call('/deliver', wake(id, { routing: 'agent-chat', items: [{ seq: 8, kind: 'message', at: 3, data: {} }], cursor: 8 }));
+  assert.ok(fleet.requests[4].message.includes('"room": "lobby"'));
+  assert.equal(fleet.requests[4].session_id, await sessionIdFor(id, 'agent-chat', 'lobby'));
+  // skipped is told.
+  await call('/deliver', wake(id, { skipped: 4, items: [{ seq: 9, kind: 'message', at: 3, data: {} }], cursor: 9 }));
+  assert.ok(fleet.requests[5].message.includes('\n(4 older items not shown)\n'));
+  assert.deepEqual(fleet.errors, []);
+  assertNoSecrets('tok-A', 'vmtok-A', 'secret room text');
+});
+
+test('deliver: paused answers 503 + Retry-After and sends nothing; unpaused delivers', async () => {
+  const id = await linked();
+  env.DELIVER_PAUSED = '1';
+  try {
+    const r = await call('/deliver', wake(id));
+    assert.equal(r.status, 503);
+    assert.equal(r.body.code, 'paused');
+    assert.equal(fleet.conns.length, 0);
+  } finally {
+    delete env.DELIVER_PAUSED;
+  }
+  assert.equal((await call('/deliver', wake(id))).status, 200);
+  assert.equal(fleet.requests.length, 1);
+});
+
+test('deliver: a retry of a wake that landed is not sent again', async () => {
+  const id = await linked();
+  assert.equal((await call('/deliver', wake(id))).status, 200);
+  const again = await call('/deliver', wake(id));
+  assert.deepEqual([again.status, again.body.duplicate], [200, true]);
+  assert.equal(fleet.requests.length, 1);
+  // A retry folding in a newer item sends only the new one.
+  const more = wake(id, { cursor: 6, items: [...wake(id).items, { seq: 6, kind: 'message', at: 3, data: { id: 'new' } }] });
+  assert.equal((await call('/deliver', more)).body.delivered, 1);
+  assert.ok(!fleet.requests[1].message.includes('"g1"'));
+  assert.ok(fleet.requests[1].message.includes('"new"'));
+});
+
+test('deliver: an upgrade refused (401) re-fetches the VM bearer once', async () => {
+  const id = await linked();
+  fleet.plans.push({ reject: 401 });
+  const r = await call('/deliver', wake(id));
+  assert.equal(r.status, 200);
+  assert.equal(apiCalls.length, 2, 'connect + one re-fetch');
+  assert.deepEqual(fleet.conns.map((c) => c.auth), ['Bearer vmtok-A', 'Bearer vmtok-A']);
+  // Refused again after the re-fetch: 502, not a loop.
+  fleet.plans.push({ reject: 403 }, { reject: 403 });
+  const r2 = await call('/deliver', wake(id, { items: [{ seq: 9, kind: 'message', at: 1, data: {} }], cursor: 9 }));
+  assert.deepEqual([r2.status, r2.body.code], [502, 'vm_refused']);
+  assert.equal(apiCalls.length, 3);
+});
+
+test('deliver: a refused access token waits out a grace period before 410', async () => {
+  const id = await linked();
+  // The device token went stale: the VM bearer is refused, and so is the re-fetch.
+  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
+  const refusedOnce = async () => {
+    fleet.plans.push({ reject: 401 });
+    return call('/deliver', wake(id));
+  };
+  // A glitch: refusals below the threshold answer 503 with Retry-After and keep the token.
+  for (let i = 0; i < 4; i++) {
+    const r = await refusedOnce();
+    assert.deepEqual([r.status, r.body.code, r.headers.get('Retry-After')], [503, 'token_refused', '900']);
+    clock += 15 * 60 * 1000;
+  }
+  assert.notEqual(env.LINK.instance(id).secret(), null);
+  // Enough refusals, but not yet over six hours: still waiting.
+  assert.equal((await refusedOnce()).status, 503);
+  assert.notEqual(env.LINK.instance(id).secret(), null);
+  // Six hours after the first refusal: gone, and the token deleted.
+  clock += 6 * 3600 * 1000;
+  const r = await refusedOnce();
+  assert.deepEqual([r.status, r.body.code], [410, 'link_gone']);
+  assert.equal(env.LINK.instance(id).secret(), null);
+  // From now on 410 without calling Muse at all.
+  const calls = apiCalls.length;
+  const conns = fleet.conns.length;
+  fleet.plans.length = 0;
+  assert.equal((await call('/deliver', wake(id))).status, 410);
+  assert.equal(apiCalls.length, calls);
+  assert.equal(fleet.conns.length, conns);
+  // A fresh token for the same Muse brings the link back.
+  assert.equal((await call('/update', { sealed: await sealFor('tok-A2') })).status, 200);
+  assert.equal((await call('/deliver', wake(id))).status, 200);
+  assertNoSecrets('tok-dead', 'tok-A2');
+});
+
+test('deliver: a success clears earlier token refusals', async () => {
+  const id = await linked();
+  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
+  const one = (seq) => wake(id, { items: [{ seq, kind: 'message', at: 1, data: {} }], cursor: seq });
+  // The cached VM bearer is refused once; after that every try goes straight to fetch_vms.
+  fleet.plans.push({ reject: 401 });
+  for (let i = 0; i < 4; i++) assert.equal((await call('/deliver', one(20 + i))).status, 503);
+  assert.equal(fleet.plans.length, 0);
+  // Muse takes the token again (the refusals were a glitch): delivered, and the count resets.
+  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-A'");
+  const ok = await call('/deliver', one(30));
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  assert.equal(env.LINK.instance(id).sql.exec('SELECT refused_n FROM secret').one().refused_n, 0);
+  // Long after, one refusal again: counted afresh, so not gone.
+  clock += 7 * 3600 * 1000;
+  env.LINK.instance(id).sql.exec("UPDATE secret SET access_token = 'tok-dead'");
+  fleet.plans.push({ reject: 401 });
+  assert.equal((await call('/deliver', one(31))).status, 503, 'one refusal after a success is not gone');
+});
+
+test('deliver: 502 when Muse is unreachable, refuses, or does not ack', async () => {
+  const id = await linked();
+  const one = (seq) => wake(id, { items: [{ seq, kind: 'message', at: 1, data: {} }], cursor: seq });
+  fleet.plans.push({ unreachable: true });
+  assert.deepEqual(await call('/deliver', one(10)).then((r) => [r.status, r.body.code]), [502, 'muse_unreachable']);
+  fleet.plans.push({ status: 500, body: '{"error":"x"}' });
+  assert.deepEqual(await call('/deliver', one(11)).then((r) => [r.status, r.body.code]), [502, 'muse_rejected']);
+  fleet.plans.push({ hang: true });
+  assert.deepEqual(await call('/deliver', one(12)).then((r) => [r.status, r.body.code]), [502, 'muse_unreachable']);
+  fleet.plans.push({ body: 'not json' });
+  assert.deepEqual(await call('/deliver', one(13)).then((r) => [r.status, r.body.code]), [502, 'no_ack']);
+  // Nothing was marked delivered: the same item goes out again.
+  assert.equal((await call('/deliver', one(10))).status, 200);
+});
+
+test('deliver: per-link rate cap answers 429 with Retry-After', async () => {
+  env.RATE_WAKES = '3';
+  env.RATE_WINDOW_S = '600';
+  const id = await linked();
+  for (let s = 1; s <= 3; s++) {
+    assert.equal((await call('/deliver', wake(id, { items: [{ seq: s, kind: 'message', at: 1, data: {} }], cursor: s }))).status, 200);
+    clock += 1000;
+  }
+  const r = await call('/deliver', wake(id, { items: [{ seq: 4, kind: 'message', at: 1, data: {} }], cursor: 4 }));
+  assert.equal(r.status, 429);
+  assert.equal(r.headers.get('Retry-After'), String(600 - 3));
+  assert.equal(fleet.requests.length, 3);
+  // Another link has its own budget.
+  const idB = await linked('tok-B');
+  assert.equal((await call('/deliver', wake(idB))).status, 200);
+  // The window moves on.
+  clock += 597 * 1000;
+  assert.equal((await call('/deliver', wake(id, { items: [{ seq: 4, kind: 'message', at: 1, data: {} }], cursor: 4 }))).status, 200);
+});
+
+test('disconnect: link and token gone, deliver 410, the Muse can link again', async () => {
+  const id = await linked();
+  const d = await call('/disconnect', { museLinkId: id });
+  assert.deepEqual([d.status, d.body], [200, { museLinkId: id, removed: true }]);
+  assert.equal(env.LINK.instance(id).secret(), null);
+  assert.equal(env.LINK.instance(id).row(), null);
+  assert.equal((await call('/deliver', wake(id))).status, 410);
+  assert.equal((await call('/update', { sealed: await sealFor('tok-A') })).status, 404);
+  assert.equal((await call('/disconnect', { museLinkId: id })).body.removed, false);
+  // Unknown link ids get 410 too.
+  assert.equal((await call('/deliver', wake('ml_' + 'f'.repeat(32)))).status, 410);
+  const again = await connect();
+  assert.notEqual(again.museLinkId, id);
+});
+
+test('disconnect kills an unclaimed code', async () => {
+  const c = await connect();
+  await call('/disconnect', { museLinkId: c.museLinkId });
+  assert.equal((await call('/claim', { code: c.code })).status, 404);
+});
+
+test('rooms and status: a count of hooked rooms, kept across connect, gone on disconnect', async () => {
+  const id = await linked();
+  let st = await call('/status', { museLinkId: id });
+  assert.deepEqual([st.status, st.body], [200, { museLinkId: id, connected: true, rooms: 0, termsVersion: '2026-11', tokenHeld: true }]);
+  assert.deepEqual((await call('/rooms', { museLinkId: id, room: 'lobby', hooked: true })).body, { museLinkId: id, rooms: 1 });
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'lobby', hooked: true })).body.rooms, 1); // idempotent
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'den', hooked: true })).body.rooms, 2);
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'den', hooked: false })).body.rooms, 1);
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'den', hooked: false })).body.rooms, 1);
+  // Connecting again (to add rooms) keeps them.
+  const again = await connect();
+  assert.equal(again.museLinkId, id);
+  assert.equal((await call('/status', { museLinkId: id })).body.rooms, 1);
+  // Bad input.
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'Bad Room', hooked: true })).status, 400);
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'lobby' })).status, 400);
+  assert.equal((await call('/rooms', { museLinkId: 'nope', room: 'lobby', hooked: true })).status, 400);
+  assert.equal((await call('/status', {})).status, 400);
+  // Unknown link: 410.
+  const other = 'ml_' + 'f'.repeat(32);
+  assert.equal((await call('/rooms', { museLinkId: other, room: 'lobby', hooked: true })).status, 410);
+  assert.equal((await call('/status', { museLinkId: other })).body.code, 'link_gone');
+  // Disconnect clears them; the link answers 410.
+  await call('/disconnect', { museLinkId: id });
+  assert.equal((await call('/status', { museLinkId: id })).status, 410);
+  assert.equal((await call('/rooms', { museLinkId: id, room: 'lobby', hooked: true })).status, 410);
+  assert.equal(env.LINK.instance(id).sql.exec('SELECT COUNT(*) AS n FROM rooms').one().n, 0);
+  assertNoSecrets(id, 'tok-A');
+});
+
+test('deliver payload checks', () => {
+  const ok = wake('ml_' + 'a'.repeat(32));
+  assert.equal(deliverError(ok), null);
+  assert.equal(deliverError({ ...ok, routing: '0e3b5b9a-8f62-4b1e-9d5c-3a2f1e0d9c8b' }), null);
+  for (const bad of [
+    { museLinkId: 'x' },
+    { room: 'Lobby\n' },
+    { routing: 'side-1' },
+    { cursor: -1 },
+    { items: [] },
+    { items: [{ seq: 1, kind: 'poke', at: 1, data: {} }] },
+    { items: [{ seq: 0, kind: 'message', at: 1, data: {} }] },
+    { items: [{ seq: 1, kind: 'message', at: 1 }] },
+    { skipped: 'x' },
+  ]) {
+    assert.ok(deliverError({ ...ok, ...bad }), JSON.stringify(bad));
+  }
+});
+
+test('bad requests', async () => {
+  assert.equal((await call('/nope', {})).status, 404);
+  assert.equal((await call('/claim', null, { method: 'GET' })).status, 405);
+  assert.equal((await call('/deliver', { museLinkId: 'nope' })).status, 400);
+  const big = await call('/claim', { code: 'x'.repeat(40_000) });
+  assert.equal(big.status, 413);
+});
+
+test.after(() => {
+  deps.now = realNow;
+});

@@ -92,7 +92,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Code | `worker/` (entry `worker/index.ts`), `web/`, `contract/`: see Repository layout. `.txt`, `.md` and `.sh` files are text modules (`wrangler.toml`'s Text rule). |
 | Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*` and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
-| Related repos | `avictorio/muse-bridge` (the `muse-bridge` Worker behind `MUSE_BRIDGE`, locally `C:\users\operator\dev\muse-bridge`) and `avictorio/muse-gadget` (the ESP32 gadget's firmware patch and tools, locally `C:\users\operator\dev\muse-gadget`), each with its own AGENTS.md. This repo serves the gadget's guide (`/muse-gadget`, `worker/routes/pages.ts`, images in `web/app/public/muse-gadget/`; retake them over USB when the gadget's screens change) and its terms (`/muse-terms`). |
+| Related repos | `avictorio/muse-gadget` (the ESP32 gadget's firmware patch and tools, locally `C:\users\operator\dev\muse-gadget`), with its own AGENTS.md. This repo serves the gadget's guide (`/muse-gadget`, `worker/routes/pages.ts`, images in `web/app/public/muse-gadget/`; retake them over USB when the gadget's screens change) and its terms (`/muse-terms`). The Muse bridge's code came from `avictorio/muse-bridge` at `ef113b6` into `worker/bridge/`, `tests/bridge/` and `scripts/bridge/`. Until this Worker serves the bridge itself, the live bridge is still the `muse-bridge` Worker behind `MUSE_BRIDGE`, deployed from that repo, so a fix to the live bridge goes there as well as here. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
 | KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, the direct-upload check's verdict (and old create-room counters, expiring) |
 | R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings, and the direct check's short-lived objects under `_check/` (`docs/agents/media.md`) |
@@ -122,6 +122,10 @@ agent-chat/
 │  │                   Cartesia, Claude, web fetch
 │  ├─ agents/          what agents read: the /api docs (docs.txt, games.txt, docs.ts), the
 │  │                   primer, notices, MCP, onboarding, the wake recipe
+│  ├─ bridge/          the Muse bridge (from avictorio/muse-bridge): its router,
+│  │                   the MuseLink and Directory Durable Objects, the sealed
+│  │                   handover, the wake text, and muse/, the port of Meta's
+│  │                   Muse Gadget SDK send path (NOTICE, LICENSE-muse-gadget-sdk)
 │  ├─ lib/             shared helpers (http, log, tokens, text, crypto, ...)
 │  ├─ push-sw.txt      the push service worker
 │  └─ limits.ts        every limit and cap in one place
@@ -133,9 +137,12 @@ agent-chat/
 ├─ contract/           @chat/contract: the API and every game's state types;
 │                      the web app and the Worker's typecheck both read it
 ├─ types/              ambient types for the Worker's typecheck
-├─ scripts/            check-worker, check-inline, check-config, move-files
-├─ tests/              api/ (the Worker on wrangler dev), unit/, upgrade/ (the
-│                      schema upgrade test), fixtures/
+├─ scripts/            check-worker, check-inline, check-config, move-files;
+│                      bridge/ (the seal key and seal tools, the SDK fixture
+│                      generator, the Python interop VM)
+├─ tests/              api/ (the Worker on wrangler dev), unit/, bridge/ (the
+│                      Muse bridge in Node), upgrade/ (the schema upgrade
+│                      test), fixtures/
 └─ docs/agents/        the topic files (sections 3, 9 and 10)
 ```
 
@@ -342,8 +349,8 @@ Before pushing:
      (section 13, Lint).
    - `npm test`: the `web/` Playwright suite, on the build, against a fake
      API.
-   - `npm run test:unit`: the pure game logic and Worker helpers, in
-     seconds.
+   - `npm run test:unit`: the pure game logic and Worker helpers, and
+     the Muse bridge's own tests (`tests/bridge/`), in seconds.
    - `npm run test:api`: the server, against a local `wrangler dev` that
      serves the build as static assets.
    - A new schema step also runs `tests/upgrade/run.sh` (section 13,

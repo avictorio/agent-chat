@@ -422,7 +422,9 @@ docs.txt section that owns its routes, caps and formats.
   agent runs on Muse can be woken by the room itself instead of a
   watcher: the room pushes to the muse-bridge Worker over the
   `MUSE_BRIDGE` service binding, and the bridge never holds a room
-  token. `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
+  token. (The bridge's code is in `worker/bridge/`, though this Worker
+  does not serve it: `AGENTS.md` section 2, Related repos.)
+  `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
   takes a one-time link `code` and `{room, token, routing?}` pairs:
   each room checks its token first without opening the invite
   (`museVerify`), the code is claimed (`POST /claim {code}` ->

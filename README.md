@@ -16,3 +16,7 @@ GitHub is the source of truth: every push to `main` deploys through Cloudflare W
 
 Rolling back: AGENTS.md section 7, "Rollback".
 Running the Worker locally (`npx wrangler dev`) and the test suites: `docs/agents/testing.md`.
+
+## Third-party code
+
+`worker/bridge/muse/` is a TypeScript port of the send path of Meta's Muse Gadget SDK, `facebookincubator/muse-gadget-sdk` at commit `e17081a` (`linux/src/musegadget/noise/*`, `streaming.py`, and parts of `link_client.py` and `muse_api.py`), Copyright (c) Meta Platforms, Inc. and affiliates, under the Apache License 2.0. Each of those files says so in its header; `worker/bridge/NOTICE` lists the sources and the changes, and `worker/bridge/LICENSE-muse-gadget-sdk` is the licence. The bridge's test fixture, `tests/bridge/fixtures/sdk-fixtures.json`, holds bytes produced by running that SDK's Python code. The Code Race word list (`worker/data/coderace-words.txt`) carries SCOWL's notice.

@@ -47,11 +47,72 @@ interface Env {
   MUSE_BRIDGE_KEY?: string;
 }
 
+// What the Muse bridge's code (worker/bridge) reads from its env: the
+// muse-bridge Worker's bindings, secrets and [vars], under their names
+// there. Nothing in the chat Worker builds one: the bridge's tests
+// (tests/bridge) do, with Durable Objects on node:sqlite. Every [vars]
+// value is a string that config() (worker/bridge/util.ts) parses and
+// clamps, a missing one taking its default.
+interface BridgeEnv {
+  LINK: DurableObjectFetchNamespace;
+  DIRECTORY: DurableObjectFetchNamespace;
+  /** base64 of the raw 32-byte X25519 private key the gadget seals to */
+  BRIDGE_SEAL_KEY?: string;
+  /** what every caller sends as X-Bridge-Key; unset, every route answers 503 */
+  BRIDGE_SHARED_KEY?: string;
+  /** "1" pauses /deliver (503 paused, Retry-After) */
+  DELIVER_PAUSED?: string;
+  RATE_WAKES?: string;
+  RATE_WINDOW_S?: string;
+  CODE_TTL_S?: string;
+  HANDSHAKE_TIMEOUT_MS?: string;
+  REQUEST_TIMEOUT_MS?: string;
+  DEDUPE_S?: string;
+  TOKEN_REFUSALS?: string;
+  TOKEN_GRACE_S?: string;
+  TOKEN_RETRY_S?: string;
+  MUSE_API_HOSTS?: string;
+  MUSE_NOISE_HOSTS?: string;
+}
+
 // The parts of the Workers runtime the Worker uses, after
 // @cloudflare/workers-types (not a dependency: only what the code calls).
 
 interface Fetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+}
+
+// Workers' WebCrypto takes any ArrayBufferView as bytes; TypeScript's lib
+// takes only views of an ArrayBuffer. The Muse bridge's Noise and seal code
+// (worker/bridge, ported against the Workers types) hands it plain
+// Uint8Arrays, so these overloads say what the runtime accepts.
+type WorkersBytes = ArrayBuffer | ArrayBufferView;
+
+interface WorkersAesGcmParams {
+  name: "AES-GCM";
+  iv: WorkersBytes;
+  additionalData?: WorkersBytes;
+  tagLength?: number;
+}
+
+interface SubtleCrypto {
+  importKey(format: "raw" | "pkcs8" | "spki", keyData: WorkersBytes, algorithm: AlgorithmIdentifier | HmacImportParams, extractable: boolean, keyUsages: KeyUsage[]): Promise<CryptoKey>;
+  sign(algorithm: AlgorithmIdentifier, key: CryptoKey, data: WorkersBytes): Promise<ArrayBuffer>;
+  digest(algorithm: AlgorithmIdentifier, data: WorkersBytes): Promise<ArrayBuffer>;
+  encrypt(algorithm: WorkersAesGcmParams, key: CryptoKey, data: WorkersBytes): Promise<ArrayBuffer>;
+  decrypt(algorithm: WorkersAesGcmParams, key: CryptoKey, data: WorkersBytes): Promise<ArrayBuffer>;
+}
+
+// Workers' outbound WebSocket: fetch() with "Upgrade: websocket" answers a
+// Response holding the socket, which the caller accepts before using it
+// (the bridge's wake, workersWebSocketFactory in worker/bridge/muse/session.ts).
+interface Response {
+  readonly webSocket: WebSocket | null;
+}
+
+interface WebSocket {
+  accept(): void;
+  send(message: WorkersBytes | string): void;
 }
 
 /** What the Worker's fetch handler gets beside the request and env. */
@@ -76,6 +137,14 @@ interface DurableObjectId {
 interface DurableObjectNamespace {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): DurableObjectStub;
+}
+
+/** A namespace whose objects are reached through fetch alone: the Muse
+ *  bridge's MuseLink and Directory answer internal routes (callDo in
+ *  worker/bridge/util.ts), not RPC methods. */
+interface DurableObjectFetchNamespace {
+  idFromName(name: string): DurableObjectId;
+  get(id: DurableObjectId): Fetcher;
 }
 
 interface DurableObjectState {
