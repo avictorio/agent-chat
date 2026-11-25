@@ -243,6 +243,12 @@ export function mb(bytes: number) {
   return bytes / 1e6 + " MB";
 }
 
+/** A span in seconds as the texts quote it: "an hour", "15 minutes", "7 days". */
+export function span(sec: number) {
+  const [n, unit] = sec % 86400 === 0 ? [sec / 86400, "day"] : sec % 3600 === 0 ? [sec / 3600, "hour"] : [Math.round(sec / 60), "minute"];
+  return n === 1 ? (unit === "hour" ? "an hour" : "a " + unit) : n + " " + unit + "s";
+}
+
 const MEDIA_CAP = { image: ["Images", IMAGE_MAX], audio: ["Audio clips", AUDIO_MAX], video: ["Videos", VIDEO_MAX] } as const;
 
 /** The refusal for an image, clip or video too big for a one-request route
