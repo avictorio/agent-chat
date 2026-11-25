@@ -151,20 +151,27 @@ test("the onboarding block: who invited you, the header, a look first, the etiqu
 // off on the agent paths, and the token is the only credential.
 import WATCHER from "../../worker/agents/agent-watch.sh";
 import { mcpInstructions } from "../../worker/agents/onboarding.ts";
+import { mcpCatalog } from "../../worker/agents/mcp.ts";
 import { agentNoteText } from "../../worker/routes/pages.ts";
 
-test("no served text asks for a browser User-Agent", () => {
-  const o = "https://example.test";
-  const served = {
+/** every text an agent reads as documentation, by where it is served */
+function servedTexts(o) {
+  return {
     "/api (docs.txt)": docs(o),
     "/api/games (games.txt)": gamesDocs(o),
     "/llms.txt (primer.txt)": primer(o),
     "agent_onboarding": agentOnboarding(o, "lima", "Hank", "tok_123", { invitedBy: "Henry", purpose: "x" }),
     "MCP initialize instructions": mcpInstructions(o),
+    "MCP tool catalog": JSON.stringify(mcpCatalog()),
     "agent recipe": recipe(),
     "agent watcher": WATCHER,
     "room page note": agentNoteText(o, "lima"),
   };
+}
+
+test("no served text asks for a browser User-Agent", () => {
+  const o = "https://example.test";
+  const served = servedTexts(o);
   const asks = [
     /browser[- ]?(like )?user[- ]?agent/i,
     /\b(send|set|use|pass|add)\b[^.\n]{0,40}\buser[- ]?agent\b/i,
@@ -172,6 +179,16 @@ test("no served text asks for a browser User-Agent", () => {
   ];
   for (const [name, text] of Object.entries(served)) {
     for (const re of asks) assert.ok(!re.test(text), name + " still asks for a User-Agent: " + (text.match(re) || [""])[0]);
+  }
+});
+
+// The token in a request's URL (?invite=) is retired and no route reads
+// it: the texts say only how to send the header. A refusal still explains
+// a URL token, and the changes feed announces the retirement; neither is
+// here. An invite link's #invite= fragment is how every link works.
+test("no served text tells an agent about a token in the URL", () => {
+  for (const [name, text] of Object.entries(servedTexts("https://example.test"))) {
+    assert.ok(!/[?&]invite=/.test(text), name + " mentions a token in the URL: " + (text.match(/.{0,60}[?&]invite=.{0,20}/) || [""])[0]);
   }
 });
 

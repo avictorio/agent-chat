@@ -286,21 +286,23 @@ async function linkPage(ctx) {
   await req('DELETE', '/api/rooms/' + room + '?confirm=' + room, { owner: true });
 }
 
-// The URL token, retired 2026-11-22: outside MCP ?invite= is not read. A
-// room answer to a request that carries one still says why, with the
-// Deprecation, Sunset and Link headers and a notice; MCP keeps the URL form.
+// The URL token is retired (2026-11-22, the MCP route 2026-11-25): no route
+// reads ?invite=. A room answer to a request that carries one still says
+// why, with the Deprecation, Sunset and Link headers, and a notice in a
+// JSON object body - never in an MCP answer's JSON-RPC envelope.
 async function queryToken(ctx) {
   const { req, check, BASE, SUF } = ctx;
   const room = 'apitest-query-' + SUF;
   const R = '/api/rooms/' + room;
   await req('POST', R, { owner: true });
   const H = (await req('POST', R + '/invites', { owner: true, json: { name: 'QryH', kind: 'human' } })).json.token;
+  const M = (await req('POST', R + '/invites', { owner: true, json: { name: 'QryM', kind: 'agent' } })).json.token;
   const dep = (r) => ({ dep: r.headers.get('deprecation'), sunset: r.headers.get('sunset'), link: r.headers.get('link') });
   let r = await req('GET', R + '/messages?limit=1&invite=' + H);
   let d = dep(r);
   check('query: a URL token alone is refused 401 invite_missing', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + JSON.stringify(r.json));
   check('query: ... its sentence says to use the header', /no longer read/.test(r.json.error || '') && /X-Invite-Token/.test(r.json.error || ''), r.json.error);
-  check('query: ... with Deprecation, Sunset (the retirement day) and a deprecation Link', /^@\d+$/.test(d.dep || '') && /22 Nov 2026/.test(d.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(d.link || ''), JSON.stringify(d));
+  check('query: ... with Deprecation (21 Nov 2026), Sunset (the retirement day) and a deprecation Link', d.dep === '@' + Date.UTC(2026, 10, 21) / 1000 && /22 Nov 2026/.test(d.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(d.link || ''), JSON.stringify(d));
   check('query: ... and a notice saying it was retired', /retired/.test(r.json.notice || '') && /X-Invite-Token/.test(r.json.notice || '') && /2026-11-22/.test(r.json.notice || ''), r.json.notice);
   r = await req('POST', R + '/messages?invite=' + H, { json: { text: 'posted with a URL token' } });
   check('query: a post with a URL token alone is refused and stores nothing', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + JSON.stringify(r.json));
@@ -310,10 +312,46 @@ async function queryToken(ctx) {
   check('query: header and query: the header is used, and the notice says the URL one was ignored', r.status === 200 && r.json.you === 'QryH' && /ignored/.test(r.json.notice || '') && !!r.headers.get('deprecation'), r.status + ' ' + r.json.notice);
   r = await req('GET', R + '/messages?limit=1', { token: H });
   check('query: no URL token, no Deprecation and no notice', !r.headers.get('deprecation') && !('notice' in r.json), JSON.stringify(dep(r)));
-  r = await req('POST', R + '/mcp?invite=' + H, { json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
-  check('query: MCP keeps the URL form, with no notice', r.status === 200 && r.json.result && !r.headers.get('deprecation') && !('notice' in r.json), r.status + ' ' + JSON.stringify(dep(r)));
-  r = await req('POST', R + '/mcp?invite=' + H, { json: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'whoami', arguments: {} } } });
-  check('query: ... and a tool call with it acts as the invite', r.status === 200 && r.json.result && /QryH/.test(JSON.stringify(r.json.result)), r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+  {
+    // MCP: QryM's token goes only in the URL. What needs a token is
+    // refused as if none was sent (HTTP 200, JSON-RPC -32001), its
+    // sentence saying to use the header; every answer carries the three
+    // headers (Deprecation and Sunset: the MCP route's own day, as it was
+    // never deprecated before) and its envelope gains no member, which a
+    // strict MCP client would reject.
+    const mcp = (body, opts) => req('POST', R + '/mcp?invite=' + M, Object.assign({ json: body }, opts || {}));
+    const mcpDep = (x) => { const h = dep(x); return h.dep === '@' + Date.UTC(2026, 10, 25) / 1000 && /25 Nov 2026/.test(h.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(h.link || ''); };
+    const envelope = (x) => !!x.json && JSON.stringify(Object.keys(x.json).sort()) === JSON.stringify(x.json.error ? ['error', 'id', 'jsonrpc'] : ['id', 'jsonrpc', 'result']);
+    const refusedAsTokenless = (x) => x.status === 200 && !!x.json && !!x.json.error && x.json.error.code === -32001 && (x.json.error.data || {}).code === 'invite_missing' && /no longer read/.test(x.json.error.message) && /X-Invite-Token/.test(x.json.error.message);
+    const show = (x) => x.status + ' ' + JSON.stringify(dep(x)) + ' ' + x.text.slice(0, 200);
+    r = await mcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    check('query: MCP no longer reads it: tools/list with only a URL token is refused -32001 invite_missing, saying to use the header', refusedAsTokenless(r), show(r));
+    check('query: ... with Deprecation, Sunset (25 Nov 2026, the MCP route\'s retirement) and the Link, and no notice in the envelope', mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'whoami', arguments: {} } });
+    check('query: ... a tool call with only a URL token is refused the same way, with the headers', refusedAsTokenless(r) && mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
+    check('query: ... and so is get_invite', refusedAsTokenless(r) && mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'get_invite', arguments: {} } }, { owner: true });
+    check('query: ... even with the owner key: get_invite previews no URL token', refusedAsTokenless(r) && mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', id: 32, method: 'tools/list' }, { token: 'query-bogus' });
+    check('query: ... a bad header token stays refused (invite_invalid): the URL token never stands in for it', r.status === 200 && !!r.json.error && r.json.error.code === -32001 && (r.json.error.data || {}).code === 'invite_invalid' && mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', id: 33, method: 'initialize', params: { protocolVersion: '2025-06-18', pad: 'x'.repeat(1100 * 1024) } });
+    check('query: ... a body too big without a token is 413, its sentence saying the URL token is not read', r.status === 413 && !!r.json && r.json.error.code === -32600 && /no longer read/.test(r.json.error.message) && /X-Invite-Token/.test(r.json.error.message) && mcpDep(r) && envelope(r), show(r));
+    r = await mcp([{ jsonrpc: '2.0', id: 4, method: 'ping' }]);
+    check('query: ... a batch with only a URL token is the tokenless 400, its sentence saying to use the header', r.status === 400 && !!r.json && r.json.error.code === -32600 && r.json.error.data.code === 'invite_missing' && /no longer read/.test(r.json.error.message) && mcpDep(r) && envelope(r), show(r));
+    // the handshake needs no token, as before: it answers, with the headers
+    r = await mcp({ jsonrpc: '2.0', id: 5, method: 'initialize', params: { protocolVersion: '2025-06-18' } });
+    check('query: ... initialize still answers without a token, with the headers and a bare envelope', r.status === 200 && !!r.json && !!r.json.result && !!r.json.result.serverInfo && mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    check('query: ... notifications/initialized is still a bare 202, with the headers', r.status === 202 && r.text === '' && mcpDep(r), show(r));
+    r = await req('GET', R + '/invite', { token: M });
+    check('query: ... and none of it opened the invite in the URL', r.status === 200 && r.json.invite.status === 'unused', r.status + ' ' + JSON.stringify(r.json && r.json.invite));
+    r = await mcp({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'whoami', arguments: {} } }, { token: H });
+    check('query: MCP with a header and a URL token acts as the header\'s member, with the headers and no notice', r.status === 200 && !!r.json.result && /QryH/.test(JSON.stringify(r.json.result)) && !/QryM/.test(JSON.stringify(r.json.result)) && mcpDep(r) && envelope(r), show(r));
+    const plain = await req('POST', R + '/mcp', { token: H, json: { jsonrpc: '2.0', id: 7, method: 'tools/list' } });
+    r = await mcp({ jsonrpc: '2.0', id: 8, method: 'tools/list' }, { headers: { Authorization: 'Bearer ' + H } });
+    check('query: ... a Bearer header too; and without a URL token, no Deprecation header', r.status === 200 && !!r.json.result && Array.isArray(r.json.result.tools) && mcpDep(r) && envelope(r) && plain.status === 200 && !!plain.json.result && !plain.headers.get('deprecation') && !plain.headers.get('sunset'), show(r) + ' | plain: ' + show(plain));
+  }
   r = await req('GET', R + '/messages/1/image?invite=' + H);
   check('query: media reads refuse it too (401), with the headers', r.status === 401 && r.json.code === 'invite_missing' && !!r.headers.get('deprecation'), r.status + ' ' + r.json.code);
   r = await req('GET', R + '/messages?limit=1&invite=bogus-token');
@@ -334,6 +372,11 @@ async function queryToken(ctx) {
   }
   r = await req('GET', '/api/changes');
   check('query: the changes feed announces the retirement', (r.json.notices || []).some((n) => /\?invite=/.test(n.text) && /retired/.test(n.text)) && !(r.json.notices || []).some((n) => /2026-12-21 at the earliest/.test(n.text)), JSON.stringify(r.json.notices).slice(0, 200));
+  {
+    const ns = r.json.notices || [];
+    const mcpNotice = ns.find((n) => n.id === '2026-11-25-mcp-query-token-retired');
+    check('query: ... announces the MCP endpoint\'s retirement too, and no notice says MCP still reads it', !!mcpNotice && /\?invite=/.test(mcpNotice.text) && /MCP/.test(mcpNotice.text) && !ns.some((n) => /still reads/.test(n.text)), JSON.stringify(ns.filter((n) => /invite=/.test(n.text))).slice(0, 400));
+  }
   await req('DELETE', R + '/invites', { owner: true });
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }

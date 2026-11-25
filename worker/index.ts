@@ -4,7 +4,7 @@
 import { BadRequest, CORS, json, settleBody } from "./lib/http.js";
 import { GONE_MSG, isGoneError } from "./lib/errors.js";
 import { AUDIO_MAX, AVATAR_MAX, IMAGE_MAX, inlineBodyCap, mb, mediaTooBig, MIB, ROOM_RE, SETTLED_BODY_MAX, VIDEO_MAX, VOICE_SAMPLE_MAX } from "./limits.js";
-import { MCP_PATH, headerToken, queryToken, queryTokenNotice } from "./lib/tokens.js";
+import { MCP_PATH, headerToken, queryTokenNotice } from "./lib/tokens.js";
 import { renewDirectVerdict } from "./platform/r2-direct-check.js";
 import { r2DirectConfigured } from "./platform/r2-s3.js";
 import {
@@ -68,9 +68,9 @@ export { Directory } from "./bridge/directory.js";
 
 /** What every route handler gets: the request and the bindings, the parsed
  *  URL and its path, whether the owner key came with it, and the invite
- *  token from a header (X-Invite-Token or Authorization: Bearer; on the MCP
- *  route also ?invite=), and the request's ctx, whose waitUntil carries work
- *  that must finish even if the client goes away. */
+ *  token from a header (X-Invite-Token or Authorization: Bearer), and the
+ *  request's ctx, whose waitUntil carries work that must finish even if the
+ *  client goes away. */
 export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, ctx: ExecutionContext };
 
 /** ?pretty=1: the JSON answer indented, for a person reading it raw. */
@@ -159,10 +159,8 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     const owner = !!env.OWNER_KEY && request.headers.get("X-Owner-Key") === env.OWNER_KEY;
     // The invite token: X-Invite-Token, else Authorization: Bearer (the
     // alias for MCP clients that can set only a bearer token). A token in
-    // the URL (?invite=) is retired (lib/tokens.ts): only
-    // POST /api/rooms/ROOM/mcp still reads it, for MCP clients configured
-    // with a URL alone, and a header wins there too.
-    const invite = headerToken(request) || (MCP_PATH.test(path) ? queryToken(url) : "");
+    // the URL (?invite=) is retired and no route reads it (lib/tokens.ts).
+    const invite = headerToken(request);
     const rc: RouteContext = { request, env, url, path, owner, invite, ctx };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });

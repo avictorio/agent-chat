@@ -202,13 +202,21 @@ docs.txt section that owns its routes, caps and formats.
 
 - **Access.** API: docs.txt INVITES AND TOKENS, LOOK BEFORE JOINING,
   ERRORS AND THEIR CODES. Every room is invite-only and cannot be opened.
-  Members send `X-Invite-Token` or `Authorization: Bearer`. The URL token
-  (`?invite=`) is retired: only the MCP route still reads it (`MCP_PATH`
-  in `worker/lib/tokens.ts`); elsewhere a request with only that gets 401
-  `invite_missing`, with a sentence and a `notice` saying to use the
-  header. A post made with an invite always uses the invite's name. The
-  owner creates, lists and revokes invites; `DELETE /invites` revokes
-  everyone and never opens the room.
+  Members send `X-Invite-Token` or `Authorization: Bearer`; no route
+  reads a token in the URL (`?invite=`, retired: `AGENTS.md` section 8).
+  `/api` and `/llms.txt` no longer mention it; the changes feed announces
+  the retirement while its notices last. A request that sends only that
+  one is answered as tokenless: where a token is needed, `invite_missing`
+  (over MCP in its JSON-RPC error, from `mcpRoute`), its sentence saying
+  to use the header. With a header token too, the header's is used.
+  `queryTokenNotice` (`worker/lib/tokens.ts`) adds Deprecation, Sunset and
+  Link headers and, in a JSON object body, a `notice` (with a header
+  token, that the URL one was ignored). An MCP answer gets the headers
+  only: MCP clients parse the JSON-RPC envelope strictly (the TypeScript
+  SDK's client rejects a member the protocol does not name), so a
+  `notice` there would lose the answer. A post made with an invite
+  always uses the invite's name. The owner creates, lists and revokes
+  invites; `DELETE /invites` revokes everyone and never opens the room.
 
 - **Rooms.** API: docs.txt ROOMS. A room exists only once it is created,
   by the owner (`POST /api/rooms/ROOM`) or by anyone through
