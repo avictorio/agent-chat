@@ -14,6 +14,7 @@ import { deps } from "../../worker/bridge/util.ts";
 import { derivedSessionId } from "../../worker/bridge/wake.ts";
 import { ServiceFrame } from "../../worker/bridge/muse/envelope.ts";
 import { museBridge } from "../../worker/room/muse.ts";
+import { resetWarnings } from "../../worker/lib/log.ts";
 import { MUSE_WAKE_WAIT_MARGIN_MS, MUSE_WAKES_AT_ONCE } from "../../worker/limits.ts";
 import { FakeNamespace } from "../bridge/helpers/fake-do.mjs";
 import { FakeVm } from "../bridge/helpers/fake-vm.mjs";
@@ -281,8 +282,10 @@ test("a failure in the clocks or the wakes stops neither the other nor the re-ar
 
 test("a wake that throws waits out a backoff instead of being picked again at once", async (t) => {
   const quiet = console.warn;
-  console.warn = () => {};
+  const warned = [];
+  console.warn = (line) => warned.push(String(line));
   t.after(() => { console.warn = quiet; });
+  resetWarnings(); // a line this process logged already would be held back
   const w = await museWorld();
   try {
     const h = makeRoom({ env: w.env });
@@ -291,13 +294,64 @@ test("a wake that throws waits out a backoff instead of being picked again at on
     await h.room.post("Bob", "one", R, false);
     dueNow(h);
     let tries = 0;
-    h.room.museWake = async () => { tries++; throw new Error("broken wake"); };
+    // what a queued item that no longer parses throws: V8 quotes the input
+    h.room.museWake = async () => { tries++; JSON.parse("Bob's private words"); };
     await h.room.museDeliver({ allowanceMs: 200 });
     assert.equal(tries, 1, "tried once in the run, not over and over");
     const row = h.one("SELECT fails, due_at FROM mh WHERE member = 'ada'");
     assert.equal(row.fails, 1);
     assert.ok(row.due_at > Date.now() + 1000, "due again after the backoff");
+    // the log names the failure, never the member's text
+    const line = warned.find((l) => l.includes("muse.wake"));
+    assert.ok(line && JSON.parse(line).error === "SyntaxError", line);
+    assert.ok(!warned.join("\n").includes("private words"), warned.join("\n"));
   } finally {
+    w.restore();
+  }
+});
+
+test("a run whose pick of the next wake fails ends only once the wakes it sent have", async (t) => {
+  const quiet = console.warn;
+  const warned = [];
+  console.warn = (line) => warned.push(String(line));
+  t.after(() => { console.warn = quiet; });
+  resetWarnings(); // a line this process logged already would be held back
+  const held = gate();
+  const w = await museWorld({ links: 2, ack: () => held.p });
+  try {
+    const h = makeRoom({ env: w.env });
+    for (const n of ["Ada", "Bob", "Cy"]) h.member(n);
+    assert.equal(h.room.museSetHook("tok-Ada", w.links[0], "agent-chat", R).ok, true);
+    assert.equal(h.room.museSetHook("tok-Cy", w.links[1], "agent-chat", R).ok, true);
+    await h.room.post("Bob", "for both", R, false);
+    dueNow(h);
+    // the third lane's pick fails (storage), the first two have each taken a wake
+    const sql = h.room.sql;
+    const exec = sql.exec.bind(sql);
+    let picks = 0;
+    sql.exec = (q, ...a) => {
+      if (/^SELECT \* FROM mh WHERE enabled = 1 AND muted = 0 AND due_at/.test(q) && ++picks === 3) throw new Error("storage hiccup");
+      return exec(q, ...a);
+    };
+    let ended = false;
+    const run = h.room.museDeliver().then(() => { ended = true; });
+    assert.ok(await until(() => w.chats.length === 2), "both wakes reached Muse");
+    sql.exec = exec;
+    await sleep(50);
+    assert.equal(ended, false, "the run is still out with its wakes");
+    assert.equal(h.room.museBusy, true, "and still holds the room's one run");
+    // the next alarm's run leaves them to it: nothing is sent twice
+    dueNow(h);
+    await h.room.museDeliver();
+    await sleep(50);
+    assert.equal(w.chats.length, 2);
+    held.open();
+    await run;
+    assert.equal(h.room.museBusy, false);
+    for (const tok of ["tok-Ada", "tok-Cy"]) assert.deepEqual([h.room.museStatus(tok).hook.pending, h.room.museStatus(tok).hook.last_status], [0, 200], tok);
+    assert.equal(warned.filter((l) => l.includes("muse.pick")).length, 1, warned.join("\n"));
+  } finally {
+    held.open();
     w.restore();
   }
 });

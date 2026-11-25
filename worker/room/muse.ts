@@ -400,8 +400,20 @@ export const MuseMethods = {
       const due = this.sql.exec<MhRow>("SELECT * FROM mh WHERE enabled = 1 AND muted = 0 AND due_at IS NOT NULL AND due_at <= ? ORDER BY due_at", Date.now()).toArray();
       return due.find((h) => !taken.has(h.member)) || null;
     };
+    // A lane whose pick fails (storage) stops; the run ends only when every
+    // lane has, or the next run would pick the members whose wakes are
+    // still out and send them again.
+    const pickFailed: { error: unknown }[] = [];
+    const pick = (): MhRow | null => {
+      try {
+        return next();
+      } catch (e) {
+        pickFailed.push({ error: e });
+        return null;
+      }
+    };
     const lane = async () => {
-      for (let h = next(); h; h = next()) {
+      for (let h = pick(); h; h = pick()) {
         taken.add(h.member);
         try {
           await this.museWake(h, gen, budget);
@@ -409,17 +421,21 @@ export const MuseMethods = {
         } catch (e) {
           // A wake that threw left its hook due: picked again at once, it
           // would spin until the allowance ran out, and every run after.
-          // It waits out a backoff instead, and sits out this run.
-          warn("muse.wake", e, { room: h.room });
+          // It waits out a backoff instead, and sits out this run. Its
+          // name only: a queued item that no longer parses would put
+          // member text in the message (lib/log.ts).
+          warn("muse.wake", e instanceof Error ? e.name : null, { room: h.room });
           this.museDefer(h.member, gen);
         }
       }
     };
     try {
-      await Promise.all(Array.from({ length: MUSE_WAKES_AT_ONCE }, lane));
+      await Promise.allSettled(Array.from({ length: MUSE_WAKES_AT_ONCE }, lane));
     } finally {
       this.museBusy = false;
     }
+    const failed = pickFailed[0];
+    if (failed) warn("muse.pick", failed.error, { room: this.roomName, lanes: pickFailed.length });
   },
 
   /** A hook whose wake failed outside museSettle (a throw): tried again
