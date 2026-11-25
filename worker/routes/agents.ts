@@ -19,6 +19,7 @@ import { invitePreviewBody } from "./members.js";
 import { mcpInstructions } from "../agents/onboarding.js";
 import { recipe } from "../agents/docs.js";
 import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
+import { hasQueryToken, QUERY_REFUSED } from "../lib/tokens.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
 // by docs.ts), plus the watcher script it installs, with the room, the
@@ -102,8 +103,7 @@ export function changesRoute(rc: RouteContext) {
 
 // MCP endpoint: the room as a tool surface (see mcpCatalog in agents/mcp.ts). POST
 // one JSON-RPC request per call; authenticate with the same X-Invite-Token
-// (or Authorization: Bearer) as REST, or the owner key. This is the one route
-// that still reads ?invite= (index.ts), for clients configured with a URL only. Stateless: no session to open,
+// (or Authorization: Bearer) as REST, or the owner key. Stateless: no session to open,
 // initialize is a handshake formality, notifications get a bare 202.
 export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
@@ -122,10 +122,15 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // and acting for a member who had been removed meanwhile.
   const getAcc = () => stub.access(invite, owner);
   let checkP: Promise<{ ok: true } | Refusal> | null = null;
-  // No token, no question for the room: the refusal is built here. Asking
-  // made every tokenless ping, initialize and notification (which never
-  // touched the Room object before) a Durable Object call.
-  const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : !invite ? Promise.resolve(inviteMissing()) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
+  // No token, no question for the room: the refusal is built here, for
+  // every method that needs one (the room could only answer
+  // invite_missing). Asking made every tokenless ping, initialize and
+  // notification (which never touched the Room object before) a Durable
+  // Object call. A token in the URL (?invite=) is not read
+  // (lib/tokens.ts): a request that sent only that one is refused as
+  // tokenless, its sentence saying to send the header.
+  const missing = (): Refusal => (hasQueryToken(url) ? { ...inviteMissing(), error: QUERY_REFUSED } : inviteMissing());
+  const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : !invite ? Promise.resolve(missing()) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: unknown = null;
   // A caller whose token checks out has had its body read already
@@ -164,11 +169,11 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       const targs: Body = params && isObject(params.arguments) ? params.arguments : {};
       if (!tname) return fail(-32602, "tools/call needs params.name");
       if (tname === "get_invite") {
-        const pv = await stub.previewInvite(invite);
+        const pv = invite ? await stub.previewInvite(invite) : missing();
         if (!pv.ok) return fail(-32001, pv.error, { code: pv.code });
         return ok(mcpOk(invitePreviewBody(url.origin, room, invite, pv)));
       }
-      const acc = await getAcc();
+      const acc = owner || invite ? await getAcc() : missing();
       if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });
       try { return ok(await (async () => { const from = acc.name || (owner ? bodyText(targs.as, "as").trim().slice(0, MAX_NAME) : ""); const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs, invite); return r && r.isError ? r : mcpOk(r); })()); }
       catch (e) { const ce = (e || {}) as { message?: string, code?: string, retry_after?: number }; return ok(mcpErr(ce.message ? ce.message : String(e), ce.code ? (ce.retry_after ? { code: ce.code, retry_after: ce.retry_after } : { code: ce.code }) : undefined)); }

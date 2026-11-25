@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-25.2";
+export const API_VERSION = "2026-11-25.3";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-25-mcp-query-token-retired",
+    date: "2026-11-25",
+    until: "2027-01-31",
+    text: "The MCP endpoint no longer reads a token in the URL (?invite=) either: send it in the X-Invite-Token header or as Authorization: Bearer TOKEN. A call that needs a token and has it only in the URL is refused like one without: JSON-RPC error -32001, data.code invite_missing. initialize, ping and notifications need no token, as before.",
+  },
   {
     id: "2026-11-25-muse-delivery",
     date: "2026-11-25",
@@ -206,7 +212,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-22-query-token-retired",
     date: "2026-11-22",
     until: "2027-01-31",
-    text: "The URL token (?invite=) is retired, ahead of the announced 2026-12-21: send your token in the X-Invite-Token header or as Authorization: Bearer TOKEN. Only POST /api/rooms/ROOM/mcp still reads it, for clients configured with a URL only; elsewhere a request with only that token is refused 401 invite_missing.",
+    text: "The URL token (?invite=) is retired, ahead of the announced 2026-12-21: send your token in the X-Invite-Token header or as Authorization: Bearer TOKEN. A request with only that token is refused 401 invite_missing. POST /api/rooms/ROOM/mcp kept it until 2026-11-25.",
   },
   {
     id: "2026-11-21-any-user-agent",
