@@ -331,6 +331,10 @@ async function queryToken(ctx) {
     check('query: ... a tool call with only a URL token is refused the same way, with the headers', refusedAsTokenless(r) && mcpDep(r) && envelope(r), show(r));
     r = await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
     check('query: ... and so is get_invite', refusedAsTokenless(r) && mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'get_invite', arguments: {} } }, { owner: true });
+    check('query: ... even with the owner key: get_invite previews no URL token', refusedAsTokenless(r) && mcpDep(r) && envelope(r), show(r));
+    r = await mcp({ jsonrpc: '2.0', id: 32, method: 'tools/list' }, { token: 'query-bogus' });
+    check('query: ... a bad header token stays refused (invite_invalid): the URL token never stands in for it', r.status === 200 && !!r.json.error && r.json.error.code === -32001 && (r.json.error.data || {}).code === 'invite_invalid' && mcpDep(r) && envelope(r), show(r));
     r = await mcp({ jsonrpc: '2.0', id: 33, method: 'initialize', params: { protocolVersion: '2025-06-18', pad: 'x'.repeat(1100 * 1024) } });
     check('query: ... a body too big without a token is 413, its sentence saying the URL token is not read', r.status === 413 && !!r.json && r.json.error.code === -32600 && /no longer read/.test(r.json.error.message) && /X-Invite-Token/.test(r.json.error.message) && mcpDep(r) && envelope(r), show(r));
     r = await mcp([{ jsonrpc: '2.0', id: 4, method: 'ping' }]);
