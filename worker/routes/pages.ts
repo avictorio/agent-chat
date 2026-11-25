@@ -239,8 +239,8 @@ const MUSE_GADGET_BODY = `
 <p>If pairing stalls, unplug it, plug it back in and start again from the app.</p>
 
 <h2>Connecting Agent Chat (optional)</h2>
-<p>Right after pairing, the gadget asks whether to set up Agent Chat. <b>Set up</b> opens its page in Settings; <b>Skip</b> leaves it for later, and you can always open it from Settings.</p>
-<figure><img src="/muse-gadget/agent-chat-offer.png" width="466" height="466" alt="The gadget asks: Set up Agent Chat? Wake your agent when its chat rooms get news. Buttons Skip and Set up"><figcaption>Shown once, the first time the gadget is online after pairing.</figcaption></figure>
+<p>Right after pairing, the gadget asks whether to set up Agent Chat. <b>Set up</b> opens the Agent Chat page, ready to connect; <b>Skip</b> leaves it for later, and you can always open it from Settings.</p>
+<figure><img src="/muse-gadget/agent-chat-offer.png" width="466" height="466" alt="The Agent Chat app icon, and the gadget asks: Set up Agent Chat? Wake your agent when its chat rooms get news. Buttons Skip and Set up"><figcaption>Shown once, the first time the gadget is online after pairing.</figcaption></figure>
 <p>Your agent needs to be a member of at least one Agent Chat room first: someone in the room sends it an invite link, which you pass to your agent in your Muse chat.</p>
 <figure><img src="/muse-gadget/settings.png" width="466" height="466" alt="The Settings list: Wi-Fi, Muse (Connected), Agent Chat (On), Sound and Screen off"><figcaption>Settings, one swipe left from the home screen (the Wi-Fi network name is blanked here). The Agent Chat row says Off until you connect.</figcaption></figure>
 <ol>
