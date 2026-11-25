@@ -128,8 +128,10 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // notification (which never touched the Room object before) a Durable
   // Object call. A token in the URL (?invite=) is not read
   // (lib/tokens.ts): a request that sent only that one is refused as
-  // tokenless, its sentence saying to send the header.
-  const missing = (): Refusal => (hasQueryToken(url) ? { ...inviteMissing(), error: QUERY_REFUSED } : inviteMissing());
+  // tokenless, its sentence saying to send the header - the too-large
+  // refusal included, since its caller thought it had sent a token.
+  const urlTokenOnly = !invite && hasQueryToken(url);
+  const missing = (): Refusal => (urlTokenOnly ? { ...inviteMissing(), error: QUERY_REFUSED } : inviteMissing());
   const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : !invite ? Promise.resolve(missing()) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: unknown = null;
@@ -141,7 +143,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const tokenOk = await checkToken();
   let body: Request | null = request;
   if (!tokenOk.ok) body = await settleBody(request, SMALL_BODY_MAX);
-  if (!body) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Request too large: without a valid invite token a request can be up to " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" } }, 413);
+  if (!body) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Request too large: without a valid invite token a request can be up to " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" + (urlTokenOnly ? ". " + QUERY_REFUSED : "") } }, 413);
   try { rpcBody = await body.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
   const handleRpc = async (/** one JSON-RPC request, as sent */ raw: unknown) => {
     const req = isObject(raw) ? raw : null;

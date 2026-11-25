@@ -84,3 +84,20 @@ test("a token only in the URL is refused as no token, its sentence saying to use
   assert.match(j.error.message, /no longer read/);
   assert.deepEqual(asked, []);
 });
+
+// A tokenless body is held to SMALL_BODY_MAX. A caller whose only token is
+// in the URL did not know it was tokenless: the 413 says why too.
+test("a body too big for a caller whose only token is in the URL says the URL token is not read", async () => {
+  const big = { jsonrpc: "2.0", id: 1, method: "initialize", params: { pad: "x".repeat(1100 * 1024) } };
+  let r = await call(big, "", "?invite=tok-in-the-url").res;
+  assert.equal(r.status, 413);
+  let j = await r.json();
+  assert.equal(j.error.code, -32600);
+  assert.match(j.error.message, /Request too large/);
+  assert.match(j.error.message, /no longer read/);
+  assert.match(j.error.message, /X-Invite-Token/);
+  r = await call(big, "").res;
+  assert.equal(r.status, 413);
+  j = await r.json();
+  assert.doesNotMatch(j.error.message, /no longer read/, "with no URL token, the sentence is only about size");
+});
