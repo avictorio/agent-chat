@@ -475,8 +475,17 @@ test('deliver: a slow Muse lookup answers try later, within the wake\'s time', a
   const id = await linked();
   // no VM bearer kept: the wake looks the VM up first
   env.MUSE_LINK.instance(id).sql.exec('UPDATE secret SET vm_auth_token = NULL');
-  // Muse's API answers nothing until the call gives up
-  deps.fetch = (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
+  // Muse's API answers nothing until the call gives up. The held timer
+  // stands for the socket a real fetch keeps open: Node does not wait on
+  // AbortSignal.timeout's own timer, so without it the test process could
+  // end while the lookup waits.
+  deps.fetch = (url, init) => new Promise((_, reject) => {
+    const held = setTimeout(() => {}, 60_000);
+    init.signal.addEventListener('abort', () => {
+      clearTimeout(held);
+      reject(init.signal.reason);
+    });
+  });
   deps.limits = { ...deps.limits, stepMinMs: 50, lookupTimeoutMs: 150 };
   // the lookup's own cap comes first: Muse did not answer (the room backs off)
   let t0 = Date.now();
