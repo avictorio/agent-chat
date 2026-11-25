@@ -120,14 +120,22 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
   for (const answer of ['no', 'yes']) {
     await run('invite-link-switch-' + answer, { init: confirmSays(answer === 'yes'), state: { previews: { tok_Carol: 'Carol' } }, hash: '#invite=tok_Carol' }, async (page, S) => {
       await page.waitForFunction(() => sessionStorage.getItem('asked'), null, { timeout: 5000 });
-      if (answer === 'yes') await page.waitForFunction(() => localStorage.getItem('chat-invite:demo') === 'tok_Carol', null, { timeout: 5000 });
+      // yes: the page saves Carol's invite and loads again on it. The link
+      // is looked at while the room loads as before, so whether the first
+      // load's own read of the room lands before the reload is a race (a
+      // count of reads failed a loaded run). The reload is told by what
+      // cannot happen without it: the stub sees Carol's invite a second
+      // time, now as the page's own, and a read of the room after that.
+      const asCarol = () => S.hits.filter((h) => h === 'GET /invite tok_Carol').length;
+      const readSince = () => S.hits.lastIndexOf('GET /messages') > S.hits.lastIndexOf('GET /invite tok_Carol');
+      if (answer === 'yes') for (let i = 0; i < 500 && !(asCarol() >= 2 && readSince()); i++) await new Promise((r) => setTimeout(r, 20));
       await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
       await settle(page);
       const reads = S.hits.filter((h) => h === 'GET /messages').length;
-      const out = { saved: await savedInvite(page), asked: await askedLog(page), reads, hits: S.hits };
+      const out = { saved: await savedInvite(page), asked: await askedLog(page), reads, asCarol: asCarol(), readSince: readSince(), hits: S.hits };
       must(out.asked.length === 1 && /You are Anthony in this room\. Switch this device to Carol\?/.test(out.asked[0]), 'switching identity must ask once: ' + JSON.stringify(out));
-      // yes: the page loads again on Carol's invite (the stub's reads still answer you: Anthony, so only the invite is compared)
-      must(answer === 'yes' ? out.saved[0] === 'tok_Carol' && reads === 2 : JSON.stringify(out.saved) === JSON.stringify(['tok_Anthony', 'Anthony', '']) && reads === 1, 'the saved invite after ' + answer + ': ' + JSON.stringify(out));
+      // (the stub's reads still answer you: Anthony, so only the invite is compared after yes)
+      must(answer === 'yes' ? out.saved[0] === 'tok_Carol' && out.asCarol >= 2 && out.readSince : JSON.stringify(out.saved) === JSON.stringify(['tok_Anthony', 'Anthony', '']) && reads === 1 && out.asCarol === 1, 'the saved invite after ' + answer + ': ' + JSON.stringify(out));
       return out;
     });
   }
