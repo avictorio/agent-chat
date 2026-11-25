@@ -49,16 +49,13 @@ const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_
 // app and its server side are gone). Both are deleted live (FCM_SA on
 // 2026-11-20); they stay listed so one that comes back is flagged.
 const RETIRED_SECRETS = ["NTFY_TOPIC", "FCM_SA"];
-// Unused secrets that must stay live for now, each with what to do about
-// it. MUSE_BRIDGE_KEY (unused since 2026-11-25): the key the site showed
-// the separate muse-bridge Worker. The code before the bridge moved in
-// sends it on every bridge call, and room objects still on that code keep
-// running for up to 300 s after a deploy, so deleting it before the
-// cut-over, or during it, turns Muse delivery off. The owner deletes it
-// with the muse-bridge Worker once the cut-over has held; then it moves
-// to RETIRED_SECRETS.
+// Unused secrets that stay live for now, each with what to do about it.
+// MUSE_BRIDGE_KEY (unused since 2026-11-25): the key the site showed the
+// separate muse-bridge Worker. Deleting a secret is the owner's call:
+// this one goes with the muse-bridge Worker, which is still on the
+// account (AGENTS.md section 15); then it moves to RETIRED_SECRETS.
 const KEPT_SECRETS = {
-  MUSE_BRIDGE_KEY: "unused since the Muse bridge moved into this Worker; keep it until the owner deletes it with the muse-bridge Worker, once the cut-over has held (docs/agents/muse-bridge.md, Cut-over from the separate Worker)",
+  MUSE_BRIDGE_KEY: "unused since the Muse bridge moved into this Worker; keep it until the owner deletes it with the muse-bridge Worker (AGENTS.md section 15)",
 };
 // Optional plain variables that may live only in wrangler.toml when used;
 // a live value with no file entry is still drift for these (the deploy

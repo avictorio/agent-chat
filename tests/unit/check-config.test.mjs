@@ -47,11 +47,11 @@ function check(live) {
   }
 }
 
-test("the unused MUSE_BRIDGE_KEY is noted as kept until the cut-over has held, never as one to delete", { skip: noPython && "no python3" }, () => {
+test("the unused MUSE_BRIDGE_KEY is noted as kept until the owner deletes it, never as one to delete", { skip: noPython && "no python3" }, () => {
   const r = check({ vars: fileVars(), secrets: [...REQUIRED, "MUSE_BRIDGE_KEY"] });
   assert.equal(r.status, 0, r.out);
   const line = r.out.split("\n").find((l) => l.includes("MUSE_BRIDGE_KEY")) || "";
-  assert.match(line, /^note {3}secret MUSE_BRIDGE_KEY is live: unused .*until the owner deletes it with the muse-bridge Worker, once the cut-over has held/);
+  assert.match(line, /^note {3}secret MUSE_BRIDGE_KEY is live: unused .*until the owner deletes it with the muse-bridge Worker/);
   assert.doesNotMatch(r.out, /MUSE_BRIDGE_KEY[^\n]*delete it in the dashboard/);
   assert.doesNotMatch(r.out, /MUSE_BRIDGE_KEY[^\n]*not in the AGENTS\.md section 2 inventory/);
 });

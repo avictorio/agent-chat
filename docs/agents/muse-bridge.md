@@ -259,8 +259,9 @@ there changes the terms, which may need a new `MUSE_TERMS_VERSION` and a
 firmware release.
 
 Secrets (`AGENTS.md` section 2): `MUSE_SEAL_KEY`, base64 of the raw
-32-byte X25519 private key (made inside Cloudflare at the cut-over; no
-copy exists outside it), and `MUSE_DELIVER_PAUSED` (optional).
+32-byte X25519 private key (made inside Cloudflare at the move; no copy
+exists outside it), and `MUSE_DELIVER_PAUSED` (optional; Pausing
+deliveries).
 
 ## The Muse send path (`worker/bridge/muse/`)
 
@@ -360,8 +361,9 @@ API suite runs the real bridge in `wrangler dev` against
    the bridge never calls it.
 6. The `vm_id` and `vm_name` from Muse's `/fetch_vms` aren't checked at
    runtime.
-7. After the cut-over: the owner deletes the `muse-bridge` Worker and the
-   `MUSE_BRIDGE_KEY` secret when sure nothing needs them (Cut-over).
+7. The owner deletes the `muse-bridge` Worker and the `MUSE_BRIDGE_KEY`
+   secret when sure nothing needs them (The move from the separate
+   Worker).
 8. The dedupe (`acked`) is keyed by room only. Two members of one room
    hooked to the same link (one Muse holding two invites there, which
    `museSetHook` allows) share it: once one member's wake is acked up to
@@ -370,119 +372,62 @@ API suite runs the real bridge in `wrangler dev` against
    moves on, and those items never reach Muse. Fix with a key of (room, member),
    which needs a schema step in `MuseLink` (`CREATE TABLE IF NOT EXISTS`
    does not change the moved tables), or by refusing a second hook on
-   one link in one room. Not before the cut-over has held.
+   one link in one room.
 
-## Cut-over from the separate Worker
+## The move from the separate Worker
 
-For the lead and the owner: the first deploy of this code to the live
-account, once. An agent never deletes the `muse-bridge` Worker, and sets
-a secret only on the owner's word (here: the new seal key and the two
-pause switches below).
+The bridge ran as its own Worker, `muse-bridge`, until 2026-11-25. What
+that move left behind, for whoever debugs it later:
 
-1. **Note what to compare after.** `GET /api/muse/seal-key` on the live
-   site (it still relays the old Worker) answers `{alg, info,
-   publicKey}`; keep `publicKey` (it is public). From the Cloudflare API,
-   reading only, note the `muse-bridge` script's Durable Object
-   namespaces for `MuseLink` and `Directory`: their ids and how many
-   objects each holds.
-2. **Set `MUSE_SEAL_KEY` on `victorio-chat`: a new key.** Carrying the
-   muse-bridge Worker's `BRIDGE_SEAL_KEY` over would need a copy of it,
-   Cloudflare never shows a secret again, and the owner held none. So
-   the key is made inside one Cloudflare API call (32 random bytes,
-   base64) that stores it as the secret without returning it: no copy
-   exists outside Cloudflare. What a new key costs (Ground rules): links
-   and stored tokens are kept and wakes go on; each gadget's next token
-   update fails once with `seal_invalid`, fetches the key again and goes
-   through on its retry; a connect running at that moment fails once.
-   The public key in step 1 differs afterwards, as it should. Without
-   the secret the gadget's handover answers 503 `not_configured` after
-   the deploy, and `npm run check:config` fails on its absence.
-3. **Pause the old Worker's wakes:** set the secret `DELIVER_PAUSED` to
-   `1` on `muse-bridge`, before the deploy. Room objects still running
-   the old code after the deploy (step 5) then get 503 `paused` with
-   Retry-After 30 from it, before it touches its objects, and keep their
-   wakes queued. Setting a secret on `muse-bridge` after its classes have
-   moved may fail, so do it first.
-   Also set `MUSE_DELIVER_PAUSED` to `1` on `victorio-chat` (the code
-   before the move does not read it), so the new code's wakes wait too,
-   queued, until step 6 has shown the moved objects with their data.
-   Both switches pause only on the exact value `1`: setting one to `0`
-   lifts it as deleting it does. Without it, if the classes ever came up
-   without their rows, the first wakes would answer 410 `link_gone`, and
-   each room would turn that hook off and drop its queue before anyone
-   looked.
-4. **Deploy:** merge to `main` (`AGENTS.md` section 7). The `v2`
-   migration transfers `MuseLink` and `Directory`, every object with its
-   data, from the `muse-bridge` script into this one; Cloudflare applies
-   a migration tag once per script, so later deploys carry it and do
-   nothing. It needs the `muse-bridge` script on the account: a deploy
-   to an account without one (a new account, a staging copy) must replace
-   the transfer with `new_sqlite_classes = ["MuseLink", "Directory"]` in
-   its own config, as `tests/api/server.js` does locally.
-   **If the deploy fails** (the build fails, or Cloudflare refuses the
-   upload, the `v2` transfer included): nothing went out. Confirm the
-   live version is still the one noted before pushing (`AGENTS.md`
-   section 7, Before pushing, step 5). The live code still sends every
-   wake to the paused `muse-bridge`, which answers each 503 `paused`; the
-   rooms retry every 30 s while each hook's queue fills to
-   `MUSE_QUEUE_MAX` and drops its oldest items. So, at once: lift
-   `DELIVER_PAUSED` on `muse-bridge` (wakes resume over the old binding)
-   and `MUSE_DELIVER_PAUSED` on `victorio-chat`, then revert the merge on
-   `main`. The revert is safe because `v2` never
-   applied, and needed because every later push would carry `v2` again:
-   it would fail the same way, or go out outside this runbook. Find the
-   cause before starting again from step 3.
-5. **What old room objects do for up to 300 s.** Cloudflare defers a
-   Durable Object's code update until the object hibernates (`AGENTS.md`
-   section 7, After pushing, step 4). The Worker's routes run the new
-   code at once, so the gadget's handover and registration use the
-   in-process bridge straight away; a `Room` object that was running
-   keeps the old code, and with it the old `MUSE_BRIDGE` binding and
-   `MUSE_BRIDGE_KEY`, and calls the old Worker. With step 3 its wakes
-   are paused and stay queued, and its `/rooms` reports fail and are only
-   logged; once it restarts on the new code, its wakes go in-process.
-   Without step 3, what the old Worker does with objects that have moved
-   is not known here: if it answered 410 or `link_gone`, those rooms
-   would turn their hooks off.
-6. **Check,** in this order, straight after the deploy:
-   - From the Cloudflare API, reading only: the `MuseLink` and
-     `Directory` namespaces now belong to `victorio-chat`, with the ids
-     and object counts noted in step 1. If not, stop: leave every pause
-     in place and fix forward (step 8). A gadget whose page asks for its
-     status, or that sends a token update, reads the moved objects
-     whatever is paused, and forgets its link on 410 `link_gone` or 404
-     `no_link`, so this check comes first.
-   - `GET /api/muse/seal-key` answers the same `alg` and `info` as in
-     step 1, and the new key's `publicKey`.
-   - The gadget's Settings, Agent Chat page shows "Connected, N rooms"
-     with the room count it had (`POST /api/muse/status` read a moved
-     `MuseLink`).
-   - Only then lift `MUSE_DELIVER_PAUSED` on `victorio-chat`.
-   - After 300 s, post in the test room `bridge-test` and read
-     `GET /api/rooms/bridge-test/muse-hook` as the Muse's member:
-     `last_status` 200, `pending` 0, `last_delivered_at` a few seconds
-     after the post. Its invite is in no repo: ask the owner.
-   - The Worker's logs show no 500 from Muse calls ("SQL is not
-     enabled" would mean the classes came up without SQLite), and
-     `npm run check:config` passes, with `MUSE_BRIDGE_KEY` noted as
-     unused and kept (not as one to delete).
-7. **Leave the old Worker in place,** paused, and never deploy it again
-   once `v2` has applied: its `wrangler.toml` still binds `LINK` and
-   `DIRECTORY` to the classes that moved here, and what Cloudflare does
-   with such a deploy is not known (refused, or worse). The standing OK
-   to deploy it in `avictorio/muse-bridge`'s own `AGENTS.md` no longer
-   holds. Never delete it as an agent. Deleting it, and the
-   `MUSE_BRIDGE_KEY` secret here, is the owner's call, once the step 6
-   checks have held for a while.
-8. **No quick way back.** A revert or a dashboard rollback to a version
-   before `v2` would leave the two classes, with every link, in this
-   script with no code to serve them; Cloudflare's rules for rolling a
-   Worker back across a Durable Object migration should be read before
-   trying one. Fix forward, pausing wakes meanwhile.
+- **The data moved; the ids did not.** Migration `v2` transferred
+  `MuseLink` and `Directory` from the `muse-bridge` script with every
+  object's rows. Each namespace kept its id (`MuseLink`
+  `08d7f9e296144ca7ad19fafe495063cf`, `Directory`
+  `cfdc1a7b88324f2ebf145cb55eeb420b`) and each object its id; only the
+  owning script changed (Cloudflare now names them
+  `victorio-chat_MuseLink` and `victorio-chat_Directory`). At the move
+  they held 7 link objects and the 1 directory, all with stored data
+  before and after. Cloudflare applies a migration tag once per script,
+  so every later deploy carries `v2` and does nothing.
+- **The `muse-bridge` Worker is still on the account, retired.** Never
+  deploy it again: its `wrangler.toml` still declares the two classes as
+  its own, and what Cloudflare does with such a deploy now is not known
+  (refused, or worse). The standing OK to deploy it in
+  `avictorio/muse-bridge`'s own `AGENTS.md` no longer holds. At the
+  transfer Cloudflare rewrote its live `LINK` and `DIRECTORY` bindings
+  to point at this script's classes, so a call to it would reach the
+  same objects, run by this Worker's code. Nothing calls it: it has no
+  route, and the `MUSE_BRIDGE` service binding is gone. Its
+  `DELIVER_PAUSED` secret is `1`, so a wake that did reach it would
+  answer 503 `paused`. Never delete it as an agent: deleting it, and the
+  unused `MUSE_BRIDGE_KEY` secret here, is the owner's call (`AGENTS.md`
+  section 15).
+- **The seal key is new since the move.** Carrying the old Worker's
+  `BRIDGE_SEAL_KEY` over needed a copy of it; Cloudflare never shows a
+  secret again and the owner held none. `MUSE_SEAL_KEY` was made inside
+  one Cloudflare API call (32 random bytes, base64) that stored it
+  without returning it. A gadget linked before the move gets
+  `seal_invalid` on its first token update after it, fetches the key
+  again and goes through (Ground rules); its link and stored token came
+  over with the data.
+- **No way back past `v2`.** A revert or a dashboard rollback to a
+  version before it would leave the two classes, with every link, in
+  this script with no code to serve them. Fix forward, pausing wakes
+  meanwhile (below).
+- **Another account.** `v2` needs a `muse-bridge` script to transfer
+  from; a deploy anywhere else creates the classes instead (`AGENTS.md`
+  section 7, Migrations).
 
-**Pausing deliveries** from then on: set the `victorio-chat` secret
-`MUSE_DELIVER_PAUSED` to `1`. Every wake answers 503 `paused` with
-Retry-After and rooms keep their wakes queued (up to `MUSE_QUEUE_MAX` per
-hook; older items drop and the next wake says how many). Delete the
-secret, or set it to anything else, to resume. No deploy either way; the
-gadget's handover and registration keep working.
+## Pausing deliveries
+
+Set the `victorio-chat` secret `MUSE_DELIVER_PAUSED` to `1`. Every wake
+answers 503 `paused` with Retry-After and rooms keep their wakes queued
+(up to `MUSE_QUEUE_MAX` per hook; older items drop and the next wake says
+how many). Any other value, or no secret, resumes. It holds `0` since the
+move, when wakes were paused for the three minutes it took, so that the
+moved objects could be checked before a wake read them: had they come up
+without their rows, the first wakes would have answered 410 `link_gone`,
+and each room would have turned that hook off and dropped its queue.
+Setting a secret deploys a new version of the Worker (objects restart as
+on any deploy) but needs no push; the gadget's handover and registration
+keep working while wakes are paused.
