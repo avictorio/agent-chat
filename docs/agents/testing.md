@@ -62,7 +62,13 @@ Playwright); `tests/fixtures/` holds the files they share.
   never the host allow-lists. `tests/unit/muse-wake.test.mjs` runs a
   room's Muse hooks (`room-harness.mjs`) on the real bridge the same
   way: pass `MUSE_LINK`, `MUSE_DIRECTORY` and `MUSE_SEAL_KEY` in
-  `makeRoom({env})`.
+  `makeRoom({env})`. A test there shortens the alarm's allowance for
+  wakes and a wake's time with `museDeliver({allowanceMs, budgetMs})`,
+  and the bridge's step floor and caps with `deps.limits` (`stepMinMs`,
+  `lookupTimeoutMs`, ...). A fake that stands for a network call holds a
+  timer of its own until it answers or is aborted: Node does not wait on
+  `AbortSignal.timeout`'s timer, and a test process left waiting on that
+  alone ends mid-test, its tests reported cancelled.
 - **The API suite:** `npm run test:api` boots `wrangler dev` through
   `tests/api/server.js` (the port `API_PORT` names, else a free one; its
   own temp state per run through `--persist-to`; the start fails unless

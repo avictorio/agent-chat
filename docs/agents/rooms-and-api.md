@@ -421,27 +421,20 @@ docs.txt section that owns its routes, caps and formats.
 - **Muse delivery hooks.** API: docs.txt MUSE DELIVERY. A member whose
   agent runs on Muse can be woken by the room itself instead of a
   watcher: the room pushes to the Muse bridge, and the bridge never
-  holds a room token. The bridge is in this Worker (`worker/bridge/`):
-  `museBridge` (`room/muse.ts`) calls its router, `bridgeFetch`
-  (`bridge/index.ts`), in-process with a path and a JSON body, as the
-  separate muse-bridge Worker was called over a service binding, and it
-  answers with the same routes, bodies, statuses and codes; a call gives
-  up after `MUSE_FETCH_MS` (30 s). Only this Muse code calls it, each
-  call with a path of its own, and nothing else reaches its two Durable
-  Objects: `MuseLink` (`MUSE_LINK`, one per linked Muse, the only place a
-  Muse access token is kept) and `Directory` (`MUSE_DIRECTORY`, one in
-  all: VMs and one-time codes to links). Their data came over from the
-  muse-bridge Worker with the v2 migration (`wrangler.toml`). The
-  bridge's numbers are in `worker/limits.ts` (`MUSE_LINK_WAKES_MAX` to
-  `MUSE_TOKEN_GRACE_S`), as are the only hosts a Muse token is ever sent
-  to (`MUSE_API_HOSTS`, `MUSE_NOISE_HOSTS`): constants, so no request,
-  variable or stored row can add one, and a link whose stored host is
-  off them is not woken (502 `host_not_allowed`). Its rules carry over:
-  never log a token, a VM bearer, a sealed blob, a code, a whole
-  `museLinkId` or message text (its log lines carry a link id's first 11
-  characters, statuses, counts and timings); never invent Muse protocol
-  (the send path in `bridge/muse/` follows Meta's SDK, whose licence
-  and notice are beside it). `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
+  holds a room token. The bridge is part of this Worker (`worker/bridge/`,
+  `docs/agents/muse-bridge.md`, with its routes, storage, settings and
+  ground rules): `museBridge` (`room/muse.ts`) calls its router,
+  `bridgeFetch` (`bridge/index.ts`), in-process with a path and a JSON
+  body. Only this Muse code calls it, each call with a path of its own,
+  and nothing else reaches its two Durable Objects: `MuseLink`
+  (`MUSE_LINK`, one per linked Muse, the only place a Muse access token
+  is kept) and `Directory` (`MUSE_DIRECTORY`, one in all). A wake carries
+  its time (`MUSE_WAKE_BUDGET_MS`, in the `X-Wake-Budget-Ms` header),
+  within which the bridge always answers, and the room waits
+  `MUSE_WAKE_WAIT_MARGIN_MS` longer, so it never counts a wake that
+  landed as failed; any other call waits `MUSE_FETCH_MS`. A Muse token is
+  only ever sent to `MUSE_API_HOSTS` and `MUSE_NOISE_HOSTS`, constants
+  that no request, variable or stored row can widen. `POST /api/muse/hooks` (`routes/muse.ts`, not under a room)
   takes a one-time link `code` and `{room, token, routing?}` pairs:
   each room checks its token first without opening the invite
   (`museVerify`), the code is claimed (`POST /claim {code}` ->
@@ -457,7 +450,13 @@ docs.txt section that owns its routes, caps and formats.
   `MUSE_PER_WAKE` at a time as `POST /deliver`, and the cursor moves only
   on a 2xx, so delivery survives a restart without repeats. The room's
   one alarm carries the nearest wake beside the match deadlines
-  (`armGameAlarm`, `museDueAt`); a refused wake backs off
+  (`armGameAlarm`, `museDueAt`). It advances the match clocks first and
+  then sends the due wakes (`museDeliver`), each step under its own
+  try/catch, so a slow Muse never holds a match deadline: wakes for
+  different members go together, `MUSE_WAKES_AT_ONCE` at a time, one at a
+  time per member, and new ones start only within `MUSE_ALARM_WAKES_MS` of
+  the run's start; what is still due then waits for the alarm armed right
+  after. A refused wake backs off
   (`MUSE_RETRY_FIRST_MS` doubling to `MUSE_RETRY_MAX_MS`), a 429 waits out
   its Retry-After, a 410 (or `code: "link_gone"`) turns the hook off.
   Nothing is queued while a hook is muted or off. A revoke drops the
@@ -469,9 +468,10 @@ docs.txt section that owns its routes, caps and formats.
   logged. `GET /members` carries `muse_delivery`, shown as a pill
   in the members list. The bridge's 503s each mean wait: `token_refused`
   (Muse refused the token; after `MUSE_TOKEN_REFUSALS_MAX` refusals over
-  `MUSE_TOKEN_GRACE_S` it is deleted and the answer becomes 410) and
+  `MUSE_TOKEN_GRACE_S` it is deleted and the answer becomes 410),
   `paused` (the `MUSE_DELIVER_PAUSED` secret set to "1", for
-  maintenance), both with Retry-After; a 429 is its per-link rate cap
+  maintenance) and `out_of_time` (the wake's time ran out before it
+  reached Muse), all with Retry-After; a 429 is its per-link rate cap
   (`MUSE_LINK_WAKES_MAX` per `MUSE_LINK_WAKES_WINDOW_S`). The Muse gadget, which is no
   room's member, hands the bridge its sealed Muse token through
   `POST /api/muse/connect {sealed, termsVersion}` (answer
@@ -498,7 +498,9 @@ docs.txt section that owns its routes, caps and formats.
   key every gadget seals to: a new one breaks every gadget's token
   updates until each connects again. `/muse-terms` is the
   terms page the gadget's "Agree and connect" points to
-  (`MUSE_TERMS_VERSION`). The API suite runs the real bridge against a
+  (`MUSE_TERMS_VERSION`); the bridge's numbers it quotes come from
+  `worker/limits.ts` (`museTermsBody`), so changing one changes the terms.
+  The API suite runs the real bridge against a
   fake Muse (`tests/api/fake-muse.mjs`, `tests/api/muse-hooks.js`;
   `docs/agents/testing.md`) and drives retries and restarts through
   `POST /api/test-hooks/muse`.

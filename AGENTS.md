@@ -92,9 +92,9 @@ Each stands until the owner changes it; the detail is where it points.
 | Code | `worker/` (entry `worker/index.ts`), `web/`, `contract/`: see Repository layout. `.txt`, `.md` and `.sh` files are text modules (`wrangler.toml`'s Text rule). |
 | Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*` and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
-| Related repos | `avictorio/muse-gadget` (the ESP32 gadget's firmware patch and tools, locally `C:\users\operator\dev\muse-gadget`), with its own AGENTS.md. This repo serves the gadget's guide (`/muse-gadget`, `worker/routes/pages.ts`, images in `web/app/public/muse-gadget/`; retake them over USB when the gadget's screens change) and its terms (`/muse-terms`). The Muse bridge came from `avictorio/muse-bridge` at `ef113b6` into `worker/bridge/`, `tests/bridge/` and `scripts/bridge/`, and runs inside this Worker (`docs/agents/rooms-and-api.md`, Muse delivery hooks): it changes here only. The separate `muse-bridge` Worker it replaces is retired (section 8). |
+| Related repos | `avictorio/muse-gadget` (the ESP32 gadget's firmware patch and tools, locally `C:\users\operator\dev\muse-gadget`), with its own AGENTS.md. This repo serves the gadget's guide (`/muse-gadget`, `worker/routes/pages.ts`, images in `web/app/public/muse-gadget/`; retake them over USB when the gadget's screens change) and its terms (`/muse-terms`). It is the only related repo: the Muse bridge came from `avictorio/muse-bridge` at `ef113b6` into `worker/bridge/`, `tests/bridge/` and `scripts/bridge/`, runs inside this Worker (`docs/agents/muse-bridge.md`) and changes here only; the separate `muse-bridge` Worker it replaces is retired (section 8). muse-gadget's `tools/agent_chat/seal_check.ts`, which checks that the gadget's C seals open with the bridge's code, still loads `<muse-bridge dir>/src/seal.ts`: point it at this repo's `worker/bridge/seal.ts` (`docs/agents/muse-bridge.md`, The sealed handover). |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
-| Muse bridge Durable Objects | class `MuseLink`, binding `MUSE_LINK`: one per linked Muse, from `idFromName(museLinkId)`, holding that Muse's access token; class `Directory`, binding `MUSE_DIRECTORY`: one, `idFromName("directory")`. SQLite-backed, transferred with their data from the `muse-bridge` Worker (migration tag `v2`). Reached only through the bridge's router (`worker/bridge/`). |
+| Muse bridge Durable Objects | class `MuseLink`, binding `MUSE_LINK`: one per linked Muse, from `idFromName(museLinkId)`, holding that Muse's access token; class `Directory`, binding `MUSE_DIRECTORY`: one, `idFromName("directory")`. SQLite-backed, transferred with their data from the `muse-bridge` Worker (migration tag `v2`). Reached only through the bridge's router (`worker/bridge/`; `docs/agents/muse-bridge.md`). |
 | KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, the direct-upload check's verdict (and old create-room counters, expiring) |
 | R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings, and the direct check's short-lived objects under `_check/` (`docs/agents/media.md`) |
 | Cron trigger | none: `wrangler.toml` carries `crons = []` (section 7) |
@@ -168,7 +168,8 @@ agent-chat/
 | `TEST_MUSE_ORIGIN` | test only | with `TEST_HOOKS`, where the Muse bridge's calls to Muse's hosts go: the API suite's fake Muse, `http://127.0.0.1:PORT` (no other origin is taken; without one, a test server's calls to Muse fail). Never live (`check:config` fails by name). |
 
 The bindings `ROOM`, `MUSE_LINK`, `MUSE_DIRECTORY`, `REQUESTS`, `MEDIA`
-and `ASSETS` are in the table above. Retired variables and secrets are
+and `ASSETS` are in the table above. The `MUSE_BRIDGE` service binding is
+gone with the separate bridge Worker. Retired variables and secrets are
 in section 8.
 
 You never need to read the secret values to work on the site. Cloud sessions
@@ -196,7 +197,7 @@ object `__create-quota` holds public room creation's daily counters. Every
 table and KV key: `docs/agents/rooms-and-api.md`, Storage. The Muse
 bridge keeps its own data in its own objects (`MuseLink`: each linked
 Muse's access token, VM and rooms; `Directory`: VMs and one-time link
-codes, hashed; `worker/bridge/link.ts`, `directory.ts`). **Never delete
+codes, hashed; `docs/agents/muse-bridge.md`, Storage). **Never delete
 them** either: every member would have to connect their gadget again.
 
 ---
@@ -214,6 +215,7 @@ touch:
 - `docs/agents/web-app.md` - the app shell, the home page, Markdown, avatars, voices and playback, reactions, HTML pages and documents, YouTube cards, the build id and update banner, dictation, and the front-end conventions (effects and memos, refs, UI components, colors).
 - `docs/agents/games.md` - the game catalog, the client plug-ins, the server engines, the ladder, each game, the 3D arenas and the Games tab, and the checklist for adding a game.
 - `docs/agents/media.md` - message media and drafts, the upload engine, the media shelf, message delete.
+- `docs/agents/muse-bridge.md` - the Muse bridge inside the Worker (`worker/bridge/`): its routes, a wake's time, the sealed handover, its storage and settings, the port of Meta's SDK, its tests and ground rules, and the cut-over from the separate `muse-bridge` Worker.
 
 ## 4. Posting announcements with the owner key
 
@@ -427,9 +429,16 @@ About `wrangler.toml`:
   next deploy does to it; `npm run check:config` checks it mechanically.
 - **Migrations:** `v1` (`new_sqlite_classes = ["Room"]`) is already applied.
   Add a new tag only when adding a Durable Object class. `v2` transfers
-  `MuseLink` and `Directory`, with their stored data, from the
+  `MuseLink` and `Directory`, every object with its stored data, from the
   `muse-bridge` script: a transfer creates the class here, so never add a
-  create migration for them. wrangler dev reads SQLite only from
+  create migration for them. Cloudflare applies a tag once per script:
+  the first deploy that carries `v2` moves the data, and every later one
+  carries it and does nothing. That first deploy needs the `muse-bridge`
+  script on the account; a deploy to an account without one (a new
+  account, a copy) must replace the transfer with `new_sqlite_classes =
+  ["MuseLink", "Directory"]` in its own config. The first deploy follows
+  the cut-over runbook (`docs/agents/muse-bridge.md`, Cut-over from the
+  separate Worker). wrangler dev reads SQLite only from
   `new_sqlite_classes`, so the local servers run a copy of the file that
   creates the two that way (`tests/api/server.js`; section 12).
 - **Cron:** keep `[triggers] crons = []`. A deploy replaces the live crons
@@ -469,7 +478,10 @@ is JSON with a code.
 Revert the commit and push; that redeploys the previous code. In an
 emergency, roll back in the dashboard (**Workers & Pages → victorio-chat →
 Deployments**), then revert in git straight away so the next push doesn't
-undo it.
+undo it. Never revert or roll back past the deploy that applied the `v2`
+migration: the Muse bridge's classes and every link now live in this
+script, and an older version has no code for them. Fix forward, with Muse
+wakes paused meanwhile (`MUSE_DELIVER_PAUSED`).
 
 ---
 
@@ -487,7 +499,7 @@ or `git checkout <commit> -- <dir>`.
 | The Android app (a Capacitor shell, `app/`) and its server and web sides: FCM push, the `pushdev` table, the device-token routes, `/.well-known/assetlinks.json`, the shell bridges | 2026-11-20 | `9a8457e` (`app/`), `e1902f1` (server and web sides) | The `FCM_SA` secret is deleted. The one-PUT stream upload and `publish_on_complete`, built for it, stay as API features any client may use. Add no native-only features (section 1). |
 | The staging Worker (`victorio-chat-next` at next.chat.victorio.cloud, `web/staging/`) | 2026-11-20 | `63b3fae` | Nothing. |
 | The URL token (`?invite=`) outside MCP | 2026-11-22 | `ef59801` | Only `POST /api/rooms/ROOM/mcp` still reads it (`MCP_PATH` in `worker/lib/tokens.ts`); elsewhere a request with only that gets 401 `invite_missing` (`docs/agents/rooms-and-api.md`). |
-| The separate muse-bridge Worker (the `MUSE_BRIDGE` service binding, `X-Bridge-Key`, the 503 `muse_unavailable` without it) | 2026-11-25 | `37465aa` | The bridge runs in this Worker (`worker/bridge/`); its two Durable Object classes came over with their data (migration `v2`). The `MUSE_BRIDGE_KEY` secret is unused, kept until the owner deletes it with the `muse-bridge` Worker. |
+| The separate muse-bridge Worker (the `MUSE_BRIDGE` service binding, `X-Bridge-Key`, the 503 `muse_unavailable` without it) | 2026-11-25 | `bbea453` | The bridge runs in this Worker (`worker/bridge/`); its two Durable Object classes came over with their data (migration `v2`). The `MUSE_BRIDGE_KEY` secret is unused, kept until the owner deletes it with the `muse-bridge` Worker. |
 
 `check:config` keeps the retired secrets (`NTFY_TOPIC`, `FCM_SA`,
 `MUSE_BRIDGE_KEY`) listed, so one that comes back live is flagged.
@@ -673,3 +685,16 @@ Findings stay out of the repo until they are fixed.
 4. **Bugs, consistency, experience and speed:** Worker reliability and
    growth, the web app, REST against MCP against the docs and the rules,
    and what no test covers.
+
+The Muse bridge's move into this Worker (2026-11-25):
+
+5. **The cut-over:** the first deploy with the `v2` migration, by the
+   runbook in `docs/agents/muse-bridge.md` (Cut-over from the separate
+   Worker): `MUSE_SEAL_KEY` set first, the old Worker's wakes paused, the
+   checks after.
+6. **muse-gadget:** point `tools/agent_chat/seal_check.ts` and its
+   `AGENTS.md`'s related-repo row at this repo (Related repos, section 2).
+7. **The owner's cleanup,** once the cut-over has held: delete the
+   `muse-bridge` Worker and the `MUSE_BRIDGE_KEY` secret (section 8).
+   Never an agent's call.
+8. The bridge's own smaller items: `docs/agents/muse-bridge.md`, Open work.
