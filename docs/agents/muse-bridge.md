@@ -364,9 +364,12 @@ For the lead and the owner: the first deploy of this code to the live
 account, once. An agent never deletes the `muse-bridge` Worker and never
 sets or deletes a secret without the owner.
 
-1. **Note the seal key's public half.** `GET /api/muse/seal-key` on the
-   live site (it still relays the old Worker) answers `{alg, info,
-   publicKey}`; keep `publicKey` to compare after (it is public).
+1. **Note what to compare after.** `GET /api/muse/seal-key` on the live
+   site (it still relays the old Worker) answers `{alg, info,
+   publicKey}`; keep `publicKey` (it is public). From the Cloudflare API,
+   reading only, note the `muse-bridge` script's Durable Object
+   namespaces for `MuseLink` and `Directory`: their ids and how many
+   objects each holds.
 2. **Set `MUSE_SEAL_KEY` on `victorio-chat`** (a dashboard Secret) to the
    exact value of the muse-bridge Worker's `BRIDGE_SEAL_KEY`. Cloudflare
    never shows a secret again, so this is the owner's copy from where the
@@ -385,6 +388,13 @@ sets or deletes a secret without the owner.
    Retry-After 30 from it, before it touches its objects, and keep their
    wakes queued. Setting a secret on `muse-bridge` after its classes have
    moved may fail, so do it first.
+   Optional, the owner's call: also set `MUSE_DELIVER_PAUSED` to `1` on
+   `victorio-chat` (the code before the move does not read it), so the
+   new code's wakes wait too, queued, until step 6 has shown the moved
+   objects with their data. Without it, if the classes ever came up
+   without their rows, the first wakes would answer 410 `link_gone`, and
+   each room would turn that hook off and drop its queue before anyone
+   looked.
 4. **Deploy:** merge to `main` (`AGENTS.md` section 7). The `v2`
    migration transfers `MuseLink` and `Directory`, every object with its
    data, from the `muse-bridge` script into this one; Cloudflare applies
@@ -393,6 +403,19 @@ sets or deletes a secret without the owner.
    to an account without one (a new account, a staging copy) must replace
    the transfer with `new_sqlite_classes = ["MuseLink", "Directory"]` in
    its own config, as `tests/api/server.js` does locally.
+   **If the deploy fails** (the build fails, or Cloudflare refuses the
+   upload, the `v2` transfer included): nothing went out. Confirm the
+   live version is still the one noted before pushing (`AGENTS.md`
+   section 7, Before pushing, step 5). The live code still sends every
+   wake to the paused `muse-bridge`, which answers each 503 `paused`; the
+   rooms retry every 30 s while each hook's queue fills to
+   `MUSE_QUEUE_MAX` and drops its oldest items. So, at once: delete
+   `DELIVER_PAUSED` on `muse-bridge` (wakes resume over the old binding;
+   delete `MUSE_DELIVER_PAUSED` on `victorio-chat` too if step 3 set it),
+   then revert the merge on `main`. The revert is safe because `v2` never
+   applied, and needed because every later push would carry `v2` again:
+   it would fail the same way, or go out outside this runbook. Find the
+   cause before starting again from step 3.
 5. **What old room objects do for up to 300 s.** Cloudflare defers a
    Durable Object's code update until the object hibernates (`AGENTS.md`
    section 7, After pushing, step 4). The Worker's routes run the new
@@ -405,12 +428,21 @@ sets or deletes a secret without the owner.
    Without step 3, what the old Worker does with objects that have moved
    is not known here: if it answered 410 or `link_gone`, those rooms
    would turn their hooks off.
-6. **Check:**
+6. **Check,** in this order, straight after the deploy:
+   - From the Cloudflare API, reading only: the `MuseLink` and
+     `Directory` namespaces now belong to `victorio-chat`, with the ids
+     and object counts noted in step 1. If not, stop: leave every pause
+     in place and fix forward (step 8). A gadget whose page asks for its
+     status, or that sends a token update, reads the moved objects
+     whatever is paused, and forgets its link on 410 `link_gone` or 404
+     `no_link`, so this check comes first.
    - `GET /api/muse/seal-key` answers the same `alg`, `info` and
      `publicKey` as in step 1.
    - The gadget's Settings, Agent Chat page shows "Connected, N rooms"
      with the room count it had (`POST /api/muse/status` read a moved
      `MuseLink`).
+   - Only then delete `MUSE_DELIVER_PAUSED` on `victorio-chat`, if step 3
+     set it.
    - After 300 s, post in the test room `bridge-test` and read
      `GET /api/rooms/bridge-test/muse-hook` as the Muse's member:
      `last_status` 200, `pending` 0, `last_delivered_at` a few seconds
@@ -419,9 +451,14 @@ sets or deletes a secret without the owner.
      enabled" would mean the classes came up without SQLite), and
      `npm run check:config` passes, with `MUSE_BRIDGE_KEY` noted as
      unused and kept (not as one to delete).
-7. **Leave the old Worker in place,** paused, and never delete it as an
-   agent. Deleting it, and the `MUSE_BRIDGE_KEY` secret here, is the
-   owner's call, once the step 6 checks have held for a while.
+7. **Leave the old Worker in place,** paused, and never deploy it again
+   once `v2` has applied: its `wrangler.toml` still binds `LINK` and
+   `DIRECTORY` to the classes that moved here, and what Cloudflare does
+   with such a deploy is not known (refused, or worse). The standing OK
+   to deploy it in `avictorio/muse-bridge`'s own `AGENTS.md` no longer
+   holds. Never delete it as an agent. Deleting it, and the
+   `MUSE_BRIDGE_KEY` secret here, is the owner's call, once the step 6
+   checks have held for a while.
 8. **No quick way back.** A revert or a dashboard rollback to a version
    before `v2` would leave the two classes, with every link, in this
    script with no code to serve them; Cloudflare's rules for rolling a

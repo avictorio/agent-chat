@@ -499,7 +499,7 @@ or `git checkout <commit> -- <dir>`.
 | The Android app (a Capacitor shell, `app/`) and its server and web sides: FCM push, the `pushdev` table, the device-token routes, `/.well-known/assetlinks.json`, the shell bridges | 2026-11-20 | `9a8457e` (`app/`), `e1902f1` (server and web sides) | The `FCM_SA` secret is deleted. The one-PUT stream upload and `publish_on_complete`, built for it, stay as API features any client may use. Add no native-only features (section 1). |
 | The staging Worker (`victorio-chat-next` at next.chat.victorio.cloud, `web/staging/`) | 2026-11-20 | `63b3fae` | Nothing. |
 | The URL token (`?invite=`) outside MCP | 2026-11-22 | `ef59801` | Only `POST /api/rooms/ROOM/mcp` still reads it (`MCP_PATH` in `worker/lib/tokens.ts`); elsewhere a request with only that gets 401 `invite_missing` (`docs/agents/rooms-and-api.md`). |
-| The separate muse-bridge Worker (the `MUSE_BRIDGE` service binding, `X-Bridge-Key`, the 503 `muse_unavailable` without it) | 2026-11-25 | `bbea453` | The bridge runs in this Worker (`worker/bridge/`); its two Durable Object classes came over with their data (migration `v2`). The `MUSE_BRIDGE_KEY` secret is unused, kept until the owner deletes it with the `muse-bridge` Worker. |
+| The separate muse-bridge Worker (the `MUSE_BRIDGE` service binding, `X-Bridge-Key`, the 503 `muse_unavailable` without it) | 2026-11-25 | `bbea453` | The bridge runs in this Worker (`worker/bridge/`); its two Durable Object classes came over with their data (migration `v2`). The `MUSE_BRIDGE_KEY` secret is unused, kept until the owner deletes it with the `muse-bridge` Worker. Never deploy the `muse-bridge` Worker again once `v2` has applied: its config still binds the classes that moved here, and the standing deploy OK in its repo's `AGENTS.md` no longer holds (`docs/agents/muse-bridge.md`, Cut-over, step 7). |
 
 `check:config` keeps the retired secrets (`NTFY_TOPIC`, `FCM_SA`) listed,
 so one that comes back live is flagged. `MUSE_BRIDGE_KEY` has a note of
@@ -700,4 +700,8 @@ The Muse bridge's move into this Worker (2026-11-25):
 7. **The owner's cleanup,** once the cut-over has held: delete the
    `muse-bridge` Worker and the `MUSE_BRIDGE_KEY` secret (section 8).
    Never an agent's call.
-8. The bridge's own smaller items: `docs/agents/muse-bridge.md`, Open work.
+8. **The muse-bridge repository:** mark it retired (withdraw its
+   `AGENTS.md`'s standing deploy OK, point it here) or archive it, so no
+   session deploys that Worker after `v2` (section 8). Not changed from
+   this repo.
+9. The bridge's own smaller items: `docs/agents/muse-bridge.md`, Open work.
