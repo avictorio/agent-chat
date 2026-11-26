@@ -22,7 +22,7 @@ import {
 import { CURSOR_REFUSAL, deny, json, parseBody, readBody, readCursor, type Body, bodyText, refused } from "../lib/http.js";
 import { MAX_NAME, PLACEHOLDER_CID, PLACEHOLDER_TEXT, clamp, isPlaceholderMessage } from "../lib/text.js";
 import { normReaction } from "../lib/reactions.js";
-import { agentOnboarding, forAgents } from "../agents/onboarding.js";
+import { forAgents } from "../agents/onboarding.js";
 import {
   cleanFileName,
   decodeTextPayload,
@@ -186,12 +186,9 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     const wait = clamp(parseInt(url.searchParams.get("wait") as string, 10) || 0, 0, WAIT_MAX_S);
     const r = await stub.list(after, limit, wait, acc.name || "", room, owner ? null : invite);
     if ("ok" in r) return deny(r);
-    const extra: { invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string } = { invite_only: true };
+    const extra: { invite_only: boolean, welcome?: string, you?: string, you_kind?: string } = { invite_only: true };
     if (after === null) extra.welcome = url.origin + "/api/rooms/" + encodeURIComponent(room) + "/welcome";
     if (acc.name) { extra.you = acc.name; if (acc.kind) extra.you_kind = acc.kind; }
-    // The hand-off block rides a first read only until the agent has posted:
-    // by then it is connected, and the block is ~3 KB with its token in it.
-    if (after === null && acc.name && extra.you_kind === "agent" && !acc.posted) extra.agent_onboarding = agentOnboarding(url.origin, room, acc.name, invite, { invitedBy: "invited_by" in acc ? acc.invited_by : null });
     return json(Object.assign({ room }, extra, r, { for_agents: forAgents(url.origin, room) }));
   }
 

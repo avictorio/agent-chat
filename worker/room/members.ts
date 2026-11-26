@@ -52,12 +52,12 @@ export const MemberMethods = {
   },
 
   invites() {
-    return this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind">>("SELECT token, name, created, revoked, used, kind FROM inv ORDER BY created").toArray();
+    return this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind" | "invited_by">>("SELECT token, name, created, revoked, used, kind, invited_by FROM inv ORDER BY created").toArray();
   },
 
   // Invite status for anyone in the room: active, unused or revoked. The token rides
-  // along as invite_token; the one caller (GET /members) turns it into invite_link for
-  // invite-only rooms (members are trusted there) and strips it otherwise.
+  // along as invite_token; the members route turns it into invite_link for the owner
+  // key and people, and for an agent only on its own row (routes/members.ts memberReply).
   members(): { invite_only: true, members: RoomMember[] } {
     const rows = this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "avatar_ver">>("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray();
     /** voices by name (nameKey) */

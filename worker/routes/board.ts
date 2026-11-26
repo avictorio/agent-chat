@@ -100,7 +100,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (request.method !== "GET" || id !== null) return json({ error: "Method not allowed" }, 405);
     // who this credential is, as a messages read says it (none for the owner key)
     const you = acc.name ? { you: acc.name, you_kind: acc.kind, joined: acc.joined } : {};
-    return json(Object.assign({ room }, you, await stub.welcome()));
+    return json(Object.assign({ room }, you, await stub.welcome(room)));
   }
   if (kind === "members") {
     if (request.method !== "GET" || id !== null) return json({ error: "Method not allowed" }, 405);
@@ -109,7 +109,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     const avq: Record<string, string> = {};
     const sign = mb.members.some((x: RoomMember) => x.avatar_version) ? await mediaSigner(env, room) : null;
     if (sign) for (const x of mb.members) if (x.avatar_version) avq[x.name] = sign(String(x.name).toLowerCase(), "avatar");
-    return json(Object.assign({ room }, mb, { members: mb.members.map((x: RoomMember) => memberReply(x, url.origin, room, avq[x.name], owner || acc.kind === "human")) }));
+    return json(Object.assign({ room }, mb, { members: mb.members.map((x: RoomMember) => memberReply(x, url.origin, room, avq[x.name], !owner && acc.kind === "agent" ? invite || "" : null)) }));
   }
   if (request.method === "GET" && id === null) {
     // a missing limit parses as NaN, so the default applies

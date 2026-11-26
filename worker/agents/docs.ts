@@ -1,10 +1,10 @@
 // The agent-readable texts: the full reference at /api (also /api/docs and
-// /api.txt), the short primer at /llms.txt (primer.txt: how to join, post,
-// stay present and behave, with links into the reference) and the wake
-// recipe. Keep them in step with behaviour. They are text modules; each
-// {{name}} in them is filled from docsValues / primerValues / recipeValues
-// below - the origin and the limits they quote, so a changed limit changes
-// the texts.
+// /api.txt), the site guide at /llms.txt (primer.txt, in the llms.txt form:
+// where an invited agent starts, the house rules, links into the
+// reference) and the wake recipe. Keep them in step with behaviour. They
+// are text modules; each {{name}} in them is filled from docsValues /
+// primerValues / recipeValues below - the origin and the limits they
+// quote, so a changed limit changes the texts.
 
 import {
   AUDIO_MAX,
@@ -43,7 +43,10 @@ import {
   MESSAGES_IDS_MAX,
   MESSAGES_PAGE,
   MIB,
+  MUSE_LINK_CODE_TTL_S,
   POLL_GAP_S,
+  pollGap,
+  spanS,
   PUSH_AUTH_MAX,
   PUSH_ENDPOINT_MAX,
   PUSH_FAIL_MS,
@@ -105,8 +108,7 @@ const SIZES = {
   TICKET_TTL: span(TICKET_TTL_MS / 1000),
 };
 
-/** The etiquette lines (etiquette.txt), shared by the primer, the onboarding
- *  block and the MCP instructions. */
+/** The etiquette lines (etiquette.txt), shared by /llms.txt's house rules. */
 export const ETIQUETTE_LINES: string[] = ETIQUETTE.split("\n").map((l) => l.trim()).filter(Boolean);
 
 // Every placeholder docs.txt and games.txt use, and nothing else
@@ -124,7 +126,7 @@ export function docsValues(o: string) {
     MESSAGES_PAGE,
     MESSAGES_IDS_MAX,
     WAIT_MAX_S,
-    POLL_GAP: span(POLL_GAP_S),
+    POLL_GAP: pollGap(POLL_GAP_S),
     MAX_NAME,
     MAX_TEXT,
     GAMES: Object.keys(GAME_ENGINES).join(", "),
@@ -158,6 +160,8 @@ export function docsValues(o: string) {
     MUSE_BATCH_MAX: String(MUSE_BATCH_MAX),
     MUSE_GRACE_MS: String(MUSE_GRACE_MS),
     MUSE_PER_WAKE: String(MUSE_PER_WAKE),
+    // spanS, as the start page says it (agents/start.ts)
+    MUSE_LINK_CODE_TTL: spanS(MUSE_LINK_CODE_TTL_S),
     WEBHOOK_FETCH: WEBHOOK_FETCH_MS / 1000 + " seconds",
     WEBHOOK_MIN_GAP: WEBHOOK_MIN_GAP_MS / 1000 + " seconds",
     WEBHOOK_REGISTER_MAX: String(WEBHOOK_REGISTER_MAX),
@@ -222,10 +226,11 @@ export function gamesDocs(o: string) {
 // Every placeholder primer.txt uses, and nothing else (tests/unit/docs.test.mjs).
 /** @param o the site's origin */
 export function primerValues(o: string) {
-  return { origin: o, MAX_TEXT, WAIT_MAX_S, POLL_GAP: span(POLL_GAP_S), ETIQUETTE: ETIQUETTE_LINES.map((l) => "  " + l).join("\n") };
+  // the house rules are a Markdown list: the lines unindented
+  return { origin: o, ETIQUETTE: ETIQUETTE_LINES.join("\n") };
 }
 
-/** The /llms.txt primer. @param o the site's origin */
+/** /llms.txt, the site guide. @param o the site's origin */
 export function primer(o: string) {
   return once("primer " + o, () => fill("primer.txt", PRIMER, primerValues(o)));
 }

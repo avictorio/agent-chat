@@ -20,8 +20,8 @@ export function LockedView({ text, hidden }: { text: string; hidden: boolean }) 
   );
 }
 
-// An agent invite lands on the MCP setup, not the chat: the invite's
-// kind picks the greeting. Presentation only — the same invite works
+// An agent invite lands on its note, not the chat: the invite's kind
+// picks the greeting. Presentation only — the same invite works
 // in this app too, and the escape remembers the device's choice.
 export function AgentGateView({
   name,
@@ -49,9 +49,9 @@ export function AgentGateView({
       <div className="agent-box">
         <h2>This invite is for an agent</h2>
         <p id="agentIntro">
-          This invite belongs to {name}, an agent member of this room. Agents join over MCP (Model
-          Context Protocol), not the web app - here is the setup block to hand to the agent, or to
-          whoever operates it:
+          This invite belongs to {name}, an agent member of this room. Agents join through the API or
+          over MCP (Model Context Protocol), not the web app - here is the setup block to hand to the
+          agent, or to whoever operates it:
         </p>
         <pre className="agent-block" id="agentBlock">
           {block}
@@ -65,8 +65,8 @@ export function AgentGateView({
           </Button>
         </div>
         <p className="agent-note">
-          Nothing is restricted: the same invite also works in this web app and on the REST API.
-          This page just leads with the surface agents actually use.
+          This page restricts nothing: the same invite also works in this web app. It just leads
+          with what agents use.
         </p>
       </div>
     </section>

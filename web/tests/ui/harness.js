@@ -70,6 +70,18 @@ const now = clockNow(), H = 3600e3, D = 86400e3;
 // state.tr8: an 8-seat Trust), in the server's seat colours from the 6th on.
 const WW9 = [['Kip', 'yellow', '#facc15'], ['Lou', 'white', '#f8fafc'], ['Mo', 'sand', '#d9b98c'], ['Ned', 'blush', '#fbcfe8']].map(([name, color, hex]) => ({ name, color, hex, accepted: true, alive: true, role: null, voted: false }));
 const TR8 = [['Ivy', 'lime', '#a3e635'], ['Jax', 'violet', '#a78bfa'], ['Kip', 'yellow', '#facc15'], ['Lou', 'white', '#f8fafc'], ['Mo', 'sand', '#d9b98c']].map(([name, color, hex], i) => ({ name, color, hex, accepted: true, committed: i % 2 === 0, score: 8 + i, out: false, coop: 0.5 }));
+// An agent invite's note (agent_onboarding) as the Worker writes it
+// (worker/agents/onboarding.ts agentOnboarding), for the room demo at the
+// live origin: its five lines, the inviter's name in quotes when a member
+// made the invite.
+function noteOf(name, by) {
+  const b = 'https://chat.victorio.cloud/api/rooms/demo';
+  return (by ? '"' + by + '" invited you' : 'You are invited') + ' to the Agent Chat room "demo" as the agent "' + name + '". Agent Chat hosts invite-only rooms where AI agents and people talk, play games and keep a shared board.\n' +
+    'To join you need a tool that can send an HTTP header: curl, an HTTP client, or an MCP client with custom headers. If you have none, you cannot join: stop here and tell your person.\n' +
+    'Send this header on every call to the room: X-Invite-Token: tok_' + name + ' (or the same token as Authorization: Bearer). It is your password here: whoever holds it acts as "' + name + '", so never post it.\n' +
+    'Start here: GET ' + b + ' with that header. It changes nothing in the room, and its answer is your start page: what to do next, in order.\n' +
+    'Or, if your MCP client can set headers: connect to ' + b + '/mcp with that header and call get_start_page for the same page. Neither step joins the room.';
+}
 function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 // A two-captain Battleship fixture's record, as the server sends it:
 // shots, every shot oldest first, read off the boards (each captain's fire
@@ -104,8 +116,8 @@ function fresh(opts) {
   opts = opts || {};
   return {
     deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind, agentYou: !!opts.agentYou,
-    // noNote: the server sends no hand-off block (GET /invite fails, the
-    // agent's read leaves agent_onboarding out), so the app builds its own
+    // noNote: GET /invite fails, so the app builds its own note (an agent's
+    // read never carries one)
     noNote: !!opts.noNote,
     artScript: !!opts.artScript,
     previews: opts.previews || null,
@@ -498,9 +510,9 @@ function fresh(opts) {
         legal_moves: ['Ada:A1', 'Ada:A2', 'Henry:A1', 'Hank-free waters are not listed'] } } : null,
     mb: { invite_only: true, members: [
       { name: 'Anthony', kind: 'human', status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 5 * 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Anthony' },
-      { name: 'Henry', kind: 'agent', webhook_delivery: true, avatar: 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=1', invited_by: null, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 2 * H, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Henry', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Henry".\nThen implement the wake recipe and post a short hello.' },
-      { name: 'Ada', kind: 'agent', muse_delivery: true, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 40 * 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Ada', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Ada".\nThen implement the wake recipe and post a short hello.' },
-      { name: 'Hank', kind: 'agent', invited_by: 'Henry', status: 'unused', invited: now - 2 * D, joined: null, last_seen: null, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Hank', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Hank".\nThen implement the wake recipe and post a short hello.' },
+      { name: 'Henry', kind: 'agent', webhook_delivery: true, avatar: 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=1', invited_by: null, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 2 * H, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Henry', agent_onboarding: noteOf('Henry') },
+      { name: 'Ada', kind: 'agent', muse_delivery: true, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 40 * 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Ada', agent_onboarding: noteOf('Ada') },
+      { name: 'Hank', kind: 'agent', invited_by: 'Henry', status: 'unused', invited: now - 2 * D, joined: null, last_seen: null, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Hank', agent_onboarding: noteOf('Hank', 'Henry') },
       { name: 'Old bot', kind: 'agent', status: 'revoked', invited: now - 5 * D, joined: now - 4 * D, last_seen: now - 4 * D, revoked: now - 3 * D },
     ] },
     nid: 100,
@@ -579,7 +591,7 @@ async function setup(page, S, calls) {
       const tk = req.headers()['x-invite-token'] || '-';
       if (S.previews && tk in S.previews) { const v = S.previews[tk]; S.hits.push('GET /invite ' + tk); return typeof v === 'number' ? J({ error: "This invite link isn't valid for this room." }, v) : J({ room: 'demo', invite: { name: v, kind: 'human', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: null, members: [], opened: false }); }
       return J(S.agentYou
-        ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list.' }
+        ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: noteOf('Probe', 'Anthony') }
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
     }
     // The stream answers with its frames and ends, as a dropped connection
@@ -693,7 +705,7 @@ async function setup(page, S, calls) {
       return J({ room: 'demo', messages: pageRows, last_id: hasMore ? Math.max(after, delivery(S, pageRows[pageRows.length - 1])) : Math.max(after, ...S.msgs.map((x) => delivery(S, x))), has_more: hasMore, you: S.agentYou ? 'Probe' : (S.noYou ? undefined : 'Anthony'), you_kind: S.agentYou ? 'agent' : 'human' });
     }
     if (p.endsWith('/messages')) return J(S.agentYou
-      ? { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: 'Probe', you_kind: 'agent', ...(S.noNote ? {} : { agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads).' }), room_state: roomState(S) }
+      ? { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: 'Probe', you_kind: 'agent', room_state: roomState(S) }
       : { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });
     if (p.endsWith('/constitution') && m === 'PUT') { S.hist.push(S.con); S.con = { version: S.con.version + 1, ts: clockNow(), editor: body.from, text: body.text }; return J({ constitution: S.con }, 201); }
     if (p.endsWith('/constitution')) return J({ constitution: S.con, history: S.hist.concat([S.con]) });
@@ -713,7 +725,7 @@ async function setup(page, S, calls) {
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: clockNow(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests') && S.digestsFail > 0) { S.digestsFail--; return J({ error: 'upstream connect error' }, 503); }
     if (p.includes('/digests')) return J({ digests: S.dg });
-    if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: clockNow() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: clockNow() }; if (body.kind !== 'human') inv.agent_onboarding = 'You are invited to the Agent Chat room "demo" as the agent "' + body.name + '".\nInvite link: ' + inv.link + '\nThen implement the wake recipe and post a short hello.'; return J(inv, 201); }
+    if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: clockNow() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: clockNow() }; if (body.kind !== 'human') inv.agent_onboarding = noteOf(body.name, 'Anthony'); return J(inv, 201); }
     if (p.endsWith('/games') && m === 'GET') { const list = [S.bs, S.bsPlay, S.duel, S.game].filter(Boolean); const mid = new Date(clockNow()); mid.setHours(0, 0, 0, 0); if (S.duel) list.push(Object.assign({}, S.duel, { id: 21, status: 'finished', winner: 'Anthony', round: 5, score: { Anthony: 3, Ada: 1 }, created: mid.getTime() - 50 * 3600e3, ended: mid.getTime() - 48 * 3600e3 + 600e3 })); if (S.bs) { list.push(Object.assign({}, S.bs, { id: 3, status: 'finished', winner: 'Ada', turn: 62, created: mid.getTime() - 8 * 3600e3, ended: mid.getTime() - 3 * 3600e3, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) })); list.push(Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, created: clockNow() - 3 * 3600e3, ended: clockNow() - 60e3, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) })); } return J({ room: 'demo', games: list, record: { battleship: [{ name: 'Ada', hex: '#22d3ee', w: 2, l: 0 }, { name: 'Henry', hex: '#fb923c', w: 0, l: 2 }], duel: [{ name: 'Anthony', hex: '#fb923c', w: 1, l: 0 }, { name: 'Ada', hex: '#22d3ee', w: 0, l: 1 }] }, ladder: { battleship: [{ name: 'Ada', hex: '#22d3ee', rating: 1031, w: 2, l: 0, d: 0, last: 15 }, { name: 'Henry', hex: '#fb923c', rating: 969, w: 0, l: 2, d: 0, last: -15 }] } }); }
     if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; if (body.game === 'battleship') { const players = (body.players || []).map((n, i) => ({ name: n, color: cols[i][0], hex: cols[i][1], accepted: false, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 })); const g = { id: 7, type: 'battleship', status: 'lobby', created_by: 'Anthony', card_msg: null, phase: null, turn: 0, turn_of: null, turn_seconds: body.tick_seconds || 3600, deadline: null, lobby_deadline: clockNow() + 3600e3, winner: null, declined_by: null, players, boards: [], last_move: null, log: [], awaiting: [], awaiting_accept: players.map(p => p.name), you: { playing: false } }; S.bs = g; return J({ room: 'demo', game: g }, 201); } const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false, accepted: n === 'Anthony' } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false, accepted: n === 'Anthony' }); const waiting = (body.players || []).filter(n => n !== 'Anthony'); const g = isDuel ? { id: 7, type: 'duel', status: 'lobby', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, round_seconds: body.tick_seconds || 60, deadline: null, lobby_deadline: clockNow() + 3600e3, winner: null, score: {}, players, rounds: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } } : { id: 7, type: 'lightcycles', status: 'lobby', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: null, lobby_deadline: clockNow() + 3600e3, winner: null, players, trails: [], log: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
     if ((mm = p.match(/games\/(\d+)\/(accept|decline)$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (mm[2] === 'decline') { gm.status = 'cancelled'; gm.declined_by = 'Anthony'; return J({ room: 'demo', game: gm }); } gm.players.forEach(x => { x.accepted = true; }); if (gm.you) gm.you.accepted = true; gm.awaiting_accept = []; gm.status = 'running'; gm.deadline = clockNow() + (gm.round_seconds || gm.tick_seconds || 60) * 1000; return J({ room: 'demo', game: gm }); }
@@ -735,6 +747,12 @@ async function setup(page, S, calls) {
       const pageItems = list.slice(0, lim);
       const next = list.length > lim && pageItems.length ? pageItems[pageItems.length - 1].id + ':' + pageItems[pageItems.length - 1].kind : null;
       return J({ room: 'demo', attachments: pageItems, counts, next_cursor: next });
+    }
+    // an agent's invite (a person using it in the browser): its own row's
+    // link only, and no row's note, as the Worker answers an agent
+    if (p.endsWith('/members') && S.agentYou) {
+      const rows = S.mb.members.filter((x) => x.name !== 'Probe').map((x) => { const row = { ...x }; delete row.invite_link; delete row.agent_onboarding; return row; });
+      return J({ ...S.mb, members: [...rows, { name: 'Probe', kind: 'agent', invited_by: 'Anthony', status: 'active', invited: now - D, joined: now - H, last_seen: now - 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Probe' }] });
     }
     if (p.endsWith('/members')) return J(S.mb);
     if (p.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });

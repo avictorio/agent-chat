@@ -19,6 +19,8 @@
 //               tokenless sentence; "read: query token", "read: query token
 //               on media" - a token only in the URL is answered exactly as
 //               no token (no notice).
+//   2026-11-26  "read: first, agent" - an agent's first read no longer
+//               carries agent_onboarding (the owner's decision).
 // Values that differ per run (ids, timestamps, tokens) are never compared.
 'use strict';
 const fs = require('fs');

@@ -10,9 +10,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { shellQuote } from "../../worker/lib/text.ts";
-import { agentOnboarding, registryLine } from "../../worker/agents/onboarding.ts";
+import { agentOnboarding } from "../../worker/agents/onboarding.ts";
 import WATCHER from "../../worker/agents/agent-watch.sh";
 import RECIPE from "../../worker/agents/agent-recipe.md";
+import { recipeRoute } from "../../worker/routes/agents.ts";
 
 const HOSTILE = [
   "$(touch MARK)",
@@ -67,22 +68,22 @@ test("the watcher's header takes a hostile member name as text, and the environm
   }
 });
 
-// The registry line is text an agent is told to append "exactly" to
-// rooms.txt, and many do it from a shell. Whatever the invite's name, the
-// line must be inert however it is quoted there.
-test("the watcher registry line is inert in a shell whatever the member is called", () => {
+// The recipe tells an agent to write its registry line itself: the room's
+// name, one space, its token, and many do it from a shell. A room name and
+// a token (charset [A-Za-z0-9_-]) hold nothing a shell acts on, so the line
+// is inert however it is quoted there; the member's name is not in it (the
+// watcher asks the API), and the invite's note prints no line at all.
+test("the registry line the recipe describes is inert in a shell", () => {
   const room = "lima-2", token = "AbC-dEf_0123456789abcdEF";
+  const line = room + " " + token;
+  for (const how of ["echo \"" + line + "\" >> rooms.txt", "cat >> rooms.txt <<EOF\n" + line + "\nEOF", "printf \"%s\\n\" \"" + line + "\" >> rooms.txt", "echo " + line + " >> rooms.txt"]) {
+    const r = run(how + "\ncat rooms.txt");
+    assert.equal(r.marked, false, "ran a command with: " + how);
+    assert.equal(r.out, line + "\n", how);
+  }
   for (const name of HOSTILE) {
-    const block = agentOnboarding("https://example.test", room, name, token, { invitedBy: name });
-    const lines = block.split("\n");
-    const line = lines[lines.findIndex((l) => l.includes("Watcher registry line")) + 1].trim();
-    assert.equal(line, registryLine(room, token));
-    assert.equal(line, room + " " + token, "room and token only");
-    for (const how of ["echo \"" + line + "\" >> rooms.txt", "cat >> rooms.txt <<EOF\n" + line + "\nEOF", "printf \"%s\\n\" \"" + line + "\" >> rooms.txt", "echo " + line + " >> rooms.txt"]) {
-      const r = run(how + "\ncat rooms.txt");
-      assert.equal(r.marked, false, "ran a command from the name " + JSON.stringify(name) + " with: " + how);
-      assert.equal(r.out, line + "\n");
-    }
+    const note = agentOnboarding("https://example.test", room, name, token, { invitedBy: name });
+    assert.ok(!note.includes("rooms.txt") && !note.split("\n").some((l) => l.trim() === line), "the note prints no registry line: " + JSON.stringify(name));
   }
 });
 
@@ -91,6 +92,27 @@ test("the recipe's registry line carries no member name", () => {
   const line = RECIPE.slice(start).split("\n").find((l) => l.includes("__ROOM__"));
   assert.ok(start > 0 && line, "the recipe shows the line");
   assert.ok(!line.includes("__NAME__") && !line.includes("__SELF__"), line);
+});
+
+// The recipe's text prints the caller's name inside its sentences: folded
+// onto its line, as the note and the start page fold it (a name may hold a
+// NEL, where some readers break a line). The script gets it as it is,
+// shell-quoted.
+test("the recipe's text folds the caller's name onto its line; the script quotes it as it is", async () => {
+  const name = "Nel\u0085Line two";
+  const stub = { access: async () => ({ ok: true, name, kind: "agent" }) };
+  const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
+  const serve = async (path) => {
+    const url = new URL("http://localhost" + path);
+    const m = url.pathname.match(/^\/api\/rooms\/([^/]+)\/agent-recipe(?:\/(script))?\/?$/);
+    return (await recipeRoute({ request: new Request(url), env, url, path: url.pathname, owner: false, invite: "tok-x" }, m)).text();
+  };
+  const text = await serve("/api/rooms/lima/agent-recipe");
+  assert.ok(!text.includes("\u0085"), "the recipe prints a NEL");
+  assert.ok(text.includes('You are the agent "Nel Line two".'), "the name, folded");
+  assert.ok(!text.includes("tok-x"), "the recipe never holds the token");
+  const script = await serve("/api/rooms/lima/agent-recipe/script");
+  assert.ok(script.includes("SELF=" + shellQuote(name)), "the script's name is the stored one, quoted");
 });
 
 // The watcher's cursor is a delivery number. A draft published late keeps

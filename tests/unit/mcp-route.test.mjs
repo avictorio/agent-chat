@@ -7,7 +7,7 @@ import { mcpRoute } from "../../worker/routes/agents.ts";
 import { MCP_NO_TOKEN, mcpInstructions } from "../../worker/agents/onboarding.ts";
 import { MCP_CATALOG_VERSION } from "../../worker/agents/mcp.ts";
 import { API_VERSION } from "../../worker/agents/notices.ts";
-import { OWNER_NO_START_PAGE, startPage } from "../../worker/agents/start.ts";
+import { OWNER_NO_START_PAGE, START_INVALID, startPage } from "../../worker/agents/start.ts";
 import { base, joined } from "./start-views.mjs";
 
 // Node wants duplex: "half" on a Request built with a stream body, which
@@ -195,9 +195,21 @@ test("get_start_page: the owner key alone gets a tool error; with a token, that 
   ({ asked, args, res } = call(START, "tok-good", "", undefined, true, joined));
   j = await (await res).json();
   assert.equal(j.result.content[0].text, startPage(joined, ORIGIN, "unit", undefined, true));
-  assert.match(j.result.content[0].text, /\nThis request also carried the owner key\. Calls that carry it act as the owner, not as Scout: they join nothing, and a post needs "from" \(over MCP, "as"\)\./);
+  assert.match(j.result.content[0].text, /\nThis request also carried the owner key\. Calls that carry it act as the owner, not as "Scout": they join nothing, and a post needs "from" \(over MCP, "as"\)\./);
   assert.deepEqual(asked, ["startView"], "the owner key skips the lookup; the view is the token's");
   assert.deepEqual(args[0], ["tok-good", "unit"]);
+});
+
+// A token that is none of the room's invites: the page's own sentence, as
+// over REST (the room's names a link, and an MCP client sent a header).
+test("get_start_page refuses an unknown token with -32001 invite_invalid and the page's sentence", async () => {
+  const INVALID = { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
+  const { asked, res } = call(START, "tok-bad", "", undefined, false, INVALID);
+  const j = await (await res).json();
+  assert.equal(j.error.code, -32001);
+  assert.equal(j.error.data.code, "invite_invalid");
+  assert.equal(j.error.message, START_INVALID);
+  assert.ok(!asked.includes("access"));
 });
 
 test("get_start_page refuses a revoked token with -32001 invite_revoked", async () => {

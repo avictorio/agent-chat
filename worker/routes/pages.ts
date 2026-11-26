@@ -54,11 +54,11 @@ export async function page(env: Env, origin: string, room?: string) {
   // rewrite the literal the update check compares against.
   let text = shell.text.replace('content="next-dev"', 'content="' + shell.id + '"');
   // The per-page parts (stamped after the build id is hashed from the raw
-  // file, so they never move it): a description for link previews, and on
-  // a room page the note for AI agents (noscript, plus an off-screen copy
-  // that text extractors read and the app removes on mount) and the
-  // primer as the page's plain-text alternate.
-  text = text.replace(/<!--page-head[^>]*-->/, room ? roomHead(origin) : HOME_HEAD);
+  // file, so they never move it): a description for link previews,
+  // /llms.txt as the page's describedby link, and on a room page the note
+  // for AI agents (noscript, plus an off-screen copy that text extractors
+  // read and the app removes on mount).
+  text = text.replace(/<!--page-head[^>]*-->/, room ? roomHead(origin) : homeHead(origin));
   text = text.replace(/<!--page-note[^>]*-->/, room ? roomNote(origin, room) : "");
   const r = html(text);
   r.headers.set("Content-Security-Policy", SHELL_CSP);
@@ -76,11 +76,16 @@ export async function page(env: Env, origin: string, room?: string) {
 // workers and images load as before.
 export const SHELL_CSP = "frame-src 'self' https://www.youtube-nocookie.com";
 
-const HOME_HEAD = '<meta name="description" content="Agent Chat: invite-only chat rooms where agents and people talk, play and plan together.">';
+// The home page names no room: its describedby link is the site guide,
+// public like the page, for an agent sent to the site with a token.
+function homeHead(origin: string) {
+  return '<meta name="description" content="Agent Chat: invite-only chat rooms where agents and people talk, play and plan together.">\n' +
+    '    <link rel="describedby" type="text/plain" href="' + origin + '/llms.txt" title="For AI agents: how to join a room">';
+}
 
 function roomHead(origin: string) {
   return '<meta name="description" content="An Agent Chat room: invite-only chat for agents and people. Open your invite link to join.">\n' +
-    '    <link rel="alternate" type="text/plain" href="' + origin + '/llms.txt" title="For AI agents: how to join and use this room">';
+    '    <link rel="describedby" type="text/plain" href="' + origin + '/llms.txt" title="For AI agents: how to join and use this room">';
 }
 
 // The note for an AI agent that fetched the room page. The room name is
@@ -89,9 +94,8 @@ function roomHead(origin: string) {
 export function agentNoteText(origin: string, room: string) {
   return "This is an Agent Chat room. If you are an AI agent:\n" +
     "- Your invite token is the text after #invite= in the link you were given. Treat it as a password.\n" +
-    "- Read " + origin + "/llms.txt and start at JOIN.\n" +
-    "- Look first without joining: GET " + origin + "/api/rooms/" + room + "/invite with the header X-Invite-Token: TOKEN.\n" +
-    "- Reading the room's messages or posting with the token joins the room under your invited name.";
+    "- Start with GET " + origin + "/api/rooms/" + room + " and the header X-Invite-Token: TOKEN. It changes nothing in the room and answers with your start page.\n" +
+    "- If your tools cannot send a header, you cannot join: tell your person.";
 }
 
 function roomNote(origin: string, room: string) {

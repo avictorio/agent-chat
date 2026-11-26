@@ -7,24 +7,26 @@ import { cleanName, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
 import type { InvRow, InvitePreview } from "../room/Room.js";
 /** a row of the room's invite list (room/members.ts invites()) */
-type InviteListRow = Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind">;
+type InviteListRow = Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind" | "invited_by">;
 import type { RoomMember } from "../room/members.js";
 import type { Member } from "@chat/contract";
 
 /** A member as a listing answers it (GET members, MCP get_members): the
  *  avatar's signed URL instead of its version, and for an unrevoked invite
- *  the invite link - for an agent also its hand-off block - instead of the
- *  raw token. Every caller of a listing holds an invite or the owner key,
- *  so a lost link can be re-sent from it; tokens never appear in messages.
- *  @param avatarParams the avatar's signed query, when it has one */
-/** @param handOff whether to include an agent's hand-off block: for the
- *  owner and people (the web's "Copy w/ Instructions"), not for agents. */
-export function memberReply(x: RoomMember, origin: string, room: string, avatarParams: string | undefined, handOff = true): Member {
+ *  the invite link instead of the raw token - for an agent invite also its
+ *  note (agent_onboarding) - so a person can re-send a lost one.
+ *  @param avatarParams the avatar's signed query, when it has one
+ *  @param agentToken the caller's own token when the caller is an agent's
+ *    invite: no row carries agent_onboarding, and only the caller's own row
+ *    (its token, never matched by name) carries invite_link - an agent never
+ *    gets another member's credential (the owner's call). null for the
+ *    owner key and people: every unrevoked row's link, agent rows' notes. */
+export function memberReply(x: RoomMember, origin: string, room: string, avatarParams: string | undefined, agentToken: string | null): Member {
   const { avatar_version: v, invite_token: tok, ...rest } = x;
   const out: Member = Object.assign(rest, { avatar: v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avatarParams ? "&" + avatarParams : "") : null });
-  if (x.status !== "revoked" && tok) {
+  if (x.status !== "revoked" && tok && (agentToken === null || tok === agentToken)) {
     out.invite_link = origin + "/r/" + room + "#invite=" + tok;
-    if (handOff && x.kind !== "human") out.agent_onboarding = agentOnboarding(origin, room, x.name, tok, { invitedBy: x.invited_by });
+    if (agentToken === null && x.kind !== "human") out.agent_onboarding = agentOnboarding(origin, room, x.name, tok, { invitedBy: x.invited_by });
   }
   return out;
 }
@@ -47,10 +49,11 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
 // GET /api/rooms/ROOM/invite: look before joining (GET /api/rooms/ROOM is
 // the same look as text: startPageRoute). The token holder sees
 // the invite (for whom, who invited them, its status), the start of the
-// constitution and who is in the room, and the invite stays unopened: a
-// read, a post and most other calls with the token open it (docs.txt LOOK
-// BEFORE JOINING). Refuses exactly as a read does. The owner key previews
-// nothing (it has no invite).
+// constitution and who is in the room, plus agent_onboarding for an agent
+// invite (the REST preview only), and the invite stays unopened: a read, a
+// post and most other calls with the token open it (docs.txt START HERE).
+// Refuses exactly as a read does. The owner key previews nothing (it has
+// no invite).
 export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -59,7 +62,7 @@ export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) 
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const pv = await stub.previewInvite(invite);
   if (!pv.ok) return deny(pv);
-  return json(invitePreviewBody(url.origin, room, invite, pv));
+  return json(invitePreviewBody(url.origin, room, invite, pv, true));
 }
 
 // GET /api/rooms/ROOM/me: who this credential is here - name, kind, the
@@ -84,12 +87,15 @@ export function meFields(acc: { name?: string, kind?: string, invited_by?: strin
   return { name: acc.name, kind: acc.kind || null, status: "active", invited_by: acc.invited_by || null, invited: acc.invited || null, joined: acc.joined || null };
 }
 
-/** The preview's answer, shared by REST and MCP get_invite. */
-export function invitePreviewBody(origin: string, room: string, token: string, pv: InvitePreview) {
+/** The preview's answer, shared by REST GET /invite and MCP get_invite.
+ *  withNote: an agent invite's note (agent_onboarding) rides along: REST,
+ *  where the web app's agent gate reads it for the person who opened the
+ *  link; never over MCP, an agent's own look (it already holds the note). */
+export function invitePreviewBody(origin: string, room: string, token: string, pv: InvitePreview, withNote: boolean) {
   const base = origin + "/api/rooms/" + encodeURIComponent(room);
   const out: Record<string, unknown> = { room, invite: pv.invite, purpose: pv.purpose, members: pv.members, opened: pv.opened };
-  if (pv.invite.kind === "agent") out.agent_onboarding = agentOnboarding(origin, room, pv.invite.name, token, { invitedBy: pv.invite.invited_by, purpose: pv.purpose });
-  out.next = { docs: origin + "/llms.txt", me: base + "/me", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" };
+  if (withNote && pv.invite.kind === "agent") out.agent_onboarding = agentOnboarding(origin, room, pv.invite.name, token, { invitedBy: pv.invite.invited_by });
+  out.next = { start: base, docs: origin + "/llms.txt", me: base + "/me", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" };
   return out;
 }
 
@@ -113,7 +119,14 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method === "GET") {
     const all = await stub.invites();
-    return json({ room, invite_only: true, invites: all.map((i: InviteListRow) => { const o: InviteListRow & { link: string, agent_onboarding?: string } = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
+    // each row keeps the listing's fields; invited_by only names a member's
+    // inviter in the note, as every other carrier of the note does
+    return json({ room, invite_only: true, invites: all.map((i: InviteListRow) => {
+      const { invited_by: by, ...row } = i;
+      const o: Omit<InviteListRow, "invited_by"> & { link: string, agent_onboarding?: string } = Object.assign({ link: link(i.token) }, row);
+      if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token, { invitedBy: by });
+      return o;
+    }) });
   }
   if (request.method === "POST") {
     const body = await readBody(request);

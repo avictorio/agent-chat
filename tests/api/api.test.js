@@ -172,28 +172,37 @@ async function takenPortRefused() {
     r = await req('GET', R + '/messages?limit=1', { token: TA });
     check('valid token -> 200', r.status === 200, r.status);
 
-    // Invite presentation: humans get the web app, agents get MCP instructions.
+    // Invite presentation: humans get the web app, agents get the note
+    // (agent_onboarding), which points at their start page. The note's
+    // addresses carry the Worker's origin (under wrangler dev the route's
+    // host, not BASE), read from the changes feed's url.
+    const ORIGIN = String(((await req('GET', '/api/changes')).json || {}).url || '').replace(/\/api\/changes$/, '');
+    const noteB = String(invB.json.agent_onboarding);
     check('human invite has no agent_onboarding', !('agent_onboarding' in (invA.json || {})));
-    check('agent invite carries agent_onboarding', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('/mcp') && invB.json.agent_onboarding.includes(TB), String(invB.json.agent_onboarding).slice(0, 80));
+    check('agent invite carries agent_onboarding: the start page, /mcp, the token once, get_start_page', typeof invB.json.agent_onboarding === 'string' && noteB.includes('GET ' + ORIGIN + R + ' with that header') && noteB.includes(ORIGIN + R + '/mcp') && noteB.split(TB).length === 2 && noteB.includes('get_start_page'), noteB.slice(0, 80));
+    check('agent note: no recipe, invite link, registry line or old first steps', !noteB.includes('/agent-recipe') && !noteB.includes('#invite=') && !noteB.includes('rooms.txt') && !noteB.includes('implement the wake recipe'));
     r = await req('GET', R + '/messages?limit=1', { token: TA });
     check('first read: human you_kind, no onboarding', r.json && r.json.you === 'ApiA' && r.json.you_kind === 'human' && !('agent_onboarding' in r.json), JSON.stringify(r.json && { you: r.json.you, you_kind: r.json.you_kind }));
     r = await req('GET', R + '/messages?limit=1', { token: TB });
-    check('first read: agent you_kind + onboarding', r.json && r.json.you === 'ApiB' && r.json.you_kind === 'agent' && typeof r.json.agent_onboarding === 'string' && r.json.agent_onboarding.includes(TB), JSON.stringify(r.json && { you: r.json.you, you_kind: r.json.you_kind }));
+    check('first read: agent you_kind, no onboarding', r.json && r.json.you === 'ApiB' && r.json.you_kind === 'agent' && !('agent_onboarding' in r.json) && !r.text.includes(TB), JSON.stringify(r.json && { you: r.json.you, you_kind: r.json.you_kind }));
+    check('a read\'s for_agents.start is the room\'s address', !!r.json.for_agents && r.json.for_agents.start === ORIGIN + R, JSON.stringify(r.json.for_agents));
     r = await req('GET', R + '/messages?after=0&limit=1', { token: TB });
     check('later reads keep you_kind, omit the onboarding block', r.json && r.json.you_kind === 'agent' && !('agent_onboarding' in r.json));
+    r = await req('POST', R + '/messages', { token: TB, json: { text: 'ApiB says hi.' } });
+    check('a post\'s for_agents.start is the room\'s address', r.status === 201 && !!r.json.for_agents && r.json.for_agents.start === ORIGIN + R, r.status + ' ' + JSON.stringify(r.json && r.json.for_agents));
+    const invM = await req('POST', R + '/invites', { token: TA, json: { name: 'ApiM', kind: 'agent' } });
     r = await req('GET', R + '/invites', { owner: true });
     const listedB = (r.json.invites || []).find(i => i.name === 'ApiB');
     const listedA = (r.json.invites || []).find(i => i.name === 'ApiA');
+    const listedM = (r.json.invites || []).find(i => i.name === 'ApiM');
     check('owner invite list: agent carries onboarding, human does not', !!(listedB && listedB.agent_onboarding) && !!(listedA && !('agent_onboarding' in listedA)));
-    check('agent onboarding points at the wake recipe', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('/agent-recipe'));
-    check('agent onboarding carries the invite link', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('#invite=' + TB));
-    check('agent onboarding gives the initiating instructions', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('implement the wake recipe') && invB.json.agent_onboarding.includes('post a short hello'));
-    check('agent onboarding carries the ready-made watcher registry line', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('rooms.txt') && invB.json.agent_onboarding.includes('\n  apitest-main-' + SUF + ' ' + TB + '\n'));
+    check('owner invite list: a member-made agent invite\'s note names its inviter, its row keeps its fields', invM.status === 201 && !!listedM && String(listedM.agent_onboarding).startsWith('"ApiA" invited you') && JSON.stringify(Object.keys(listedM)) === JSON.stringify(['link', 'token', 'name', 'created', 'revoked', 'used', 'kind', 'agent_onboarding']), JSON.stringify(listedM && Object.keys(listedM)) + ' ' + String(listedM && listedM.agent_onboarding).slice(0, 40));
     r = await req('GET', R + '/members', { owner: true });
     const memB = (r.json.members || []).find(m => m.name === 'ApiB');
     const memA = (r.json.members || []).find(m => m.name === 'ApiA');
-    check('members list: agent carries invite_link + onboarding', !!(memB && memB.invite_link && typeof memB.agent_onboarding === 'string' && memB.agent_onboarding.includes('implement the wake recipe')));
+    check('members list (owner): agent carries invite_link + a note naming get_start_page', !!(memB && memB.invite_link && typeof memB.agent_onboarding === 'string' && memB.agent_onboarding.includes('get_start_page')));
     check('members list: human carries invite_link, no onboarding', !!(memA && memA.invite_link && !('agent_onboarding' in memA)));
+    await req('DELETE', R + '/invites/' + invM.json.token, { owner: true });
 
     // Wake recipe: personalized text + the watcher script, never the token.
     const RNAME = 'apitest-main-' + SUF;

@@ -11,7 +11,7 @@ import {
   MAX_STAKES,
   MAX_TEXT,
   POLL_GAP_S,
-  span,
+  pollGap,
 } from "../limits.js";
 import { decRow } from "./state.js";
 import { sameName } from "../lib/text.js";
@@ -340,8 +340,9 @@ export const BoardMethods = {
     return true;
   },
 
-  // Welcome packet: everything a new agent should read on joining, in one call.
-  welcome() {
+  // Welcome packet: everything a new agent should read on joining, in one
+  // call. Its recommendations name the caller's start page, in this room.
+  welcome(room: string) {
     const q = this.questions();
     return {
       constitution: this.constitution(false).constitution,
@@ -351,11 +352,11 @@ export const BoardMethods = {
       recent_digests: this.digests(3).digests,
       last_id: this.lastId(),
       recommendations: {
-        summary: "How to get the most from this room; the full reference is GET /api.",
-        connect: "Read GET /messages?after=LAST_ID on each wake, at most once " + span(POLL_GAP_S) + " between turns, or be woken: GET /agent-recipe.",
-        room_state: "room_state.awaiting_you lists what waits on you, each item with the exact call to make.",
+        summary: "How to get the most from this room. Your start page (GET /api/rooms/" + room + ", MCP get_start_page) has your next steps; the full reference is GET /api.",
+        connect: "Read GET /messages?after=LAST_ID each turn, at most once " + pollGap(POLL_GAP_S) + " between turns. The ways to stay present between turns, and how to stop each, are step 3 of your start page.",
+        room_state: "room_state.awaiting_you lists what the board and matches wait on from you (messages are not in it), each item with the exact call to make.",
         speak_well: "Post Markdown up to " + MAX_TEXT + " characters; send a transcript with audio; big files go through UPLOADING FILES.",
-        board: "File your digest when named, sign decisions you agree with, settle questions on the board.",
+        board: "The digest, decisions and questions in awaiting_you are requests from the room: decide each one, and settle the ones you take on the board, not only in chat.",
         games: "A match waiting on you shows in awaiting_you; how_to_play in its state has the rules.",
         tools: "POST /tools/fetch reads a link as text (" + FETCH_DAILY_CAP + " per room per day).",
         identity: "Set an avatar (PUT /avatar) and a voice (PUT /voice/sample); never post your token.",

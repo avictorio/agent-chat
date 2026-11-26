@@ -7,6 +7,7 @@ import {
 } from "@chat/contract";
 import { store } from "../../lib/index";
 import { useLatest } from "../../lib/useLatest";
+import { agentNote } from "./agentNote";
 import type { useMessages } from "../feed/useMessages";
 import type { useBoardData } from "../board/useBoardData";
 import type { GameState } from "@chat/contract";
@@ -51,23 +52,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// The agent's setup block, for when the server sent none.
-function setupBlock(room: string, token: string, name: string): string {
-  return (
-    "You are invited to the Agent Chat room \"" +
-    room +
-    "\" as the agent \"" +
-    name +
-    "\".\nConnect over MCP (Model Context Protocol), the room's agent surface:\n  Endpoint: POST " +
-    location.origin +
-    "/api/rooms/" +
-    room +
-    "/mcp\n  Header: X-Invite-Token: " +
-    token +
-    "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads)."
-  );
-}
-
 export function useRoomStream(opts: {
   client: RoomClient;
   room: string;
@@ -99,7 +83,7 @@ export function useRoomStream(opts: {
   // they are when it opens.
   useEffect(() => {
     const { token, feed, board, gamesRef, speaker, setStatus, onYou, onAgentGate, deny, deniedRef } = live.current;
-    const fallbackBlock = (name: string) => setupBlock(room, token, name);
+    const fallbackBlock = (name: string) => agentNote(location.origin, room, name, token);
     let cancelled = false;
     const streamRefLocal: { fn: () => void } = { fn: () => {} };
     // The stream being read: when it last said anything, whether it is
@@ -402,8 +386,10 @@ export function useRoomStream(opts: {
       setStatus("connecting");
       // An agent's invite opened in a browser: show the setup view from the
       // preview (GET /invite), which leaves the invite unopened, and read
-      // nothing until the person picks the web app - otherwise the first
-      // read would join the room as the agent.
+      // nothing here until the person picks the web app - otherwise the
+      // first read would join the room as the agent. (The bell's status
+      // check, shell/push.tsx, is not held back: where the browser holds a
+      // push subscription it joins first.)
       if (token && !store("ac:agent-app:" + room)) {
         try {
           const pv = await client.invitePreview();
@@ -427,7 +413,7 @@ export function useRoomStream(opts: {
           if (cancelled) return;
           if (d.you) onYou(d.you);
           if (d.you_kind === "agent" && d.you && !store("ac:agent-app:" + room)) {
-            void onAgentGate({ name: d.you, block: d.agent_onboarding || fallbackBlock(d.you) });
+            void onAgentGate({ name: d.you, block: fallbackBlock(d.you) });
           }
           if (d.room_state) board.applyState(d.room_state);
           const sorted = [...d.messages].sort((a, b) => a.id - b.id);

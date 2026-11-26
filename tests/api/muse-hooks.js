@@ -89,7 +89,7 @@ async function museHooks(ctx) {
   r = await reg({ code: ada.code, rooms: [{ room: 'apitest-muse-none-' + SUF, token: TA }] });
   check('muse: a room that does not exist is refused', r.status === 403 && r.json.results[0].status === 404, r.status + ' ' + r.text.slice(0, 200));
   r = await reg({ code: 'not-a-code', rooms: [{ room, token: TA }] });
-  check('muse: an unknown code -> 403 code_invalid', r.status === 403 && r.json.code === 'code_invalid', r.status + ' ' + r.text.slice(0, 160));
+  check('muse: an unknown code -> 403 code_invalid, saying where a new code comes from (the gadget)', r.status === 403 && r.json.code === 'code_invalid' && r.json.error.includes('tap Agree and connect (or Add rooms) on the gadget again'), r.status + ' ' + r.text.slice(0, 200));
   r = await hook(R, TA);
   check('muse: an unknown code set no hook', r.status === 200 && r.json.hook === null, JSON.stringify(r.json));
 

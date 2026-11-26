@@ -17,6 +17,21 @@ Front-end conventions.
   `AGENTS.md` section 5: rooms are reached by invite only, and there is
   no open-by-name.
 
+- **Agent invites in the browser:** the agent gate (`room/views.tsx`,
+  `useRoomStream.ts`) shows the invite's note from `GET /invite`, and
+  the room's messages are not read until the person picks the web app.
+  One call is not held back: on a device whose browser holds a push
+  subscription (notifications turned on in any room), the bell's boot
+  check (`shell/push.tsx`, `GET /push/status`) runs with the agent's
+  token and opens an unused invite before the choice. When the
+  preview fails with something other than 401 or 403, the app reads the
+  room instead (that read opens an unused invite, so the agent has
+  joined) and then shows the gate with the owner-made form `agentNote`
+  builds, without waiting for the person's choice. With an agent's
+  invite the members list has no other member's link
+  (`docs/agents/rooms-and-api.md`, Members), and the rows without one
+  show no link field.
+
 - **Install strip:** the native install prompt on Android, Share steps on
   iOS, with one shared 30-day dismissal for the home banner and the room
   strip, under the localStorage key `ac:install-hide-2`

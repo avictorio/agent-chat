@@ -86,7 +86,7 @@ export const VARIANTS = [
   ["start-joined-hook-webhook-off", "joined, a webhook its member turned off", ORIGIN, room, { ...joined, hook: web({ enabled: false, off_reason: "member" }) }],
   ["start-worst", "worst case before joining: a 64-character room, MAX_ACTIVE_INVITES members of MAX_NAME characters, a 280-character purpose", ORIGIN, WORST_ROOM, worst],
   ["start-joined-worst", "worst case joined: as above, posted, a failing webhook with a WEBHOOK_URL_MAX-character URL, STATE_ITEMS items filling STATE_MAX_BYTES and more", ORIGIN, WORST_ROOM, worstJ],
-  ["start-joined-worst-not-posted", "worst case joined, not posted (the agent_onboarding sentence and the Lost line both)", ORIGIN, WORST_ROOM, { ...worstJ, posted: false, since: null }],
+  ["start-joined-worst-not-posted", "worst case joined, not posted (the Lost line)", ORIGIN, WORST_ROOM, { ...worstJ, posted: false, since: null }],
 ];
 
 /** a view's variant by name */

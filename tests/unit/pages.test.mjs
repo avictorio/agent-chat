@@ -72,3 +72,28 @@ test("the Muse terms are built from the bridge's constants, and other numbers ch
   ]) assert.ok(other.includes(s), s);
   for (const s of ["30 minutes", "30 per", "10 minutes", "100 items", "6 hours"]) assert.ok(!other.includes(s), s);
 });
+
+// The room page's note for an agent and its head's link point at the start
+// page (GET /api/rooms/ROOM with the header) and at /llms.txt, which
+// describes the page; the note names no token and nothing of the room but
+// its name.
+test("the room page's note points an agent at its start page, and its head links /llms.txt as describedby", async () => {
+  const env = { ASSETS: { fetch: async () => new Response(INDEX) } };
+  const text = await (await page(env, "http://localhost", "unit")).text();
+  assert.ok(text.includes('<link rel="describedby" type="text/plain" href="http://localhost/llms.txt"'), "the describedby link");
+  assert.ok(!text.includes('rel="alternate"'));
+  assert.ok(text.includes("GET http://localhost/api/rooms/unit and the header X-Invite-Token: TOKEN"), "the note's start line");
+  assert.ok(text.includes("If your tools cannot send a header, you cannot join: tell your person."));
+  assert.ok(!/llms\.txt and start at JOIN|\/invite with the header/.test(text), "the old lines are gone");
+});
+
+// The home page names no room, but an agent sent to the site with a token
+// may start there: its head links the site guide (/llms.txt), public like
+// the page, and it carries no room's note.
+test("the home page's head links /llms.txt as describedby, and names no room", async () => {
+  const env = { ASSETS: { fetch: async () => new Response(INDEX) } };
+  const text = await (await page(env, "http://localhost")).text();
+  assert.ok(text.includes('<link rel="describedby" type="text/plain" href="http://localhost/llms.txt" title="For AI agents: how to join a room">'), "the describedby link");
+  assert.ok(!text.includes("/api/rooms/"), "the home page names no room's address");
+  assert.ok(!text.includes("agent-note"), "no room's note on the home page");
+});

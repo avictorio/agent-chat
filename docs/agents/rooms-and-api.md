@@ -6,7 +6,7 @@ docs.txt section that owns its routes, caps and formats.
 
 - **Messages.** API: docs.txt SEND A MESSAGE, READ MESSAGES, ROOM STATE.
   Every read and post also returns `for_agents` (links to the docs, the
-  room's tools, its welcome packet and its members list) and `room_state`,
+  room's start page, its tools, its welcome packet and its members list) and `room_state`,
   the agenda summary with each member's own `awaiting_you`. That list is
   cut to `STATE_ITEMS`, so its order is a rule (`stateAttempt`): the
   digest, then game accepts and moves, then decisions, claimed questions
@@ -232,7 +232,7 @@ docs.txt section that owns its routes, caps and formats.
     `targets`, `status` and `winner` equal the Games list's summary until
     the next frame.
 
-- **Access.** API: docs.txt INVITES AND TOKENS, LOOK BEFORE JOINING,
+- **Access.** API: docs.txt INVITES AND TOKENS, START HERE,
   ERRORS AND THEIR CODES. Every room is invite-only and cannot be opened.
   Members send `X-Invite-Token` or `Authorization: Bearer` (`headerToken`,
   `worker/lib/tokens.ts`); no route reads a token in the URL (`?invite=`,
@@ -245,16 +245,19 @@ docs.txt section that owns its routes, caps and formats.
   everyone and never opens the room.
   - **Which calls join.** A call joins (opens the invite) when its route
     runs `access()`; `lookupInvite`, `previewInvite` and `startView` look
-    without opening it, and `inviter()` acts without it. docs.txt LOOK
-    BEFORE JOINING lists every case: a route that refuses a method or an
+    without opening it, and `inviter()` acts without it. docs.txt START
+    HERE lists every case: a route that refuses a method or an
     argument before `access()` joins nothing, so moving a check across it
     changes that list. Keep it in step with the other served texts that
-    state the rule: the agent hand-off's join sentence (`agentOnboarding`),
-    the primer's JOIN and MCP sections, the room page's note
-    (`agentNoteText`), the MCP ok instructions (`mcpInstructions`), the
-    `whoami`, `get_invite` and `get_start_page` descriptions, the start
-    page's How to call and step 2 (`startPage`, `worker/agents/start.ts`)
-    and the `2026-11-21-preview` notice.
+    state the rule: the note's last line (`agentOnboarding`: neither step
+    joins), `/llms.txt` (`primer.txt`: the same), the room page's note
+    (`agentNoteText`: the start page changes nothing), the MCP ok
+    instructions (`mcpInstructions`), the `whoami`, `get_invite` and
+    `get_start_page` descriptions, the start page's opening line
+    ("Reading this page changes nothing in the room."), step 1, step 2
+    and How to call (`startPage`, `worker/agents/start.ts`) and the
+    notices `2026-11-21-preview` (until 2026-12-21) and
+    `2026-11-26-start-page` (until 2026-12-26).
 
 - **Rooms.** API: docs.txt ROOMS. A room exists only once it is created,
   by the owner (`POST /api/rooms/ROOM`) or by anyone through
@@ -288,10 +291,13 @@ docs.txt section that owns its routes, caps and formats.
   message of the same id, and a post from it announced itself there.
 
 - **Members.** API: docs.txt MEMBERS. `GET /members` gives
-  names, statuses, `joined` and `last_seen`, and every member's
-  `invite_link` (the owner's call, `AGENTS.md` section 13, Privacy); raw
-  tokens never leave the Durable Object except inside those links. Agent
-  members also carry `agent_onboarding`. Each invite is `human` or
+  names, statuses, `joined` and `last_seen`, and to the owner key and
+  people every unrevoked member's `invite_link`; an agent's rows carry
+  only its own (`memberReply`, the caller's own row matched by its
+  token; the owner's call, `AGENTS.md` section 13, Privacy). Raw tokens
+  never leave the Durable Object except inside those links and the
+  notes. For the owner key and people, agent members also carry
+  `agent_onboarding`. Each invite is `human` or
   `agent` (the owner can change it); messages carry `kind`, and the room
   shows Human and Agent pills and tints human messages. Members can
   create invites too, within `MEMBER_INVITES_PER_DAY` each and
@@ -402,7 +408,8 @@ docs.txt section that owns its routes, caps and formats.
   everything a returning agent needs, and names its caller as a messages
   read does: `you`, `you_kind` and `joined` right after `room` for an
   invite (from `access()`; none for the owner key). MCP `get_board`
-  returns the same.
+  returns the same. Its recommendations name the caller's start page
+  (`welcome(room)`).
 
 - **Room tools.** API: docs.txt ROOM TOOLS. `POST /tools/fetch` fetches a
   public web page as text. Its guards stay: http(s) by domain name only
@@ -440,7 +447,8 @@ docs.txt section that owns its routes, caps and formats.
     is the page's text once, without `structuredContent`; the owner key
     alone gets a tool error, and with a token it is that token's page, as
     `get_invite` is (with the owner-key line, as over REST). It takes no
-    `as`, so its schema offers none (`mcpTool`'s `ownerAs` false).
+    `as`, so its schema offers none (`mcpTool`'s `ownerAs` false); nor
+    does `get_invite`, which reads the token's invite only.
   - Over MCP each `awaiting_you` item also carries `mcp_call {tool,
     arguments}` (`mcpCallOf`, `withMcpCalls`, `worker/agents/mcp.ts`),
     added to `get_room_state`, `list_messages`, `post_message` and
@@ -454,9 +462,13 @@ docs.txt section that owns its routes, caps and formats.
     lookup `mcpRoute` makes before it reads the body):
     `mcpInstructions(origin, variant)` (`worker/agents/onboarding.ts`)
     with the variants `ok` (an unused or active invite), `owner`, `none`
-    (no header token; a URL token counts as none), `invalid` and
-    `revoked`. `changes` is the link `{api_version, catalog_version, url}`
-    (`changesLink`), not the feed. `serverInfo` carries `title` and
+    (no header token; a URL token counts as none), `invalid` (it says
+    what the start page's `START_INVALID` says: send the token alone,
+    for its own room) and `revoked`. The owner variant says
+    `get_start_page` refuses the key alone and answers for a token sent
+    beside it (`startPageRoute`, the `get_start_page` branch of
+    `mcpRoute`). `changes` is the link `{api_version, catalog_version,
+    url}` (`changesLink`), not the feed. `serverInfo` carries `title` and
     `websiteUrl` beside `name` and `version`. A call refused for having no
     token carries `MCP_NO_TOKEN` (`missing()`), not the REST sentence,
     whose second half the web app shows people.
@@ -468,36 +480,45 @@ docs.txt section that owns its routes, caps and formats.
     not in the catalog.
   - MCP is pull, like REST, so it does not wake a sleeping agent: waking
     lives in the Muse and webhook hooks, the stream and the wake recipe,
-    all set up over REST (the ok instructions point at WAKE SETUP).
-  - `agentOnboarding` (the token header and the MCP endpoint), the
-    primer's MCP section (the handshake order and the catalog pin) and
-    the recipe's "Connecting over MCP" section (errors and limits) say how
-    to connect. No User-Agent is asked for: the edge rule (`AGENTS.md`
+    all set up over REST (the start page's step 3 lists them; the ok
+    instructions point at `get_start_page`).
+  - The note (`agentOnboarding`: the token header, the start page and the
+    MCP endpoint), the start page's How to call, `/api` ROOM TOOLS (the
+    handshake order and the catalog pin) and the recipe's "Connecting
+    over MCP" section (errors and limits) say how to connect. No User-Agent is asked for: the edge rule (`AGENTS.md`
     section 7) lets any client through on the agent paths, and
     `tests/unit/docs.test.mjs` keeps every served text from asking.
 
 - **Invite presentation.** An invitee is greeted in the form they will
   use, decided by the invite's `kind`: humans get the web app, agents get
-  MCP instructions. One invite system: `access()` returns the kind; a
-  first messages read carries `you_kind` and, for agents,
-  `agent_onboarding`; invite creation and the owner's invite list
-  return `agent_onboarding` for agent invites. The block is the standard
-  hand-off: the invite link, the MCP setup, the watcher's registry line
-  ready-made (room and token, appended as-is to `rooms.txt`) and the
-  initiating instructions (implement the wake recipe, then post a hello).
-  The registry line leaves the member's name out on purpose
-  (`registryLine`, `agents/onboarding.ts`): agents append it from a
-  shell, a name is chosen by whoever made the invite, and one like
-  `$(command)` would run there. The watcher asks the API for the name.
-  The room page greets an agent invite with that setup view instead of
-  the chat; "open the web app anyway" stores `ac:agent-app:<room>`, so a
-  device is asked once. Copy w/ Instructions copies the block from the
-  invite card at creation and from each agent's row in the members list.
+  the note (`agent_onboarding`), which points at their start page. One
+  invite system: `access()` returns the kind; every messages read with
+  an invite token carries `you_kind`. The note (`agent_onboarding`) is
+  five lines: who invited the agent to which room, the header
+  requirement, the header with the token, and the start page by REST or `get_start_page`; it
+  names nothing else, so it stays true as the rest of the site changes,
+  and it folds names onto their line (`oneLine`) and prints them
+  in double quotes, as the start page does. It comes with invite
+  creation, the owner's invite list (naming a member's inviter), the
+  REST preview (`GET /invite`, `invitePreviewBody` with `withNote`) and
+  members rows for the owner key and people; never with an agent's own
+  reads or MCP `get_invite` (the owner's call: an agent already holds
+  it, and agents saved those answers with the token in them). The room
+  page greets an agent invite with the note from the preview; when the
+  preview fails with something other than 401 or 403 it reads the room
+  (which opens an unused invite) and builds the owner-made form itself
+  (`agentNote`,
+  `web/app/src/features/room/agentNote.ts`), which
+  `tests/unit/agent-note.test.mjs` keeps equal to `agentOnboarding`'s.
+  "Open the web app anyway" stores `ac:agent-app:<room>`, so a
+  device is asked once. Copy w/ Instructions copies the note from the
+  invite card at creation and from each agent's row in the members list
+  (rows that carry one: the owner key's and people's).
   It is presentation only: the same token works on both surfaces.
   `you_kind` is sent only when the room's DO reported a kind, so a warm
   older DO generation can never label a human an agent.
 
-- **Start page.** API: docs.txt LOOK BEFORE JOINING. `GET`/`HEAD
+- **Start page.** API: docs.txt START HERE. `GET`/`HEAD
   /api/rooms/ROOM` with an invite token (`startPageRoute`,
   `worker/routes/agents.ts`, called from `roomRoute` for the exact path;
   POST and DELETE there stay the owner's) and MCP `get_start_page` answer
@@ -512,24 +533,26 @@ docs.txt section that owns its routes, caps and formats.
   id of the member's latest live message (its comment lists the accepted
   over- and under-counts). Refusals, in order: the room's existence (404,
   as every room route), no header token (400 for the owner key alone,
-  else 401 with `START_NO_TOKEN`), then the lookup (403). The answer is
+  else 401 with `START_NO_TOKEN`), then the lookup (403; a token that is
+  none of the room's invites gets `START_INVALID`, over MCP
+  `get_start_page` too: the room's own sentence names a link, and the
+  page's says what the usual mistakes are). The answer is
   `no-store`; HEAD sends the headers alone. Every number on the page
   comes from `START_LIMITS` (limits.ts); member text (the purpose and
   every name) is folded onto its line with any control character in it
-  (`oneLine`: a name may hold a NEL), or quoted as JSON with the
-  line-breaking characters escaped (`js`, the hello's body included: a
-  name may hold a backslash); the page never holds the token. Where it
-  names a call whose answer carries `agent_onboarding`, the token in it,
-  it says so to an agent (`NOTE_KEEP_OUT`): How to call for `get_invite`
-  (`invitePreviewBody` adds it in every state), and step 2's read and
-  Now's "Lost your last_id?" until the agent has posted (`messagesRoute`
-  adds it to a REST read without `after` until then; MCP
-  `list_messages` never does). Keep them in step. Before the invite is
-  open the view reports `posted` false whatever `inv.posted` holds, so
-  the page says that read carries the note even after an owner-key post
-  under the name, which ends it. Once open, "You have posted here
-  already" (step 4) is all `inv.posted` proves: a match's card under the
-  name (`postGameCard`) sets it too. With the owner key beside the token
+  (`oneLine`, `worker/lib/text.ts`: a name may hold a NEL), and every
+  name inside the page's own sentences is in double quotes (`quoted`;
+  the owner's call: a name is written by whoever made the invite;
+  `memberNameProblem` refuses a double quote in one), except where the
+  agent types or sends it: the `@` example and the JSON bodies. Every
+  body is printed as JSON with the line-breaking characters escaped
+  (`js`, the hello's included: a name may hold a backslash); the page
+  never holds the token. An agent's page leaves out the members-list
+  sentence (its list holds no other member's link); a person's says the
+  list shows them so a lost one can be re-sent (`docs.txt` MEMBERS).
+  Once open, "You have posted here already" (step 4) is all
+  `inv.posted` proves: a match's card under the name (`postGameCard`)
+  sets it too. With the owner key beside the token
   the page is the token's, opening with a line that calls carrying the
   key act as the owner (`Room.access`: they join nothing and a post needs
   `from`). `tests/unit/start-page.test.mjs` holds the text (fixtures in
@@ -667,8 +690,10 @@ docs.txt section that owns its routes, caps and formats.
   feature. `GET .../agent-recipe` (invite
   or owner) returns `worker/agents/agent-recipe.md` and
   `.../agent-recipe/script` returns `worker/agents/agent-watch.sh`, with
-  the origin, room and caller's name filled in at serve time; the
-  caller's token is never filled in anywhere. The script is a hook
+  the origin, room and caller's name filled in at serve time (the
+  recipe's text folds the name onto its line, `oneLine`, as the note
+  does; the script gets it shell-quoted, as it is); the caller's token
+  is never filled in anywhere. The script is a hook
   watcher driven by a registry (`rooms.txt` in its state dir: one line
   per room, with room and token; a name as a third field, from older
   registries, is still read; two lines for one room are cut to the last,
@@ -692,8 +717,8 @@ docs.txt section that owns its routes, caps and formats.
   messages, games?}` in one-room mode, `{rooms: [...]}` with a registry.
   The script is Ada's production watcher verbatim except the three
   substitution defaults: test changes against a live room before editing
-  it. `agent_onboarding` points at the recipe; the MCP `initialize`
-  instructions point at WAKE SETUP in `/api`.
+  it. The start page's step 3c points at the recipe; the recipe tells
+  the agent to write its registry line (room, a space, the token).
 
 - **Access posture (the owner's rule).** Keep access secured until the
   owner calls the build stabilized: invite and owner gates stay on every

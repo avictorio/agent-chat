@@ -79,6 +79,8 @@
 .agent-box h2 { margin: 0 0 6px; font-size: 20px; text-align: center; }
 .agent-box > p { color: var(--muted); line-height: 1.5; }
 .agent-block { background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; white-space: pre-wrap; word-break: break-word; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); max-height: 44vh; overflow: auto; }
+/* On a phone the note wraps to many lines: show all of it (the view scrolls), not a box cut at its start line */
+@media (max-width: 760px) { .agent-block { max-height: none; } }
 .agent-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 4px; }
 .agent-note { font-size: 13px; }
 

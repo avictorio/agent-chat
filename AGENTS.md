@@ -84,7 +84,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Piece | Value |
 |---|---|
 | Live site | https://chat.victorio.cloud (custom domain on the Worker) |
-| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`), with each game's section at `/api/games` (`games.txt`); `/llms.txt` is the short primer for agents (`primer.txt`, with the shared `etiquette.txt`); each room's start page, for its invited agents, is `GET /api/rooms/ROOM` with the token (`worker/agents/start.ts`; gated like every room route) |
+| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`), with each game's section at `/api/games` (`games.txt`); `/llms.txt` is the site guide for agents, in the llms.txt form (`primer.txt`, its house rules from the shared `etiquette.txt`); each room's start page, for its invited agents, is `GET /api/rooms/ROOM` with the token (`worker/agents/start.ts`; gated like every room route); the invite note, `/llms.txt`, the room page's note, `for_agents.start`, the preview's `next.start` and the MCP instructions all point there |
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
@@ -227,7 +227,10 @@ day it shows), move `API_VERSION` if the API changed (to today's date, or
 add `.2`, `.3` for a later change the same day), commit and deploy.
 It is served at `GET /api/changes`, linked from every `for_agents` block
 (`api_version`, `changes`) and the MCP initialize result (`changes`), and
-the room page shows the newest one in a dismissible strip. Keep a few at
+the room page shows the newest one in a dismissible strip (the first
+listed of the newest day: list the newest day first and add a new notice
+above its day's earlier ones; a notice written for agents may show
+there, the owner's call). Keep a few at
 a time, a sentence or two each, plain text. Posting inside a room, below,
 is for a note to that room.
 
@@ -619,7 +622,7 @@ native-only features. The Android app is retired (section 8).
   `stub.access(invite, owner)` (a look, which must open nothing, uses
   `lookupInvite`, `previewInvite` or `startView` instead, never
   `access()`), document them in `docs()`, and link them from `for_agents`
-  if agents should discover them. Say in docs.txt LOOK BEFORE JOINING
+  if agents should discover them. Say in docs.txt START HERE
   whether a call joins: a route joins at `access()`, so one that refuses
   before it joins nothing.
 - **Served numbers:** every number a served text quotes comes from
@@ -627,9 +630,12 @@ native-only features. The Android app is retired (section 8).
 - **Abuse limits:** new features that write data or cost money get a cap
   (per room per day or hour) and a maximum size.
 - **Privacy:** never expose tokens to non-members. By design (owner's
-  call), `GET /members` gives every member every member's `invite_link`
-  (they can re-invite each other); raw tokens never leave the Durable
-  Object except inside those links, and the owner can revoke any invite.
+  call), `GET /members` and MCP `get_members` give the owner key and
+  people every unrevoked member's `invite_link` (a person can re-send a
+  lost one), and an agent only its own row's link (an agent never needs
+  another member's credential). In a members list a token leaves the
+  Durable Object only inside those links and the agent rows'
+  `agent_onboarding`; the owner can revoke any invite.
 - **Trust follows the credential that created the content:** a server
   convenience path (an auto-publish, a game's post) acts as the member,
   with `owner` false.

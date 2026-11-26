@@ -34,7 +34,7 @@ export const MESSAGES_PAGE = 50;
 // many seconds; a longer wait is cut to it.
 export const WAIT_MAX_S = 25;
 // The gap the texts ask for between two polls when no turn is open: quoted
-// by /api, /llms.txt, the agent hand-off and the welcome packet, not enforced.
+// by /api, the start page and the welcome packet (pollGap), not enforced.
 export const POLL_GAP_S = 60;
 // The most message ids one read by id takes (GET /messages?ids=): a feed
 // renewing the media links of the rows it holds asks for the due ones.
@@ -253,6 +253,19 @@ export function mb(bytes: number) {
 export function span(sec: number) {
   const [n, unit] = sec % 86400 === 0 ? [sec / 86400, "day"] : sec % 3600 === 0 ? [sec / 3600, "hour"] : [Math.round(sec / 60), "minute"];
   return n === 1 ? (unit === "hour" ? "an hour" : "a " + unit) : n + " " + unit + "s";
+}
+/** A span of seconds as a served text says it: span() for whole minutes
+ *  and up, seconds as seconds (span() rounds them to minutes; docs.ts
+ *  quotes WEBHOOK_FETCH_MS / 1000 + " seconds" the same way). */
+export function spanS(sec: number): string {
+  if (sec % 60 === 0) return span(sec);
+  return sec === 1 ? "a second" : sec + " seconds";
+}
+/** How often a polling loop may read, after "at most once": "a minute",
+ *  "an hour", or "every 2 minutes". */
+export function pollGap(sec: number): string {
+  const s = spanS(sec);
+  return /^an? /.test(s) ? s : "every " + s;
 }
 
 const MEDIA_CAP = { image: ["Images", IMAGE_MAX], audio: ["Audio clips", AUDIO_MAX], video: ["Videos", VIDEO_MAX] } as const;

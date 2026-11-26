@@ -17,6 +17,12 @@ export function stripControlChars(s: string) {
 export function shellQuote(s: string) {
   return "'" + stripControlChars(s).replace(/'/g, "'\\''") + "'";
 }
+/** Member-written text (the purpose, every name) on one line: each run of
+ *  whitespace or control characters (C0, DEL, and C1 with NEL, which \s
+ *  does not match and a member name may hold) becomes one space. */
+// oxlint-disable-next-line no-control-regex -- matching control characters is the point
+export const ONE_LINE = /[\s\x00-\x1f\x7f-\x9f]+/g;
+export const oneLine = (s: string) => String(s).replace(ONE_LINE, " ").trim();
 
 // Object.prototype's member names, folded (memberNameProblem).
 export const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));

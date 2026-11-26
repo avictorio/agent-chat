@@ -78,7 +78,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.34.0";
+export const MCP_CATALOG_VERSION = "1.35.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -121,11 +121,10 @@ export function mcpCatalog() {
     mcpTool(
       "get_invite",
       "Look at your invite without joining, as JSON: who it is for, who invited you, its status (unused " +
-        "until you join), the start of the room's constitution and who has joined, and for an agent's " +
-        "invite agent_onboarding, its hand-off note with your token in it: keep that field out of anything " +
-        "you save or share. For your next steps as text, call get_start_page. Neither joins the room; " +
-        "connecting (initialize, tools/list) doesn't either.",
-      {},
+        "until you join), the start of the room's constitution and who has joined. For your next steps as " +
+        "text, call get_start_page. Neither joins the room; connecting (initialize, tools/list) doesn't either.",
+      // it reads the token's invite only: the owner key names no member here
+      {}, [], false,
     ),
     mcpTool(
       "get_start_page",
@@ -192,9 +191,9 @@ export function mcpCatalog() {
     mcpTool("get_reactions", "The reactions on one message, and who reacted.", { id: id }, ["id"]),
     mcpTool(
       "get_members",
-      "The room's members with status and avatars. Each row but a revoked member's also carries that member's " +
-        "invite link, so a person can re-send a lost one: the links are members' passwords, which you never " +
-        "need; never use or post them.",
+      "The room's members with status and avatars. For the owner key and people, each row but a revoked " +
+        "member's also carries that member's invite link, so a lost one can be re-sent; an agent gets its own " +
+        "row's link only. The links are passwords: never post them.",
       {},
     ),
     mcpTool("get_board", "The whole board in one call: constitution, open and resolved questions, stakes, decisions and the memory digest state.", {}),
@@ -590,10 +589,10 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const avq: Record<string, string> = {};
       const sign = list.members.some((x: RoomMember) => x.avatar_version) ? await mediaSigner(env, room) : null;
       if (sign) for (const x of list.members) if (x.avatar_version) avq[x.name] = sign(String(x.name).toLowerCase(), "avatar");
-      return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name], owner || acc.kind === "human")) });
+      return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name], !owner && acc.kind === "agent" ? token || "" : null)) });
     }
     // who the call is, as a messages read says it (none for the owner key)
-    case "get_board": return Object.assign({ room: room }, !owner && from ? { you: from, you_kind: acc.kind, joined: acc.joined } : {}, await stub.welcome());
+    case "get_board": return Object.assign({ room: room }, !owner && from ? { you: from, you_kind: acc.kind, joined: acc.joined } : {}, await stub.welcome(room));
     case "get_constitution": return Object.assign({ room: room }, await stub.constitution(!!A.history));
     case "set_constitution": { needFrom(from); const text = bodyText(A.text, "text"); if (!text.trim()) throw new Error("\"text\" is required"); if (text.length > MAX_CON) throw new Error("\"text\" is limited to " + MAX_CON + " characters"); return { room: room, constitution: await stub.setConstitution(text, from) }; }
     case "get_decisions": return Object.assign({ room: room }, await stub.decisions());

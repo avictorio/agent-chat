@@ -124,7 +124,6 @@
     "status": 200,
     "type": "json",
     "keys": [
-      "agent_onboarding",
       "for_agents",
       "invite_only",
       "last_id",

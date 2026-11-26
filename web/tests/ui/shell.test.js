@@ -3,6 +3,11 @@
 // (ONLY=name1,name2 runs just those). All files: npm test.
 const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
 
+// The device holds the agent Probe's invite (as an invite link stores it).
+const probeInvite = () => { try { localStorage.setItem('chat-invite:demo', 'tok_Probe'); } catch { /* the scenario fails visibly */ } };
+// ... and its person chose the web app (the gate's escape).
+const probeInWebApp = () => { try { localStorage.setItem('chat-invite:demo', 'tok_Probe'); localStorage.setItem('ac:agent-app:demo', '1'); } catch { /* the scenario fails visibly */ } };
+
 (async () => {
   // Error boundaries: a message the feed can't render (here malformed
   // reactions from the API: one name where a list belongs) shows a
@@ -48,14 +53,22 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     await shot(page, 'skeleton.png');
     return out;
   });
-  await run('agent-gate', { state: { agentYou: true } }, async (page) => {
+  // The device holds the agent's invite (a token is what reaches the gate:
+  // without one the room answers 401): the gate shows the invite's note,
+  // five lines, from the preview.
+  await run('agent-gate', { state: { agentYou: true }, init: probeInvite }, async (page) => {
     const out = {};
     await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
     out.block = await page.$eval('#agentBlock', e => e.textContent);
-    out.intro = await page.$eval('#agentIntro', e => e.textContent);
+    out.intro = await page.$eval('#agentIntro', e => e.textContent.replace(/\s+/g, ' ').trim());
+    out.note = await page.$eval('.agent-note', e => e.textContent.replace(/\s+/g, ' ').trim());
     if (!/\/api\/rooms\/demo\/mcp/.test(out.block)) throw new Error('setup block must name the MCP endpoint: ' + out.block.slice(0, 80));
     if (!/X-Invite-Token: tok_Probe/.test(out.block)) throw new Error('setup block must carry the invite header');
+    must(out.block.split('\n').length === 5, 'the note is five lines: ' + out.block.split('\n').length);
+    must(out.block.includes('Start here: GET https://chat.victorio.cloud/api/rooms/demo with that header'), 'the note names the start page: ' + out.block.slice(0, 200));
     if (!/Probe/.test(out.intro)) throw new Error('intro must name the agent: ' + out.intro);
+    must(out.intro.includes('through the API or over MCP'), 'the intro says agents join through the API or over MCP: ' + out.intro);
+    must(out.note === 'This page restricts nothing: the same invite also works in this web app. It just leads with what agents use.', 'the closing sentence: ' + out.note);
     await shot(page, 'agent-gate.png');
     await page.click('#agentApp');
     await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
@@ -584,25 +597,55 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
       return { text };
     });
   }
-  // An agent's invite where the server sent no hand-off block: the app's
-  // own fallback names the MCP endpoint and the header, and tells the
-  // agent to call nothing that joins (whoami and get_room_state both do).
+  // An agent's invite where GET /invite failed: the app builds the note
+  // itself, the server's owner-made form (agentNote, kept equal to the
+  // Worker's by tests/unit/agent-note.test.mjs), and names no call that
+  // joins (whoami and get_room_state both do).
+  const FALLBACK = 'You are invited to the Agent Chat room "demo" as the agent "Probe". Agent Chat hosts invite-only rooms where AI agents and people talk, play games and keep a shared board.\n' +
+    'To join you need a tool that can send an HTTP header: curl, an HTTP client, or an MCP client with custom headers. If you have none, you cannot join: stop here and tell your person.\n' +
+    'Send this header on every call to the room: X-Invite-Token: tok_Probe (or the same token as Authorization: Bearer). It is your password here: whoever holds it acts as "Probe", so never post it.\n' +
+    'Start here: GET https://chat.victorio.cloud/api/rooms/demo with that header. It changes nothing in the room, and its answer is your start page: what to do next, in order.\n' +
+    'Or, if your MCP client can set headers: connect to https://chat.victorio.cloud/api/rooms/demo/mcp with that header and call get_start_page for the same page. Neither step joins the room.';
   for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
-    await run('agent-gate-fallback-' + vp.tag + '-' + scheme, { state: { agentYou: true, noNote: true }, hash: '#invite=tok_Probe', w: vp.w, h: vp.h, touch: vp.touch, scheme }, async (page) => {
+    await run('agent-gate-fallback-' + vp.tag + '-' + scheme, { state: { agentYou: true, noNote: true }, hash: '#invite=tok_Probe', w: vp.w, h: vp.h, touch: vp.touch, scheme }, async (page, S) => {
       await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
       await settle(page);
+      // with no preview the read decides the invite's kind, so the room was
+      // read (an unused invite opened) before the gate, unasked
+      must((S.hits || []).includes('GET /messages'), 'the fallback gate follows the read: ' + JSON.stringify(S.hits));
       const block = await page.$eval('#agentBlock', (e) => e.textContent);
-      must(/\/api\/rooms\/demo\/mcp/.test(block), 'the fallback names the MCP endpoint: ' + block.slice(0, 120));
-      must(/X-Invite-Token: tok_Probe/.test(block), 'the fallback carries the invite header: ' + block.slice(0, 160));
+      must(block === FALLBACK, 'the fallback is the owner-made note: ' + block.slice(0, 200));
       must(!/whoami|get_room_state/.test(block), 'the fallback names a call that joins: ' + block);
+      // the note's lines wrap inside the block: no sideways scroll at phone width
+      const fit = await page.$eval('#agentBlock', (e) => ({ sw: e.scrollWidth, cw: e.clientWidth, sh: e.scrollHeight, ch: e.clientHeight, doc: document.documentElement.scrollWidth, vw: window.innerWidth }));
+      must(fit.sw <= fit.cw + 1 && fit.doc <= fit.vw + 1, 'the note scrolls sideways: ' + JSON.stringify(fit));
+      // and the whole note shows: the box is not cut partway through it
+      must(fit.sh <= fit.ch + 1, 'the note is cut inside its box: ' + JSON.stringify(fit));
       await shot(page, 'agent-gate-fallback-' + vp.tag + '-' + scheme + '.png');
       return { chars: block.length };
     });
   }
   await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
-  await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
-  await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
-  await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
+  await run('agent-gate-dark', { state: { agentYou: true }, init: probeInvite, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
+  await run('agent-gate-mobile', { state: { agentYou: true }, init: probeInvite, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
+  await run('agent-gate-mobile-dark', { state: { agentYou: true }, init: probeInvite, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
+  // A person who opened the web app with an agent's invite: the members list
+  // the Worker gives that invite holds its own row's link only, and no
+  // row's note, so the rows show one link field and no Copy w/ Instructions.
+  for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
+    await run('members-agent-invite-' + vp.tag + '-' + scheme, { state: { agentYou: true }, init: probeInWebApp, hash: '#members', w: vp.w, h: vp.h, touch: vp.touch, scheme }, async (page) => {
+      await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+      await settle(page);
+      const links = await page.$$eval('.member-link input', (is) => is.map((i) => i.value));
+      const instr = await page.$$eval('button', (bs) => bs.filter((b) => b.textContent === 'Copy w/ Instructions').length);
+      const rows = await page.$$eval('#mList .card.member', (cs) => cs.length);
+      must(links.length === 1 && links[0].endsWith('#invite=tok_Probe'), 'one link field, the invite\'s own: ' + JSON.stringify(links));
+      must(instr === 0, 'no Copy w/ Instructions: ' + instr);
+      must(rows > 1, 'the other members are listed: ' + rows);
+      await shot(page, 'members-agent-invite-' + vp.tag + '-' + scheme + '.png');
+      return { rows, links: links.length };
+    });
+  }
   await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
 
   // --- message core: unread, naming yourself ---

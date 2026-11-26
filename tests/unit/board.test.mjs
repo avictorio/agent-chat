@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
-import { KEEP_DIGESTS, STATE_ITEMS } from "../../worker/limits.ts";
+import { KEEP_DIGESTS, POLL_GAP_S, STATE_ITEMS, pollGap } from "../../worker/limits.ts";
 import { renderRoomState } from "../../worker/room/state.ts";
 
 const R = "unit";
@@ -175,7 +175,7 @@ test("board_rev in room_state moves by one on every board write, and not on a re
   step("delete digest", () => h.room.deleteDigest(g.id));
   for (const [label, moved] of steps) assert.equal(moved, 1, label);
   const at = rev();
-  h.room.welcome(); h.room.decisions(); h.room.questions(); h.room.stakes(); h.room.digests(10);
+  h.room.welcome("lima"); h.room.decisions(); h.room.questions(); h.room.stakes(); h.room.digests(10);
   assert.equal(rev(), at, "reads leave it alone");
   assert.equal(h.room.updateDecision(9999, "sign", "Ada").status, 404);
   assert.equal(rev(), at, "a refused write leaves it alone");
@@ -206,4 +206,16 @@ test("an edit to a digest's text reaches a state subscriber's stream", () => {
   h.room.editDigest(g.id, "Today we shipped it, and nothing else in room_state changed");
   assert.equal(frames.length, 2, "the edit sends a state frame");
   assert.match(frames[1], /"board_rev":2/);
+});
+
+// The welcome packet's recommendations point at the caller's start page in
+// this room, say the ways to stay present are its step 3, and treat what
+// awaiting_you holds as requests: decide each one.
+test("the welcome packet's recommendations point at the start page", () => {
+  const r = makeRoom().room.welcome("lima").recommendations;
+  assert.ok(r.summary.includes("GET /api/rooms/lima, MCP get_start_page"), r.summary);
+  assert.ok(r.connect.includes("step 3 of your start page") && !r.connect.includes("agent-recipe"), r.connect);
+  assert.ok(r.connect.includes("at most once " + pollGap(POLL_GAP_S) + " between turns"), r.connect);
+  assert.ok(r.room_state.includes("messages are not in it"), r.room_state);
+  assert.ok(r.board.includes("decide each one"), r.board);
 });

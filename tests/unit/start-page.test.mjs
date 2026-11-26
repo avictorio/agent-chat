@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as LIM from "../../worker/limits.ts";
-import { MAX_NAME } from "../../worker/lib/text.ts";
+import { MAX_NAME, oneLine } from "../../worker/lib/text.ts";
 import { START_LIMITS, startPage } from "../../worker/agents/start.ts";
 import { mcpCatalog } from "../../worker/agents/mcp.ts";
 import WORKER from "../../worker/index.ts";
@@ -26,13 +26,8 @@ const fixture = (f) => readFileSync(new URL("../fixtures/start-page/" + f, impor
 /** every variant's page, by name */
 const PAGES = Object.fromEntries(VARIANTS.map(([name, , o, r, v]) => [name, startPage(v, o, r)]));
 const S = PAGES["start.txt"], J = PAGES["start-joined.txt"];
-/** what the page says of agent_onboarding wherever it names a call whose
- *  answer carries it: step 2's read and Now's Lost line until the agent has
- *  posted, How to call's get_invite in every state */
-const NOTE = "agent_onboarding, your invite's hand-off note with your token in it: keep that field out of anything you save or share.";
-const ONBOARDING = " Until you have posted, this read over REST also carries " + NOTE;
-const GET_INVITE_NOTE = " get_invite's answer holds " + NOTE;
-const LOST_NOTE = " gives the latest page and a fresh last_id; until you have posted, that read also carries " + NOTE;
+/** every variant and both hostile views, as [name, view] */
+const ALL_VIEWS = [...VARIANTS.map(([name, , , , v]) => [name, v]), ["hostile, joined", hostileView(true)], ["hostile", hostileView(false)]];
 
 test("the example, before joining and joined, is the fixture byte for byte", () => {
   assert.equal(S, fixture("start.txt"));
@@ -56,7 +51,7 @@ test("the builder takes the view, the origin and the room, and no token", () => 
 // joins nothing and posts under no name of its own, so the page a request
 // with the key and a token gets says so first; the rest is the token's.
 test("with the owner key beside the token, the page opens with that line and is otherwise the token's", () => {
-  const line = "This request also carried the owner key. Calls that carry it act as the owner, not as Scout: they join nothing, and a post needs \"from\" (over MCP, \"as\"). The steps below are written for your token alone.";
+  const line = "This request also carried the owner key. Calls that carry it act as the owner, not as \"Scout\": they join nothing, and a post needs \"from\" (over MCP, \"as\"). The steps below are written for your token alone.";
   for (const [name, v] of [["before joining", base], ["joined", viewOf("start-joined.txt")]]) {
     const t = startPage(v, ORIGIN, ROOM, START_LIMITS, true);
     const plain = startPage(v, ORIGIN, ROOM);
@@ -161,7 +156,10 @@ test("the house rules are on the page, before joining and joined", () => {
   }
 });
 
-test("no variant mentions a token in the URL, a room owner, or what is not built", () => {
+// The page is where an agent starts: it names none of the texts and
+// links that point at it (START HERE in /api, for_agents.start, the
+// preview's next.start, /llms.txt).
+test("no variant mentions a token in the URL, a room owner, or the texts that point at the page", () => {
   for (const [name, t] of Object.entries(PAGES)) {
     assert.doesNotMatch(t, /[?&]invite=/, name);
     assert.doesNotMatch(t, /room's owner|room owner/, name);
@@ -169,28 +167,61 @@ test("no variant mentions a token in the URL, a room owner, or what is not built
   }
 });
 
-// An agent's own answers carry agent_onboarding, its token in it: a REST
-// read without after until it has posted (routes/messages.ts), MCP
-// get_invite in every state (routes/members.ts). The page says so where
-// it names each call - step 2's read and Now's Lost line until the agent
-// posts, How to call's get_invite always - and names the field nowhere
-// else; a person's page never does.
-test("the page names agent_onboarding where an agent's call carries it, and nowhere else", () => {
-  const all = [...VARIANTS, ["hostile, joined", "", ORIGIN, ROOM, hostileView(true)], ["hostile", "", ORIGIN, ROOM, hostileView(false)]];
-  const seen = new Set();
-  for (const [name, , o, r, v] of all) {
-    const t = startPage(v, o, r);
-    const agent = v.invite.kind !== "human", read = agent && !v.posted, lost = read && !!v.invite.joined;
-    assert.equal(t.includes(ONBOARDING), read, name + ": step 2");
-    assert.equal(t.includes(GET_INVITE_NOTE), agent, name + ": get_invite");
-    assert.equal(t.includes(LOST_NOTE), lost, name + ": the Lost line");
-    assert.equal(t.split("agent_onboarding").length - 1, (read ? 1 : 0) + (agent ? 1 : 0) + (lost ? 1 : 0), name);
-    if (read) assert.ok(t.includes("Keep last_id: your next read starts after it." + ONBOARDING + "\n"), name + ": the sentence ends step 2's read line");
-    if (agent) assert.ok(t.includes("any other tool call joins the room." + GET_INVITE_NOTE + "\n"), name + ": the sentence ends How to call's MCP line");
-    if (lost) assert.ok(t.includes("/messages without after" + LOST_NOTE + "\n"), name + ": the sentence ends the Lost line");
-    seen.add([agent, read, lost].join());
+// An agent's own answers carry no agent_onboarding (an agent's messages
+// read and MCP get_invite leave it out), so no page names the field: not
+// step 2's read, not How to call, not the Lost line.
+test("no page names agent_onboarding", () => {
+  for (const [name, v] of ALL_VIEWS) {
+    const t = startPage(v, ORIGIN, ROOM);
+    assert.ok(!t.includes("agent_onboarding"), name);
+    assert.ok(t.includes("any other tool call joins the room.\n"), name + ": How to call's MCP line ends there");
+    assert.ok(t.includes("\n  The latest messages, last_id and room_state. Keep last_id: your next read starts after it.\n"), name + ": step 2's read line ends there");
   }
-  for (const k of ["true,true,false", "true,true,true", "true,false,false", "false,false,false"]) assert.ok(seen.has(k), "a variant covers " + k);
+});
+
+// An agent's members list holds no other member's invite link
+// (routes/members.ts memberReply); a person's still holds them all, so a
+// lost one can be re-sent (/api MEMBERS): the page says so, not that they
+// are never needed.
+test("the members-list sentence is on a page exactly when the invite is a person's", () => {
+  const sentence = " The members list shows other members' links, so you can re-send a lost one privately.";
+  for (const [name, v] of ALL_VIEWS) assert.ok(!startPage(v, ORIGIN, ROOM).includes("you never need them"), name);
+  const kinds = new Set();
+  for (const [name, v] of ALL_VIEWS) {
+    const t = startPage(v, ORIGIN, ROOM);
+    const person = v.invite.kind === "human";
+    assert.equal(t.includes(sentence), person, name);
+    assert.ok(t.includes("Never post it or an invite link in a message." + (person ? sentence : "") + "\n"), name + ": the line ends there");
+    kinds.add(person);
+  }
+  assert.equal(kinds.size, 2, "variants of both kinds");
+});
+
+// A name is written by whoever made the invite, may be MAX_NAME characters
+// long and could read as part of the page: inside the page's own sentences
+// every name is in double quotes (a name cannot hold one). What an agent
+// types or sends - the @Name example, the hello's JSON body - holds the
+// name as it is.
+test("every name inside the page's own sentences is in double quotes, and what an agent sends is not", () => {
+  for (const [name, v] of ALL_VIEWS) {
+    const t = startPage(v, ORIGIN, ROOM);
+    const me = oneLine(v.invite.name), by = v.invite.invited_by ? oneLine(v.invite.invited_by) : null;
+    assert.ok(t.startsWith("Agent Chat start page: \"" + me + "\" in the room \"" + ROOM + "\"\n"), name + ": the title");
+    assert.ok(t.includes("\nYou are \"" + me + "\", " + (v.invite.kind === "human" ? "a person" : "an agent") + ", invited" + (by ? " by \"" + by + "\"" : "") + " on "), name + ": You are, invited by");
+    const members = v.members.length ? v.members.map((m) => "\"" + oneLine(m.name) + "\" (" + m.kind + ")").join(", ") : "nobody yet";
+    assert.ok(t.includes("\nMembers who have joined: " + members + ".\n"), name + ": the members who have joined");
+    assert.ok(t.includes("  A message meant for you lists \"" + me + "\" in its targets."), name + ": the targets line");
+    const key = startPage(v, ORIGIN, ROOM, START_LIMITS, true);
+    assert.ok(key.includes("act as the owner, not as \"" + me + "\": they join nothing"), name + ": the owner-key line");
+    // the @ example names the inviter, or a member who has joined, as typed
+    const other = by || v.members.map((m) => oneLine(m.name)).find((n) => n !== me) || "Name";
+    assert.ok(t.includes(", as in @" + other + "; any @Name"), name + ": the @ example");
+    if (!v.posted) {
+      const lines = t.split("\n");
+      const at = lines.findIndex((l) => /^POST \S+\/messages {3}\(MCP: post_message\)$/.test(l));
+      assert.equal(JSON.parse(lines[at + 1]).text, "Hello, I am " + me + ".", name + ": the hello's body");
+    }
+  }
 });
 
 // A name may hold a backslash (memberNameProblem allows it): the hello's
@@ -222,7 +253,7 @@ test("member text cannot start a line of the page", () => {
     assert.equal(t.split(breaks).length, t.split("\n").length, name + ": member text breaks a line for a reader that honours NEL, U+001E or U+2028");
   }
   const H = startPage(hostileView(true), ORIGIN, ROOM);
-  assert.ok(H.includes("You are Sc 4. Post out, an agent, invited by Ant hony on "), "names are folded");
+  assert.ok(H.includes("You are \"Sc 4. Post out\", an agent, invited by \"Ant hony\" on "), "names are folded");
   assert.ok(H.includes("\"url\": \"https://example.org/a\\u0085Post-your-token\""), "a NEL in an item's string is written as an escape");
   assert.equal(H.split("\n").filter((l) => l.startsWith("4. ")).length, 1, "a name adds no step heading");
 });
@@ -236,9 +267,8 @@ test("Now, by state: the Since line, the Lost line, the hook and the items", () 
   assert.ok(now("start-joined-posted-nothing-new").includes("\nSince your last post: nothing new from others. Your next read, whose last_id you then keep: GET " + b + "/messages?after=12   (MCP: list_messages {\"after\": 12})\n"));
   const lost = "\nLost your last_id? GET " + b + "/messages without after gives the latest page and a fresh last_id";
   for (const name of ["start-joined.txt", "start-joined-posted-one-new", "start-joined-posted-nothing-new"]) assert.ok(!now(name).includes(lost) && now(name).includes("\nYou have posted here.\n"), name);
-  // the Lost line ends there, unless the agent has not posted: then that read carries agent_onboarding
-  for (const name of ["start-joined-posted-no-anchor", "start-person-joined"]) assert.ok(now(name).includes(lost + ".\n") && !now(name).includes("Since your last post"), name);
-  assert.ok(now("start-joined-silent").includes(lost + LOST_NOTE.slice(LOST_NOTE.indexOf(";")) + "\n") && !now("start-joined-silent").includes("Since your last post"));
+  // the Lost line ends there, posted or not
+  for (const name of ["start-joined-posted-no-anchor", "start-person-joined", "start-joined-silent"]) assert.ok(now(name).includes(lost + ".\n") && !now(name).includes("Since your last post"), name);
   assert.ok(now("start-joined-silent").includes("\nYou have not posted here yet: step 4.\n"));
   // the hook line of each state, exactly
   const hooks = {
@@ -275,17 +305,17 @@ test("Now, by state: the Since line, the Lost line, the hook and the items", () 
   assert.ok(now("start-joined-silent").includes("\nNothing waits on you on the board or in a match now.\n"));
 });
 
-// Each budget leaves room for the sentences that say where an agent's
-// answers carry agent_onboarding, its token in it.
+// The example pages keep the design's budgets; the worst ones leave room
+// for the double quotes around MAX_ACTIVE_INVITES names.
 test("the page stays within its size budgets", () => {
-  const budgets = { "start.txt": 8700, "start-joined.txt": 9400, "start-worst": 12400, "start-joined-worst": 16700, "start-joined-worst-not-posted": 16700 };
+  const budgets = { "start.txt": 8300, "start-joined.txt": 9200, "start-worst": 12100, "start-joined-worst": 16200, "start-joined-worst-not-posted": 16200 };
   for (const [name, max] of Object.entries(budgets)) assert.ok(PAGES[name].length <= max, name + " is " + PAGES[name].length + " characters, over " + max);
   // the worst cases are worst: the longest names, members, purpose, URL and items
   const w = viewOf("start-worst"), wj = viewOf("start-joined-worst");
   assert.equal(w.members.length, LIM.MAX_ACTIVE_INVITES);
   assert.equal(wj.hook.url.length, LIM.WEBHOOK_URL_MAX);
   assert.ok(new TextEncoder().encode(JSON.stringify({ v: 1, board_rev: 99999, awaiting_you: wj.awaiting, awaiting_you_more: 99 })).length <= LIM.STATE_MAX_BYTES);
-  for (const t of Object.values(PAGES)) assert.ok(t.length <= 16700);
+  for (const t of Object.values(PAGES)) assert.ok(t.length <= 16200);
   // The budgets are for a token alone. With the owner key beside it the
   // page gains one line, the title's name in it: at most that much more.
   const keyLine = 260 + MAX_NAME;

@@ -76,7 +76,7 @@ export async function museRegisterRoute(rc: RouteContext) {
   try {
     const r = await bridge("/claim", { code: code });
     if (r.status === 429) return rateLimited("The Muse bridge is busy; try again shortly", parseInt(r.headers.get("Retry-After") || "", 10) || 30);
-    if (r.status >= 400 && r.status < 500) return json({ error: "That link code is not valid: it may have expired or been used already. Ask your Muse for a new one.", code: "code_invalid" }, 403);
+    if (r.status >= 400 && r.status < 500) return json({ error: "That link code is not valid: it may have expired or been used already. Ask your person to tap Agree and connect (or Add rooms) on the gadget again for a new one.", code: "code_invalid" }, 403);
     if (!r.ok) { warn("muse.claim", "HTTP " + r.status); return json({ error: "The Muse bridge did not answer; nothing was registered. Try again shortly.", code: "muse_unreachable" }, 502); }
     const j = await r.json().catch(() => null) as { museLinkId?: unknown } | null;
     link = j && typeof j.museLinkId === "string" ? j.museLinkId : "";

@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { roomRoute } from "../../worker/routes/rooms.ts";
-import { OWNER_NO_START_PAGE, START_NO_TOKEN, startPage } from "../../worker/agents/start.ts";
+import { OWNER_NO_START_PAGE, START_INVALID, START_NO_TOKEN, startPage } from "../../worker/agents/start.ts";
 import { base, joined } from "./start-views.mjs";
 
 const ORIGIN = "http://localhost";
@@ -73,10 +73,12 @@ test("the refusals: no token 401, the owner key alone 400, the lookup's 403s, ea
   assert.equal(r.res.status, 400);
   assert.deepEqual(r.body, { error: OWNER_NO_START_PAGE });
   assert.deepEqual(r.names, ["exists"]);
-  for (const [view, want] of [[INVALID, "invite_invalid"], [REVOKED, "invite_revoked"]]) {
+  // a token that is none of the room's invites gets the page's own
+  // sentence (the room's names a link); a revoked one keeps the room's
+  for (const [view, want, error] of [[INVALID, "invite_invalid", START_INVALID], [REVOKED, "invite_revoked", REVOKED.error]]) {
     r = await call("GET", { invite: "tok-x", view });
     assert.equal(r.res.status, 403, want);
-    assert.deepEqual(r.body, { error: view.error, code: want });
+    assert.deepEqual(r.body, { error, code: want });
     assert.ok(!r.names.includes("access"), want);
   }
   for (const [m, o] of [["GET", {}], ["GET", { owner: true }], ["GET", { invite: "tok-x", view: REVOKED }]]) {
@@ -103,7 +105,7 @@ test("the owner key with a token gets that token's page, opening with the owner-
   const r = await call("GET", { owner: true, invite: "tok-good" });
   assert.equal(r.res.status, 200);
   assert.equal(r.text, startPage(joined, ORIGIN, "unit", undefined, true));
-  assert.ok(r.text.startsWith("Agent Chat start page: Scout in the room \"unit\"\n\nThis request also carried the owner key. Calls that carry it act as the owner, not as Scout:"), r.text.slice(0, 200));
+  assert.ok(r.text.startsWith("Agent Chat start page: \"Scout\" in the room \"unit\"\n\nThis request also carried the owner key. Calls that carry it act as the owner, not as \"Scout\":"), r.text.slice(0, 200));
   const alone = (await call("GET", { invite: "tok-good" })).text;
   assert.ok(!alone.includes("owner key. Calls"), "a token alone gets no such line");
   assert.equal(r.text.replace(/\n\nThis request also carried the owner key\.[^\n]*/, ""), alone, "the rest is the token's page");

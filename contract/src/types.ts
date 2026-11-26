@@ -330,7 +330,6 @@ export interface MessagesResponse {
   has_more: boolean;
   you?: string;
   you_kind?: MemberKind;
-  agent_onboarding?: string;
   room_state?: RoomState;
 }
 
