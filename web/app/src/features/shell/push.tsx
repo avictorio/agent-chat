@@ -71,11 +71,23 @@ export interface PushApi {
   visible: boolean;
   on: boolean;
   label: string;
+  /** whether the bell's menu can be used (RoomShell: not while the agent gate holds the room) */
+  usable: boolean;
   bellClick: (anchor: HTMLElement) => void;
   menuNode: React.ReactNode;
 }
 
-export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) => void): PushApi {
+/** ask: the room may be asked about this device (its status check, and the
+ *  quiet re-register after it); usable: the bell's menu may be opened. Both
+ *  are off while RoomShell holds the room for the agent gate: each of those
+ *  calls runs access() on the server, which opens an unused invite, so an
+ *  agent's invite would join before the person chose. */
+export function usePush(
+  client: RoomClient,
+  toast: (msg: string, err?: boolean) => void,
+  ask: boolean,
+  usable: boolean
+): PushApi {
   // painted from the support rule up front (the async pass refines it);
   // gating the bell on serviceWorker.ready leaves it missing forever
   // when registration fails
@@ -83,6 +95,13 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
   const [mode, setMode] = useState<PushMode>("all");
   const [visible, setVisible] = useState(() => pushSupported() || iosNeedsInstall());
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // the menu closes when the bell stops being usable (the gate shows)
+  const [usableWas, setUsableWas] = useState(usable);
+  if (usableWas !== usable) {
+    setUsableWas(usable);
+    if (!usable) setMenu(null);
+  }
+  const usableRef = useLatest(usable);
   const stateRef = useLatest(state);
   const modeRef = useLatest(mode);
   const modeKey = "chat-push-mode:" + client.basePath();
@@ -106,6 +125,14 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     try {
       const reg = await navigator.serviceWorker.ready;
       let sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (!ask) {
+        // The room is not asked yet (the agent gate): the bell shows what
+        // this browser alone knows, its subscription and this room's saved
+        // mode, until the room may be asked (a new paint, below).
+        const wanted = savedMode(modeKey);
+        paint(sub && wanted ? "on" : "off", wanted || modeRef.current);
+        return;
+      }
       if (!sub && reg && savedMode(modeKey) && Notification.permission === "granted") {
         // The browser dropped or replaced its subscription (Chrome rarely
         // fires pushsubscriptionchange, and the service worker could not
@@ -151,7 +178,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     } catch {
       paint("off", modeRef.current);
     }
-  }, [client, modeKey, paint, modeRef]);
+  }, [client, modeKey, paint, modeRef, ask]);
 
   const pushOn = useCallback(
     async (m: PushMode) => {
@@ -208,11 +235,15 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     void paintPushState();
   }, [client, modeKey, paintPushState, toast]);
 
-  // Boot: register the service worker, then refine the painted state
-  // (and again whenever the page comes back into view).
+  // Boot: register the service worker.
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     void navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }, []);
+  // Refine the painted state, again whenever the page comes back into
+  // view, and once more when the room may be asked (ask turns on).
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
     // oxlint-disable-next-line react/set-state-in-effect -- syncs the browser's push permission and subscription (an external system) into state
     void paintPushState();
     const onVis = () => {
@@ -237,6 +268,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
   const choose = useCallback(
     async (m: PushMode | "off") => {
       setMenu(null);
+      if (!usableRef.current) return;
       try {
         if (m === "off") {
           if (stateRef.current === "on") await pushOff();
@@ -245,11 +277,12 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
         toast("Couldn't change notifications: " + (e instanceof Error ? e.message : String(e)), true);
       }
     },
-    [pushOff, pushOn, toast, stateRef]
+    [pushOff, pushOn, toast, stateRef, usableRef]
   );
 
   const bellClick = useCallback(
     (anchor: HTMLElement) => {
+      if (!usableRef.current) return;
       if (stateRef.current === "blocked") {
         toast("Notifications are blocked for this site - allow them in your browser or phone settings for this site.", true);
         return;
@@ -272,7 +305,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
         return { x: left, y: top };
       });
     },
-    [toast, stateRef]
+    [toast, stateRef, usableRef]
   );
 
   // Menu dismissal: outside click and Escape.
@@ -329,5 +362,5 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     </div>
   ) : null;
 
-  return { visible, on: state === "on", label, bellClick, menuNode };
+  return { visible, on: state === "on", label, usable, bellClick, menuNode };
 }

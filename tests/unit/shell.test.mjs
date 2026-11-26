@@ -9,11 +9,13 @@ import { createServer } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shellQuote } from "../../worker/lib/text.ts";
+import { oneLine, shellQuote } from "../../worker/lib/text.ts";
+import { ESCAPED_SET, HOSTILE_NAMES } from "./start-views.mjs";
 import { agentOnboarding } from "../../worker/agents/onboarding.ts";
 import WATCHER from "../../worker/agents/agent-watch.sh";
 import RECIPE from "../../worker/agents/agent-recipe.md";
 import { recipeRoute } from "../../worker/routes/agents.ts";
+import { recipe } from "../../worker/agents/docs.ts";
 
 const HOSTILE = [
   "$(touch MARK)",
@@ -113,6 +115,41 @@ test("the recipe's text folds the caller's name onto its line; the script quotes
   assert.ok(!text.includes("tok-x"), "the recipe never holds the token");
   const script = await serve("/api/rooms/lima/agent-recipe/script");
   assert.ok(script.includes("SELF=" + shellQuote(name)), "the script's name is the stored one, quoted");
+});
+
+// Inside the recipe's own double quotes ("__NAME__", every use of the name
+// in its text) the name is folded and escaped as the note and the start
+// page print it (quotedBody, worker/lib/text.ts): each parses back to the
+// folded name as a JSON string, and nothing in it can pass for the closing
+// quote. The script still gets the stored name, shell-quoted.
+test("the recipe's quoted names are JSON string bodies that give back the folded name; the script's name is as stored", async () => {
+  const Q = String.raw`"(?:[^"\\]|\\.)*"`;
+  assert.equal(RECIPE.split("__NAME__").length, RECIPE.split("\"__NAME__\"").length, "every __NAME__ in the recipe sits in its double quotes");
+  assert.ok(!RECIPE.includes("__SELF__"), "the recipe's text has no __SELF__ (the script's)");
+  const origin = "http://localhost";
+  const filled = (t) => t.replace(/__SCRIPT_URL__/g, origin + "/api/rooms/lima/agent-recipe/script").replace(/__ORIGIN__/g, origin).replace(/__ROOM__/g, "lima");
+  // the recipe as served before the route's substitutions: its limits filled in (docs.ts recipe)
+  const shape = new RegExp("^" + recipe().split("\"__NAME__\"").map((part) => filled(part).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(" + Q + ")") + "$");
+  for (const name of [...HOSTILE_NAMES, "Scout"]) {
+    const stub = { access: async () => ({ ok: true, name, kind: "agent" }) };
+    const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
+    const serve = async (path) => {
+      const url = new URL(origin + path);
+      const m = url.pathname.match(/^\/api\/rooms\/([^/]+)\/agent-recipe(?:\/(script))?\/?$/);
+      return (await recipeRoute({ request: new Request(url), env, url, path: url.pathname, owner: false, invite: "tok-x" }, m)).text();
+    };
+    const text = await serve("/api/rooms/lima/agent-recipe");
+    const got = text.match(shape);
+    assert.ok(got, JSON.stringify(name) + ": the recipe's text is the template with the quoted names filled in");
+    assert.equal(got.length - 1, 4, "four quoted names");
+    for (const q of got.slice(1)) {
+      assert.ok(!ESCAPED_SET.test(q), JSON.stringify(name) + ": a raw escapable character in " + q);
+      assert.equal(JSON.parse(q), oneLine(name), JSON.stringify(name));
+    }
+    if (name === "Scout") assert.ok(text.includes("You are the agent \"Scout\"."), "an ordinary name prints as it is");
+    const script = await serve("/api/rooms/lima/agent-recipe/script");
+    assert.ok(script.includes("SELF=" + shellQuote(name)), JSON.stringify(name) + ": the script's name is the stored one, shell-quoted");
+  }
 });
 
 // The watcher's cursor is a delivery number. A draft published late keeps

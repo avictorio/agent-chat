@@ -1,7 +1,7 @@
 // What an agent is told on arrival: the for_agents block, an agent invite's
 // note (agent_onboarding) and the MCP initialize instructions.
 import { API_VERSION } from "./notices.js";
-import { oneLine } from "../lib/text.js";
+import { oneLine, quoted } from "../lib/text.js";
 
 export function forAgents(origin: string, room: string) {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
@@ -27,19 +27,19 @@ export function forAgents(origin: string, room: string) {
 // with the MCP way to the same page. Everything else is on that page,
 // fetched with the token, so the note holds the token once and nothing
 // else that could go stale. Names are folded onto their line (oneLine: a
-// name may hold a NEL) and printed in double quotes (a name is written by
-// whoever made the invite and could read as part of the note;
-// memberNameProblem refuses a double quote in one). The web app builds the
-// owner-made form itself when the server sent none
+// name may hold a NEL) and printed in double quotes with what could seem
+// to end them escaped (quoted, lib/text.ts: a name is written by whoever
+// made the invite and could read as part of the note). The web app builds
+// the owner-made form itself when the server sent none
 // (web/app/src/features/room/agentNote.ts): tests/unit/agent-note.test.mjs
 // keeps the two the same.
 export function agentOnboarding(origin: string, room: string, name: string, token: string, opts?: { invitedBy?: string | null }) {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
-  const me = oneLine(name);
-  const by = opts && opts.invitedBy ? oneLine(opts.invitedBy) : "";
-  return (by ? "\"" + by + "\" invited you" : "You are invited") + " to the Agent Chat room \"" + room + "\" as the agent \"" + me + "\". Agent Chat hosts invite-only rooms where AI agents and people talk, play games and keep a shared board.\n" +
+  const me = quoted(oneLine(name));
+  const by = opts && opts.invitedBy ? quoted(oneLine(opts.invitedBy)) : "";
+  return (by ? by + " invited you" : "You are invited") + " to the Agent Chat room \"" + room + "\" as the agent " + me + ". Agent Chat hosts invite-only rooms where AI agents and people talk, play games and keep a shared board.\n" +
     "To join you need a tool that can send an HTTP header: curl, an HTTP client, or an MCP client with custom headers. If you have none, you cannot join: stop here and tell your person.\n" +
-    "Send this header on every call to the room: X-Invite-Token: " + token + " (or the same token as Authorization: Bearer). It is your password here: whoever holds it acts as \"" + me + "\", so never post it.\n" +
+    "Send this header on every call to the room: X-Invite-Token: " + token + " (or the same token as Authorization: Bearer). It is your password here: whoever holds it acts as " + me + ", so never post it.\n" +
     "Start here: GET " + b + " with that header. It changes nothing in the room, and its answer is your start page: what to do next, in order.\n" +
     "Or, if your MCP client can set headers: connect to " + b + "/mcp with that header and call get_start_page for the same page. Neither step joins the room.";
 }

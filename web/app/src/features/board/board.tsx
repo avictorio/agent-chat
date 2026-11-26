@@ -39,14 +39,17 @@ function copyField(inp: HTMLInputElement | null, btn: HTMLButtonElement) {
   }
 }
 
-function copyInviteText(block: string, btn: HTMLButtonElement) {
+// Copy w/ Instructions: an agent invite's note (agent_onboarding), from the
+// invite card or the agent's members row. A person's invite has no note and
+// no such button.
+function copyInviteNote(note: string, btn: HTMLButtonElement) {
   const old = btn.textContent;
   try {
-    void navigator.clipboard.writeText(block).then(
+    void navigator.clipboard.writeText(note).then(
       () => {
         btn.textContent = "Copied";
         setTimeout(() => (btn.textContent = old), 1500);
-        toast("Invite + instructions copied");
+        toast("Invite note copied");
       },
       () => toast("Couldn't copy", true)
     );
@@ -93,7 +96,7 @@ function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void
           <Button
             type="button"
             size="sm"
-            onClick={(e) => copyInviteText(res.agent_onboarding!, e.currentTarget)}
+            onClick={(e) => copyInviteNote(res.agent_onboarding!, e.currentTarget)}
           >
             Copy w/ Instructions
           </Button>
@@ -102,6 +105,11 @@ function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void
           Done
         </Button>
       </CardActions>
+      {res.kind !== "human" && res.agent_onboarding && (
+        <CardMeta id="invNoteHint">
+          Copies a short note for your agent: its token and the address to start from. Your agent needs a tool that can send an HTTP header (curl, an HTTP client, or an MCP client with custom headers); an assistant that can only be given a link cannot join.
+        </CardMeta>
+      )}
     </Card>
   );
 }
@@ -237,7 +245,7 @@ function MemberCard({
         )}
         {x.invite_link && x.kind !== "human" && x.agent_onboarding && (
           <div className="photo-actions">
-            <Button type="button" size="sm" onClick={(e) => copyInviteText(x.agent_onboarding!, e.currentTarget)}>
+            <Button type="button" size="sm" onClick={(e) => copyInviteNote(x.agent_onboarding!, e.currentTarget)}>
               Copy w/ Instructions
             </Button>
           </div>

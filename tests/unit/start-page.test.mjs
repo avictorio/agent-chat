@@ -9,11 +9,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as LIM from "../../worker/limits.ts";
-import { MAX_NAME, oneLine } from "../../worker/lib/text.ts";
+import { MAX_NAME, oneLine, quoted } from "../../worker/lib/text.ts";
 import { START_LIMITS, startPage } from "../../worker/agents/start.ts";
 import { mcpCatalog } from "../../worker/agents/mcp.ts";
 import WORKER from "../../worker/index.ts";
-import { ORIGIN, ROOM, VARIANTS, base, hostileView, viewOf } from "./start-views.mjs";
+import { ESCAPED_SET, HOSTILE_NAMES, ORIGIN, ROOM, VARIANTS, base, hostileView, viewOf } from "./start-views.mjs";
 
 // Node wants duplex: "half" on a Request built with a stream body
 // (settleBody, lib/http.ts); the Workers runtime does not.
@@ -220,6 +220,68 @@ test("every name inside the page's own sentences is in double quotes, and what a
       const lines = t.split("\n");
       const at = lines.findIndex((l) => /^POST \S+\/messages {3}\(MCP: post_message\)$/.test(l));
       assert.equal(JSON.parse(lines[at + 1]).text, "Hello, I am " + me + ".", name + ": the hello's body");
+    }
+  }
+});
+
+// Names that could seem to close the page's quotes or reorder its text
+// (HOSTILE_NAMES): inside the quotes each is a JSON string's body (quoted,
+// worker/lib/text.ts); what an agent sends keeps it as typed.
+const Q = String.raw`"(?:[^"\\]|\\.)*"`;
+/** the quoted strings a pattern with Q groups finds in t, JSON.parsed; each also checked to hold no raw escapable character */
+function unquote(t, re, label) {
+  const m = t.match(re);
+  assert.ok(m, label + ": " + re);
+  return m.slice(1).map((s) => {
+    assert.ok(!ESCAPED_SET.test(s), label + ": a raw escapable character in " + JSON.stringify(s));
+    return JSON.parse(s);
+  });
+}
+
+test("quoted writes a name as a JSON string's body, escaping what the rule names and nothing else", () => {
+  assert.equal(quoted("Scout"), "\"Scout\"");
+  assert.equal(quoted("Иван"), "\"Иван\"");
+  assert.equal(quoted("a\\b\"c"), "\"a\\\\b\\\"c\"");
+  for (const cp of [0x201c, 0x201d, 0x201e, 0x201f, 0x2033, 0x2036, 0x02ba, 0x02dd, 0x02ee, 0x05f4, 0x275d, 0x275e, 0x301d, 0x301e, 0x301f, 0xff02, 0x3003, 0x2e42, 0x00ad, 0x061c, 0x200b, 0x200e, 0x200f, 0x202a, 0x202e, 0x2060, 0x2066, 0x2069, 0xfeff]) {
+    assert.equal(quoted("a" + String.fromCodePoint(cp) + "b"), "\"a\\u" + cp.toString(16).padStart(4, "0") + "b\"", cp.toString(16));
+  }
+  // above U+FFFF: the surrogate pair, lower-case hex
+  assert.equal(quoted("t\u{E0041}"), "\"t\\udb40\\udc41\"");
+  assert.equal(quoted("\u{E0001}"), "\"\\udb40\\udc01\"");
+  // the two joiners stay, and so does an emoji built with one
+  for (const s of ["a\u200cb", "a\u200db", "\u{1F468}\u200d\u{1F469}\u200d\u{1F467}", "\u{1F3F3}\ufe0f\u200d\u{1F308}"]) assert.equal(quoted(s), "\"" + s + "\"", JSON.stringify(s));
+  for (const name of HOSTILE_NAMES) {
+    const q = quoted(oneLine(name));
+    assert.match(q, new RegExp("^" + Q + "$"), JSON.stringify(name));
+    assert.equal(JSON.parse(q), oneLine(name), JSON.stringify(name));
+    assert.ok(!ESCAPED_SET.test(q), JSON.stringify(name));
+  }
+});
+
+test("every quoted name on the page is a JSON string giving back the folded name; the @ example and the hello keep it as typed", () => {
+  for (const name of HOSTILE_NAMES) {
+    const by = "By " + name;
+    const me = oneLine(name), inviter = oneLine(by);
+    const before = { ...base, invite: { ...base.invite, name, invited_by: by }, members: [{ name: by, kind: "human" }] };
+    const joinedV = { ...viewOf("start-joined-silent"), invite: { ...viewOf("start-joined-silent").invite, name, invited_by: by }, members: [{ name: by, kind: "human" }, { name, kind: "agent" }] };
+    for (const [label, v] of [["before joining", before], ["joined", joinedV]]) {
+      const tag = JSON.stringify(name) + ", " + label;
+      const t = startPage(v, ORIGIN, ROOM, START_LIMITS, true);
+      assert.deepEqual(unquote(t, new RegExp("^Agent Chat start page: (" + Q + ") in the room \"" + ROOM + "\"\\n"), tag + ": the title"), [me]);
+      assert.deepEqual(unquote(t, new RegExp("\\nYou are (" + Q + "), an agent, invited by (" + Q + ") on "), tag + ": You are"), [me, inviter]);
+      assert.deepEqual(unquote(t, new RegExp("act as the owner, not as (" + Q + "): they join nothing"), tag + ": the owner-key line"), [me]);
+      assert.deepEqual(unquote(t, new RegExp("A message meant for you lists (" + Q + ") in its targets\\."), tag + ": the targets line"), [me]);
+      const line = t.split("\n").find((l) => l.startsWith("Members who have joined: "));
+      const listed = [...line.slice("Members who have joined: ".length).matchAll(new RegExp("(" + Q + ") \\((human|agent)\\)(, |\\.$)", "g"))];
+      assert.equal(listed.map((m) => m[0]).join(""), line.slice("Members who have joined: ".length), tag + ": the members line is quoted names alone");
+      assert.deepEqual(listed.map((m) => { assert.ok(!ESCAPED_SET.test(m[1]), tag); return JSON.parse(m[1]); }), v.members.map((m) => oneLine(m.name)), tag + ": the members");
+      // what an agent types or sends: as typed (folded)
+      assert.ok(t.includes(", as in @" + inviter + "; any @Name"), tag + ": the @ example");
+      if (!v.posted) {
+        const lines = t.split("\n");
+        const at = lines.findIndex((l) => /^POST \S+\/messages {3}\(MCP: post_message\)$/.test(l));
+        assert.equal(JSON.parse(lines[at + 1]).text, "Hello, I am " + me + ".", tag + ": the hello");
+      }
     }
   }
 });

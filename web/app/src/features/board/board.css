@@ -82,6 +82,14 @@
 /* On a phone the note wraps to many lines: show all of it (the view scrolls), not a box cut at its start line */
 @media (max-width: 760px) { .agent-block { max-height: none; } }
 .agent-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 4px; }
+/* "What your agent reads first": the start page (about 8,000 characters) in
+   a box of its own height that scrolls by itself at every width, so the
+   closing sentence stays near; its lines wrap, so nothing scrolls sideways */
+.agent-start { margin: 14px 0 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.agent-start > summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: 14px; }
+.agent-start[open] > summary { border-bottom: 1px solid var(--line); }
+.agent-start-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; padding: 12px 14px; color: var(--muted); font-size: 14px; }
+.agent-block.agent-start-page { margin: 0; border: 0; border-radius: 0 0 10px 10px; max-height: min(55vh, 460px); overflow: auto; }
 .agent-note { font-size: 13px; }
 
   .install-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 14px; }

@@ -24,6 +24,37 @@ export function shellQuote(s: string) {
 export const ONE_LINE = /[\s\x00-\x1f\x7f-\x9f]+/g;
 export const oneLine = (s: string) => String(s).replace(ONE_LINE, " ").trim();
 
+/** What quotedBody() writes as an escape: a backslash, a double quote, the
+ *  characters that read as a double quotation mark (curly, low, reversed,
+ *  primes, the Hebrew gershayim, ornaments, CJK and full-width marks,
+ *  the ditto mark) and every invisible format character (general category
+ *  Cf: zero-width space, bidi marks and overrides, soft hyphen, tags) but
+ *  the two joiners, U+200C and U+200D, that scripts and emoji need. */
+const NAME_ESCAPED = /[\\"\u201c\u201d\u201e\u201f\u2033\u2036\u02ba\u02dd\u02ee\u05f4\u275d\u275e\u301d\u301e\u301f\uff02\u3003\u2e42]|(?![\u200c\u200d])\p{Cf}/gu;
+/** A member's name, already on one line (oneLine), as the body of the
+ *  double quotes a text prints it in inside its own sentences (the start
+ *  page, the invite note, the wake recipe): a JSON string's body, \ as
+ *  \\, " as \", and each character of NAME_ESCAPED as \uXXXX (UTF-16
+ *  units, lower-case hex: a surrogate pair above U+FFFF). A name is written
+ *  by whoever made the invite: printed as it is, a quotation mark in it, or
+ *  one that looks like one, could seem to end the quotes and the rest read
+ *  as the text's own words, and a bidi override could reorder what a reader
+ *  sees. memberNameProblem refuses only the straight double quote, and only
+ *  in new names: older names may hold one. An ordinary name prints as it
+ *  is. For a template that has its own quote marks around the name. */
+export function quotedBody(name: string) {
+  return name.replace(NAME_ESCAPED, (ch) => {
+    if (ch === "\\" || ch === "\"") return "\\" + ch;
+    let out = "";
+    for (let i = 0; i < ch.length; i++) out += "\\u" + ch.charCodeAt(i).toString(16).padStart(4, "0");
+    return out;
+  });
+}
+/** quotedBody in its double quotes: JSON.parse of the whole gives the name back. */
+export function quoted(name: string) {
+  return "\"" + quotedBody(name) + "\"";
+}
+
 // Object.prototype's member names, folded (memberNameProblem).
 export const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));
 

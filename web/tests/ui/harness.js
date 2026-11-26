@@ -73,7 +73,8 @@ const TR8 = [['Ivy', 'lime', '#a3e635'], ['Jax', 'violet', '#a78bfa'], ['Kip', '
 // An agent invite's note (agent_onboarding) as the Worker writes it
 // (worker/agents/onboarding.ts agentOnboarding), for the room demo at the
 // live origin: its five lines, the inviter's name in quotes when a member
-// made the invite.
+// made the invite. Invite creation and the members rows carry it; GET
+// /invite does not (the agent gate builds its own).
 function noteOf(name, by) {
   const b = 'https://chat.victorio.cloud/api/rooms/demo';
   return (by ? '"' + by + '" invited you' : 'You are invited') + ' to the Agent Chat room "demo" as the agent "' + name + '". Agent Chat hosts invite-only rooms where AI agents and people talk, play games and keep a shared board.\n' +
@@ -82,6 +83,11 @@ function noteOf(name, by) {
     'Start here: GET ' + b + ' with that header. It changes nothing in the room, and its answer is your start page: what to do next, in order.\n' +
     'Or, if your MCP client can set headers: connect to ' + b + '/mcp with that header and call get_start_page for the same page. Neither step joins the room.';
 }
+// The agent Probe's start page in demo before joining (GET /api/rooms/demo):
+// the real page of the fixture (tests/fixtures/start-page/start.txt, the
+// agent Scout in example-room, also invited by Anthony) with the names
+// swapped, about 8,000 characters.
+const START_PAGE = fs.readFileSync(FIXTURES + 'start-page/start.txt', 'utf8').replace(/\r\n/g, '\n').replace(/example-room/g, 'demo').replace(/Scout/g, 'Probe').replace(/scout-hello/g, 'probe-hello');
 function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 // A two-captain Battleship fixture's record, as the server sends it:
 // shots, every shot oldest first, read off the boards (each captain's fire
@@ -116,9 +122,13 @@ function fresh(opts) {
   opts = opts || {};
   return {
     deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind, agentYou: !!opts.agentYou,
-    // noNote: GET /invite fails, so the app builds its own note (an agent's
-    // read never carries one)
+    // noNote: GET /invite fails, so the app reads the room and builds the
+    // owner-made note (the gate's note is always the app's: GET /invite carries none)
     noNote: !!opts.noNote,
+    // startFail: how many reads of the start page (GET /api/rooms/demo) fail
+    startFail: opts.startFail || 0,
+    // probeBy: who invited the agent Probe, as GET /invite says (null: the owner)
+    probeBy: 'probeBy' in opts ? opts.probeBy : 'Anthony',
     artScript: !!opts.artScript,
     previews: opts.previews || null,
     // digestsFail: how many /digests reads fail (a weak connection under the board's boot load)
@@ -584,6 +594,15 @@ async function setup(page, S, calls) {
     if (p === '/api/push/key') return J({ key: 'B' + 'A'.repeat(86) });
     if ((am = p.match(/^\/api\/rooms\/[^/]+\/push\/(status|subscribe|unsubscribe)$/))) { S.push = S.push || {}; const act = am[1]; const ep = act === 'status' ? u.searchParams.get('endpoint') : act === 'subscribe' ? body.subscription && body.subscription.endpoint : body.endpoint; (S.pushLog = S.pushLog || []).push(act + ' ' + (req.headers()['x-invite-token'] || '-')); if (act === 'status') { if (S.statusGate) await S.statusGate; return J(S.push[ep] ? { room: 'demo', registered: true, mode: S.push[ep] } : { room: 'demo', registered: false }); } if (S.pushFail) return J({ error: 'upstream connect error' }, S.pushFail); if (act === 'subscribe') { S.push[ep] = body.mode === 'mentions' ? 'mentions' : 'all'; return J({ room: 'demo', subscribed: true, mode: S.push[ep] }); } delete S.push[ep]; if (S.unsubGate) await S.unsubGate; return J({ room: 'demo', subscribed: false }); }
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask whoever gave it to you for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
+    // The room's own address with a token: its start page, as text (the
+    // agent gate's "What your agent reads first"). S.startFail: how many
+    // reads of it fail first (a 503).
+    if (p === '/api/rooms/demo' && m === 'GET') {
+      (S.hits = S.hits || []).push('GET /api/rooms/demo');
+      if (S.startFail > 0) { S.startFail--; return J({ error: 'upstream connect error' }, 503); }
+      if (!req.headers()['x-invite-token']) return J({ error: 'This is a room\'s start page for invited agents. Send your invite token in the X-Invite-Token header (or as Authorization: Bearer). If your tools cannot send a header, you cannot join: tell your person.', code: 'invite_missing' }, 401);
+      return route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: START_PAGE });
+    }
     if (p.endsWith('/invite') && m === 'GET') {
       (S.hits = S.hits || []).push('GET /invite');
       if (S.noNote) return J({ error: 'upstream connect error' }, 500);
@@ -591,7 +610,7 @@ async function setup(page, S, calls) {
       const tk = req.headers()['x-invite-token'] || '-';
       if (S.previews && tk in S.previews) { const v = S.previews[tk]; S.hits.push('GET /invite ' + tk); return typeof v === 'number' ? J({ error: "This invite link isn't valid for this room." }, v) : J({ room: 'demo', invite: { name: v, kind: 'human', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: null, members: [], opened: false }); }
       return J(S.agentYou
-        ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: noteOf('Probe', 'Anthony') }
+        ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: S.probeBy, invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false }
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
     }
     // The stream answers with its frames and ends, as a dropped connection
@@ -932,4 +951,4 @@ function done(file) {
   process.exit(FAILURES ? 1 : 0);
 }
 
-module.exports = { ARENA_KIDS, fakePush, heldStream, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };
+module.exports = { ARENA_KIDS, fakePush, heldStream, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, START_PAGE, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };

@@ -9,15 +9,16 @@
 // address joins. It takes no token and prints none. Member-written text is
 // kept from steering the page: the purpose and every name are folded onto
 // their line (oneLine, control characters included: a name may hold a NEL),
-// every name in the page's own sentences is in double quotes (quoted),
-// and every body is printed as JSON (js), the hello's included (a name may
-// hold a backslash), with the characters that break a line for some readers
-// escaped. Every number it quotes comes from limits.ts (START_LIMITS); a
-// test renders it with others.
+// every name in the page's own sentences is in double quotes with what
+// could pass for a closing quote or reorder the text escaped (quoted,
+// lib/text.ts), and every body is printed as JSON (js), the hello's
+// included (a name may hold a backslash), with the characters that break a
+// line for some readers escaped. Every number it quotes comes from
+// limits.ts (START_LIMITS); a test renders it with others.
 
 import { DIGEST_CLOSE_HOUR, MUSE_LINK_CODE_TTL_S, POLL_GAP_S, WAIT_MAX_S, WEBHOOK_FETCH_MS, pollGap, spanS } from "../limits.js";
 import { mcpCallOf } from "./mcp.js";
-import { oneLine } from "../lib/text.js";
+import { oneLine, quoted } from "../lib/text.js";
 import type { StartView } from "../room/Room.js";
 import type { MuseHookView } from "../room/muse.js";
 
@@ -36,12 +37,12 @@ export const START_INVALID = "This token is not one of this room's invites. Send
 export const OWNER_NO_START_PAGE = "The owner key has no start page: it is not a member. Use a member's invite token.";
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-/** A member's name inside the page's own sentences, in double quotes: a
- *  name is written by whoever made the invite, may be MAX_NAME characters
- *  long and could read as part of the page (memberNameProblem refuses a
- *  double quote in a name). What an agent types or sends, the @Name
- *  example and every JSON body, prints the name as it is. */
-const quoted = (name: string) => "\"" + name + "\"";
+// A member's name inside the page's own sentences goes through quoted
+// (lib/text.ts): a name is written by whoever made the invite, may be
+// MAX_NAME characters long and could read as part of the page, so it sits
+// in double quotes with anything that could seem to end them escaped. What
+// an agent types or sends, the @Name example and every JSON body, prints
+// the name as it is.
 
 // JSON.stringify escapes C0 controls but leaves U+0085 (NEL), the other C1
 // controls, U+2028 and U+2029 raw, and some readers break a line at each

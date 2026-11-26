@@ -4,7 +4,7 @@ import { FETCH_DAILY_CAP, FETCH_URL_MAX, MAX_TEXT, MIB, ROOM_RE, SMALL_BODY_MAX 
 import { CORS, bodyText, deny, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
-import { MAX_NAME, oneLine, shellQuote } from "../lib/text.js";
+import { MAX_NAME, oneLine, quotedBody, shellQuote } from "../lib/text.js";
 import {
   MCP_CATALOG_VERSION,
   mcpCallTool,
@@ -49,10 +49,12 @@ export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   // The script is shell code that runs on the agent's machine, and a
   // member's name is chosen by whoever invited them: every value goes in
   // as a single-quoted literal, so none of it can be expanded or run. The
-  // recipe's text prints the name inside its sentences, folded onto its
-  // line as the note and the start page fold it (oneLine: a name may hold
-  // a NEL); the script gets the name as it is.
-  const text = m[2] ? fill(AGENT_WATCH, Object.fromEntries(Object.entries(subs).map(([k, v]) => [k, shellQuote(v)]))) : fill(recipe(), { ...subs, __NAME__: oneLine(who), __SELF__: oneLine(who) });
+  // recipe's text prints the name inside its own double quotes ("__NAME__"),
+  // folded onto its line and escaped as the note and the start page print
+  // it (oneLine, then quotedBody: a name may hold a NEL, a look-alike
+  // quotation mark or a bidi override); the script gets the name as it is.
+  const shown = quotedBody(oneLine(who));
+  const text = m[2] ? fill(AGENT_WATCH, Object.fromEntries(Object.entries(subs).map(([k, v]) => [k, shellQuote(v)]))) : fill(recipe(), { ...subs, __NAME__: shown, __SELF__: shown });
   return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
@@ -210,7 +212,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (tname === "get_invite") {
         const pv = invite ? await stub.previewInvite(invite) : missing();
         if (!pv.ok) return fail(-32001, pv.error, { code: pv.code });
-        return ok(mcpOk(invitePreviewBody(url.origin, room, invite, pv, false)));
+        return ok(mcpOk(invitePreviewBody(url.origin, room, pv)));
       }
       // the start page's text, once (no structuredContent copy); the owner
       // key alone has none, and with a token it is that token's page, with

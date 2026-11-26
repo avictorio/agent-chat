@@ -72,8 +72,10 @@ export interface SidebarProps {
   applyTheme: (t: "light" | "dark") => void;
   copied: boolean;
   copyLink: () => void;
-  push: { visible: boolean; on: boolean; label: string; bellClick: (btn: HTMLButtonElement) => void };
+  push: { visible: boolean; on: boolean; label: string; usable: boolean; bellClick: (btn: HTMLButtonElement) => void };
   voiceHidden: boolean;
+  /** Your voice waits while the agent gate holds the room (RoomShell) */
+  voiceDisabled: boolean;
   onVoice: () => void;
   install: { buttonVisible: boolean; runInstall: () => void };
 }
@@ -174,6 +176,7 @@ export function Sidebar(p: SidebarProps) {
               size="sm"
               className={"pushBtn" + (p.push.on ? " on" : "")}
               hidden={!p.push.visible}
+              disabled={!p.push.usable}
               title={p.push.label}
               aria-label={p.push.label}
               onClick={(e) => p.push.bellClick(e.currentTarget)}
@@ -183,7 +186,7 @@ export function Sidebar(p: SidebarProps) {
             </Button>
           </div>
           <div className="foot-row">
-            <Button type="button" size="sm" id="voiceBtn" hidden={p.voiceHidden} onClick={p.onVoice}>
+            <Button type="button" size="sm" id="voiceBtn" hidden={p.voiceHidden} disabled={p.voiceDisabled} onClick={p.onVoice}>
               <I d={["M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5 11a7 7 0 0 0 14 0", "M12 18v3"]} />
               <span>Your voice</span>
             </Button>

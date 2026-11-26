@@ -355,7 +355,9 @@ test("/api says exactly which calls join", () => {
   const look = sectionOf(api, "START HERE");
   for (const want of ["Only look, never join:", "Act without joining:", "Join only when they succeed:", "Join: every other room call"]) assert.ok(look.includes(want), "START HERE lacks " + want);
   const folded = look.replace(/\s+/g, " ");
-  for (const want of ["GET or HEAD /api/rooms/ROOM (the start page)", "get_start_page", "The owner key alone has no start page (400)", "without agent_onboarding", "\"next\" (links: start", "except that the owner key alone has no invite to look at (401 invite_missing)"]) assert.ok(folded.includes(want), "START HERE lacks " + want);
+  for (const want of ["GET or HEAD /api/rooms/ROOM (the start page)", "get_start_page", "The owner key alone has no start page (400)", "\"next\" (links: start, docs, me, mcp, messages, changes)}. status", "except that the owner key alone has no invite to look at (401 invite_missing)", "Over MCP, get_invite returns the same."]) assert.ok(folded.includes(want), "START HERE lacks " + want);
+  // the preview carries no note, over REST or MCP (routes/members.ts invitePreviewBody)
+  assert.ok(!look.includes("agent_onboarding"), "START HERE says the preview carries the note");
 });
 
 // START HERE replaced LOOK BEFORE JOINING in place, and texts already out
@@ -396,6 +398,8 @@ test("/api names the note one way, says every read returns you, and signs a deci
   const api = docs("https://example.test");
   const inv = sectionOf(api, "INVITES AND TOKENS").replace(/\s+/g, " ");
   assert.ok(inv.includes("The invite note: an invite made with kind \"agent\" carries agent_onboarding"), "INVITES AND TOKENS names the note");
+  // its carriers: the invite (created, the owner's list) and the members rows for the owner and people; never the preview
+  assert.ok(inv.includes("It comes with the invite (on create and in the owner's list) and with its row in MEMBERS when the owner or a person lists them; the invite preview (GET .../invite, MCP get_invite: START HERE) and an agent's own messages reads never carry it."), "INVITES AND TOKENS lists the note's carriers");
   assert.ok(!api.includes("hand-off:"), "/api still calls it the agent hand-off");
   assert.ok(inv.includes("Every messages read with your token returns you (your name) and you_kind."));
   assert.ok(!inv.includes("first messages read also"), "a first read is no longer the only one with you");
@@ -442,19 +446,39 @@ test("the room page's note and the web app's texts drop the false sentences", as
   const { readFileSync } = await import("node:fs");
   const root = new URL("../../", import.meta.url);
   assert.ok(!agentNoteText("https://example.test", "lima").includes("Any other call"));
-  // the web app's fallback note and home page are not importable in Node: read as text
+  // the web app's gate and home page are not importable in Node: read as text
   const stream = readFileSync(new URL("web/app/src/features/room/useRoomStream.ts", root), "utf8");
-  assert.ok(!stream.includes("Call whoami"), "the fallback note still says to call whoami (it joins)");
-  // the fallback is agentNote (the server's note, tests/unit/agent-note.test.mjs);
-  // an agent's read carries none, only the REST preview does
-  assert.ok(stream.includes("import { agentNote } from \"./agentNote\""), "the fallback note is agentNote");
+  assert.ok(!stream.includes("Call whoami"), "the gate's note still says to call whoami (it joins)");
+  // the gate's note is agentNote (the server's note, tests/unit/agent-note.test.mjs):
+  // neither an agent's read nor the preview carries one
+  assert.ok(stream.includes("import { agentNote } from \"./agentNote\""), "the gate's note is agentNote");
   assert.ok(!stream.includes("setupBlock"), "the old setup block is gone");
   assert.ok(!stream.includes("d.agent_onboarding"), "the gate still reads a note from a messages read");
+  // GET /invite carries no note either: the gate's note is always agentNote's,
+  // member-made from the preview's inviter
+  assert.ok(!stream.includes("agent_onboarding") && stream.includes("noteFor(pv.invite.name, pv.invite.invited_by)"), "the gate's note comes from agentNote, with the preview's inviter");
+  const client = readFileSync(new URL("contract/src/client.ts", root), "utf8");
+  const preview = client.slice(client.indexOf("export type InvitePreviewResponse"), client.indexOf("\n};", client.indexOf("export type InvitePreviewResponse")));
+  assert.ok(preview.includes("opened: boolean") && !preview.includes("agent_onboarding"), "the contract's preview has no note");
   const views = readFileSync(new URL("web/app/src/features/room/views.tsx", root), "utf8").replace(/\s+/g, " ");
-  assert.ok(views.includes("Agents join through the API or over MCP"), "the gate says agents join through the API or over MCP");
-  assert.ok(!views.includes("Nothing is restricted"), "the gate says nothing is restricted");
-  // the note's first way is a REST call: the closing sentence names no surface the note leaves out
-  assert.ok(views.includes("This page restricts nothing: the same invite also works in this web app. It just leads with what agents use."), "the gate's closing sentence");
+  // the gate's sentences (React prints {name} where the source has it)
+  assert.ok(views.includes("This invite belongs to {name}, an agent member of this room. Agents join through the API or MCP, with a tool that can send an HTTP header; an assistant that can only be given a link cannot join. Hand your agent this note:"), "the gate's intro");
+  assert.ok(views.includes(">Copy the note<") || views.includes("> Copy the note <"), "the copy button");
+  assert.ok(views.includes("toast(\"Note copied\")"), "the copy toast");
+  assert.ok(views.includes("What your agent reads first"), "the start page's disclosure");
+  // "Open the web app anyway" reads the room as the agent, which opens an
+  // unused invite; and an agent invite's members list shows no other
+  // member's link, so the gate does not say nothing is restricted
+  assert.ok(views.includes("Opening the web app with this invite acts as {name}: if {name} has not joined yet, that joins the room. The same invite works in the web app, on REST and over MCP."), "the gate's closing sentence");
+  assert.ok(!views.includes("Nothing is restricted") && !views.includes("restricts nothing"), "the gate says nothing is restricted");
+  assert.ok(!/setup block|Setup block/.test(views.replace("select the block", "")), "the gate still calls the note a setup block");
+  // the invite card's hint under Copy w/ Instructions (an agent invite's
+  // only: the members rows' button has none), and the copy toast
+  const board = readFileSync(new URL("web/app/src/features/board/board.tsx", root), "utf8").replace(/\s+/g, " ");
+  const hint = "Copies a short note for your agent: its token and the address to start from. Your agent needs a tool that can send an HTTP header (curl, an HTTP client, or an MCP client with custom headers); an assistant that can only be given a link cannot join.";
+  assert.equal(board.split(hint).length, 2, "the hint, once");
+  assert.ok(board.indexOf(hint) > board.indexOf("function InviteResultCard") && board.indexOf(hint) < board.indexOf("function MembersView"), "the hint is the invite card's");
+  assert.ok(board.includes("toast(\"Invite note copied\")") && !board.includes("Invite + instructions copied"), "the copy toast names the note");
   const home = readFileSync(new URL("web/app/src/features/home/StaticViews.tsx", root), "utf8");
   assert.ok(!home.includes("room owner"), "the home page says a room owner revokes");
   assert.ok(!home.includes("gets a 401"), "the home page says a wrong token gets a 401");

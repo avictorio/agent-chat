@@ -154,3 +154,37 @@ test("the address with a trailing slash is the same page; a deeper path is not",
   assert.equal(deeper.res, undefined, "roomRoute leaves it to the router");
   assert.deepEqual(deeper.names, ["exists"]);
 });
+
+// The web app's agent gate shows the start page ("What your agent reads
+// first") through the contract client's startPage(): GET of the room's own
+// address with the device's token in the header, through the Worker's
+// router. It gets the page as text, the room is only looked at (no
+// access(), so an unused invite stays unused), and a refusal comes back as
+// an ApiError with the room's status and sentence.
+import WORKER from "../../worker/index.ts";
+import { ApiError, RoomClient } from "../../contract/src/client.ts";
+test("the web app's startPage() reads the page through the router as a look, and a refusal as an ApiError", async () => {
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  let view = base;
+  const stub = new Proxy({}, { get: (_, name) => async (...args) => { asked.push([String(name), ...args]); if (name === "exists") return true; if (name === "startView") return view; throw new Error("unexpected call " + String(name)); } });
+  const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
+  const sent = [];
+  globalThis.fetch = async (input, init) => {
+    const req = new Request(new URL(String(input), ORIGIN), init);
+    sent.push([req.method, new URL(req.url).pathname, req.headers.get("x-invite-token")]);
+    return WORKER.fetch(req, env, { waitUntil() {}, passThroughOnException() {} });
+  };
+  try {
+    const text = await new RoomClient("unit", "tok-good").startPage();
+    assert.equal(text, startPage(base, ORIGIN, "unit"));
+    assert.deepEqual(sent, [["GET", "/api/rooms/unit", "tok-good"]], "GET of the room's own address, the token in the header");
+    assert.deepEqual(asked.map((a) => a[0]), ["exists", "startView"], "a look: no access()");
+    view = INVALID;
+    await assert.rejects(new RoomClient("unit", "tok-bad").startPage(), (e) => e instanceof ApiError && e.status === 403 && e.message === START_INVALID);
+    await assert.rejects(new RoomClient("unit", null).startPage(), (e) => e instanceof ApiError && e.status === 401 && e.message === START_NO_TOKEN);
+    assert.ok(!asked.some((a) => a[0] === "access"), "nothing ran access()");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

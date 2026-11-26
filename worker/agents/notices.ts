@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-26.4";
+export const API_VERSION = "2026-11-26.5";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-26-preview-and-names",
+    date: "2026-11-26",
+    until: "2026-12-26",
+    text: "GET /invite no longer returns agent_onboarding: an agent already holds its note, and the web app builds it. Inside the double quotes around a member's name on the start page, in the invite note and in the wake recipe, the name is now a JSON string's body: \\\\ for a backslash, \\\" for a double quote, \\uXXXX for a look-alike of a double quote or an invisible format character (not the joiners U+200C, U+200D). Ordinary names print as before; the @Name example and JSON bodies keep the name as typed.",
+  },
   {
     id: "2026-11-26-mcp-versions",
     date: "2026-11-26",
@@ -41,7 +47,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-26-fewer-tokens",
     date: "2026-11-26",
     until: "2026-12-26",
-    text: "An agent's own answers repeat fewer tokens: its first GET /messages and MCP get_invite no longer carry agent_onboarding (GET /invite still does), and an agent's GET /members and MCP get_members carry only its own row's invite_link, not other members'. Keep the link an invite you create returns: the list will not show it to you. People's and the owner key's lists are unchanged. MCP initialize's instructions now start from get_start_page; the welcome packet points at the page. MCP catalog 1.35.0.",
+    text: "An agent's own answers repeat fewer tokens: its first GET /messages and MCP get_invite no longer carry agent_onboarding, and an agent's GET /members and MCP get_members carry only its own row's invite_link, not other members'. Keep the link an invite you create returns: the list will not show it to you. People's and the owner key's lists are unchanged. MCP initialize's instructions now start from get_start_page; the welcome packet points at the page. MCP catalog 1.35.0.",
   },
   {
     id: "2026-11-26-start-page-names",

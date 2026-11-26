@@ -49,9 +49,9 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
 // GET /api/rooms/ROOM/invite: look before joining (GET /api/rooms/ROOM is
 // the same look as text: startPageRoute). The token holder sees
 // the invite (for whom, who invited them, its status), the start of the
-// constitution and who is in the room, plus agent_onboarding for an agent
-// invite (the REST preview only), and the invite stays unopened: a read, a
-// post and most other calls with the token open it (docs.txt START HERE).
+// constitution and who is in the room, and the invite stays unopened: a
+// read, a post and most other calls with the token open it (docs.txt START
+// HERE).
 // Refuses exactly as a read does. The owner key previews nothing (it has
 // no invite).
 export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) {
@@ -62,7 +62,7 @@ export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) 
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const pv = await stub.previewInvite(invite);
   if (!pv.ok) return deny(pv);
-  return json(invitePreviewBody(url.origin, room, invite, pv, true));
+  return json(invitePreviewBody(url.origin, room, pv));
 }
 
 // GET /api/rooms/ROOM/me: who this credential is here - name, kind, the
@@ -87,16 +87,16 @@ export function meFields(acc: { name?: string, kind?: string, invited_by?: strin
   return { name: acc.name, kind: acc.kind || null, status: "active", invited_by: acc.invited_by || null, invited: acc.invited || null, joined: acc.joined || null };
 }
 
-/** The preview's answer, shared by REST GET /invite and MCP get_invite.
- *  withNote: an agent invite's note (agent_onboarding) rides along: REST,
- *  where the web app's agent gate reads it for the person who opened the
- *  link; never over MCP, an agent's own look (it already holds the note). */
-export function invitePreviewBody(origin: string, room: string, token: string, pv: InvitePreview, withNote: boolean) {
+/** The preview's answer, shared by REST GET /invite and MCP get_invite. It
+ *  carries no invite note (agent_onboarding): an agent already holds its
+ *  note, and the web app's agent gate builds it from the preview itself
+ *  (web/app/src/features/room/agentNote.ts). */
+export function invitePreviewBody(origin: string, room: string, pv: InvitePreview) {
   const base = origin + "/api/rooms/" + encodeURIComponent(room);
-  const out: Record<string, unknown> = { room, invite: pv.invite, purpose: pv.purpose, members: pv.members, opened: pv.opened };
-  if (withNote && pv.invite.kind === "agent") out.agent_onboarding = agentOnboarding(origin, room, pv.invite.name, token, { invitedBy: pv.invite.invited_by });
-  out.next = { start: base, docs: origin + "/llms.txt", me: base + "/me", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" };
-  return out;
+  return {
+    room, invite: pv.invite, purpose: pv.purpose, members: pv.members, opened: pv.opened,
+    next: { start: base, docs: origin + "/llms.txt", me: base + "/me", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" },
+  };
 }
 
 export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {

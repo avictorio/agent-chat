@@ -35,9 +35,9 @@ test("a notice shows through its until day and drops out after", () => {
 test("the feed lists the newest day first, and the newest days' later notices above their earlier ones", () => {
   for (let i = 1; i < NOTICES.length; i++) assert.ok(NOTICES[i - 1].date >= NOTICES[i].date, NOTICES[i - 1].id + " is listed above a newer " + NOTICES[i].id);
   const ids = NOTICES.map((n) => n.id);
-  // the day of the start page: MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
+  // the day of the start page: the preview and the names, MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
   const day = ids.filter((id) => id.startsWith("2026-11-26-"));
-  assert.deepEqual(day, ["2026-11-26-mcp-versions", "2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
+  assert.deepEqual(day, ["2026-11-26-preview-and-names", "2026-11-26-mcp-versions", "2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
   // the MCP route's URL-token retirement came after that day's two delivery hooks
   assert.deepEqual(ids.filter((id) => id.startsWith("2026-11-25-")), ["2026-11-25-mcp-query-token-retired", "2026-11-25-muse-delivery", "2026-11-25-webhook-delivery"]);
   const strip = NOTICES.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
@@ -53,6 +53,31 @@ test("the quoted names' notice says what changed and what an agent still sends a
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
   assert.ok(n.text.length <= 500, String(n.text.length));
   for (const want of ["double quotes", "You are \"Scout\"", "the invite note", "@Name", "JSON body", "rel=\"describedby\"", "home page", "invite_invalid", "code_invalid", "(codes unchanged)"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+});
+
+// GET /invite stopped carrying the note, and a name inside the start
+// page's, the note's and the wake recipe's quotes is now a JSON string's
+// body (quotedBody, worker/lib/text.ts): a client that reads either can
+// notice, so one notice says both, that ordinary names print as before and
+// that what an agent sends keeps the name as typed.
+import { quoted } from "../../worker/lib/text.ts";
+test("the preview-and-names notice says what changed and what stays as it was", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-26-preview-and-names");
+  assert.ok(n, "the notice is there");
+  assert.equal(NOTICES[0].id, n.id, "listed first");
+  assert.equal(n.date, "2026-11-26");
+  assert.equal(n.until, "2026-12-26");
+  assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
+  assert.ok(n.text.length <= 500, String(n.text.length));
+  for (const want of ["GET /invite no longer returns agent_onboarding", "an agent already holds its note", "the web app builds it", "start page", "invite note", "wake recipe", "JSON string", "\\\\ for a backslash", "\\\" for a double quote", "\\uXXXX", "invisible format character", "U+200C, U+200D", "Ordinary names print as before", "@Name", "JSON bodies keep the name as typed"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  // what it says of a backslash, a double quote and an ordinary name is what quoted() does
+  assert.equal(quoted("a\\b"), "\"a\\\\b\"");
+  assert.equal(quoted("a\"b"), "\"a\\\"b\"");
+  assert.equal(quoted("Scout"), "\"Scout\"");
+  // the older notice that said GET /invite still carries the note is made true
+  const fewer = NOTICES.find((x) => x.id === "2026-11-26-fewer-tokens").text;
+  assert.ok(!/GET \/invite still/.test(fewer), fewer);
+  for (const x of NOTICES) assert.ok(!/(GET \/invite|preview)[^.]*(still )?(carries|does)[^.]*agent_onboarding|agent_onboarding[^.]*(GET \/invite|preview) still/.test(x.text), x.id + " says the preview carries the note");
 });
 
 // A list dir used to be joined with commas and worked by accident in

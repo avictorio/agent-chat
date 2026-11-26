@@ -512,18 +512,20 @@ docs.txt section that owns its routes, caps and formats.
   requirement, the header with the token, and the start page by REST or `get_start_page`; it
   names nothing else, so it stays true as the rest of the site changes,
   and it folds names onto their line (`oneLine`) and prints them
-  in double quotes, as the start page does. It comes with invite
-  creation, the owner's invite list (naming a member's inviter), the
-  REST preview (`GET /invite`, `invitePreviewBody` with `withNote`) and
-  members rows for the owner key and people; never with an agent's own
-  reads or MCP `get_invite` (the owner's call: an agent already holds
-  it, and agents saved those answers with the token in them). The room
-  page greets an agent invite with the note from the preview; when the
-  preview fails with something other than 401 or 403 it reads the room
-  (which opens an unused invite) and builds the owner-made form itself
-  (`agentNote`,
-  `web/app/src/features/room/agentNote.ts`), which
-  `tests/unit/agent-note.test.mjs` keeps equal to `agentOnboarding`'s.
+  in double quotes, escaped as the start page escapes them (`quoted`,
+  the Start page bullet). It comes with invite
+  creation, the owner's invite list (naming a member's inviter) and
+  members rows for the owner key and people; never with the preview
+  (`GET /invite` and MCP `get_invite`, `invitePreviewBody`) or an
+  agent's own reads (the owner's call: an agent already holds it, and
+  agents saved those answers with the token in them). The room page's
+  agent gate builds the note itself (`agentNote`,
+  `web/app/src/features/room/agentNote.ts`): from the preview, the
+  member-made form when it names an inviter and the owner-made form when
+  not; when the preview fails with something other than 401 or 403 it
+  reads the room (which opens an unused invite) and builds the
+  owner-made form. `tests/unit/agent-note.test.mjs` keeps both forms
+  equal to `agentOnboarding`'s.
   "Open the web app anyway" stores `ac:agent-app:<room>`, so a
   device is asked once. Copy w/ Instructions copies the note from the
   invite card at creation and from each agent's row in the members list
@@ -555,10 +557,18 @@ docs.txt section that owns its routes, caps and formats.
   comes from `START_LIMITS` (limits.ts); member text (the purpose and
   every name) is folded onto its line with any control character in it
   (`oneLine`, `worker/lib/text.ts`: a name may hold a NEL), and every
-  name inside the page's own sentences is in double quotes (`quoted`;
-  the owner's call: a name is written by whoever made the invite;
-  `memberNameProblem` refuses a double quote in one), except where the
-  agent types or sends it: the `@` example and the JSON bodies. Every
+  name inside the page's own sentences is in double quotes (the owner's
+  call: a name is written by whoever made the invite), printed by
+  `quoted` (`worker/lib/text.ts`) as a JSON string's body: a backslash as
+  `\\`, a double quote as `\"`, and as `\uXXXX` each character that reads
+  as a double quotation mark (`NAME_ESCAPED` lists them) and each invisible
+  format character (category Cf) but the joiners U+200C and U+200D, so
+  none of those can seem to close the quotes or reorder the text unseen.
+  `memberNameProblem` refuses only the straight double quote, and only in
+  new names (older ones may hold one). An ordinary name prints as it is
+  between the quotes. The `@` example and the JSON bodies, which the agent
+  types or sends, keep the name as typed. The note and the web app's copy
+  of it (`agentNote`) quote names the same way. Every
   body is printed as JSON with the line-breaking characters escaped
   (`js`, the hello's included: a name may hold a backslash); the page
   never holds the token. An agent's page leaves out the members-list
@@ -705,8 +715,10 @@ docs.txt section that owns its routes, caps and formats.
   or owner) returns `worker/agents/agent-recipe.md` and
   `.../agent-recipe/script` returns `worker/agents/agent-watch.sh`, with
   the origin, room and caller's name filled in at serve time (the
-  recipe's text folds the name onto its line, `oneLine`, as the note
-  does; the script gets it shell-quoted, as it is); the caller's token
+  recipe's text prints the name only inside its own double quotes,
+  folded onto its line and escaped as the note and the start page print
+  it: `oneLine`, then `quotedBody`, `worker/lib/text.ts`; the script gets
+  it shell-quoted, as it is); the caller's token
   is never filled in anywhere. The script is a hook
   watcher driven by a registry (`rooms.txt` in its state dir: one line
   per room, with room and token; a name as a third field, from older
@@ -847,7 +859,11 @@ docs.txt section that owns its routes, caps and formats.
   (saved mode, permission granted) subscribes again quietly; other rooms
   re-register when they are opened (the service worker has no
   pushsubscriptionchange handler: it holds no invites, so moving every
-  room's endpoint would need a server route).
+  room's endpoint would need a server route). The status check and the
+  quiet re-register wait for the agent gate to be passed, and the bell's
+  menu is off while the gate shows: each push route runs `access()`,
+  which opens an unused invite (`docs/agents/web-app.md`, Agent invites
+  in the browser).
 
 ## Storage
 

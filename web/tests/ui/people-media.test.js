@@ -30,6 +30,45 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     return { btns: await page.$$eval('#invResult button', b => b.map(x => x.textContent)) };
   });
   await run('invites-dark-mobile', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => { await shot(page, 'members-mobile-dark.png'); });
+  // An agent's invite card says under Copy w/ Instructions what it copies
+  // and what the agent needs; a person's card and the members rows' own
+  // Copy w/ Instructions have no such line. Both copies toast "Invite note
+  // copied". (The clipboard takes what is copied: window.__copied.)
+  const HINT = 'Copies a short note for your agent: its token and the address to start from. Your agent needs a tool that can send an HTTP header (curl, an HTTP client, or an MCP client with custom headers); an assistant that can only be given a link cannot join.';
+  const fakeClipboard = () => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__copied = t; } }, configurable: true }); };
+  for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
+    await run('invite-card-hint-' + vp.tag + '-' + scheme, { scheme, w: vp.w, h: vp.h, touch: vp.touch, hash: '#members', init: fakeClipboard }, async (page) => {
+      await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+      await page.fill('#invName', 'Matheo'); await page.click('[data-kind="human"]'); await page.click('#invForm button[type=submit]'); await settle(page);
+      must(await page.$('#invResult .invite-result') && !(await page.$('#invNoteHint')), 'a person\'s invite card has no hint');
+      await page.fill('#invName', 'Scout'); await page.click('[data-kind="agent"]'); await page.click('#invForm button[type=submit]'); await settle(page);
+      const hint = await page.$eval('#invNoteHint', (e) => e.textContent.trim());
+      must(hint === HINT, 'the hint: ' + hint);
+      const pos = await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('#invResult button')].find((x) => x.textContent === 'Copy w/ Instructions').getBoundingClientRect();
+        const h = document.getElementById('invNoteHint').getBoundingClientRect();
+        const card = document.querySelector('#invResult .invite-result').getBoundingClientRect();
+        return { btnBottom: Math.round(btn.bottom), hintTop: Math.round(h.top), hintRight: Math.round(h.right), cardRight: Math.round(card.right), doc: document.documentElement.scrollWidth, vw: window.innerWidth };
+      });
+      must(pos.hintTop >= pos.btnBottom - 1 && pos.hintRight <= pos.cardRight && pos.doc <= pos.vw + 1, 'the hint sits under the button, inside the card: ' + JSON.stringify(pos));
+      const hints = await page.evaluate((t) => document.body.innerText.split(t).length - 1, HINT);
+      must(hints === 1, 'one hint on the page, the card\'s: ' + hints);
+      await page.$eval('#invResult .invite-result', (e) => e.scrollIntoView({ block: 'center' }));
+      await settle(page);
+      await shot(page, 'invite-card-hint-' + vp.tag + '-' + scheme + '.png');
+      await page.click('#invResult button:text-is("Copy w/ Instructions")');
+      await page.waitForFunction(() => /Invite note copied/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 4000 });
+      const card = await page.evaluate(() => window.__copied);
+      must(/X-Invite-Token: tok_Scout /.test(card) && card.split('\n').length === 5, 'the card copies the new invite\'s note: ' + card.slice(0, 120));
+      // a members row's own Copy w/ Instructions: the same toast, no hint
+      await page.evaluate(() => { window.__copied = null; });
+      await page.click('#mList .card.member button:text-is("Copy w/ Instructions")');
+      await page.waitForFunction(() => window.__copied && /Invite note copied/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 4000 });
+      const row = await page.evaluate(() => window.__copied);
+      must(/X-Invite-Token: tok_/.test(row), 'the row copies its agent\'s note: ' + row.slice(0, 120));
+      return { hint: hint.length, pos };
+    });
+  }
   /* A reload paints avatars at once: the roster is remembered
      per room on the device, so the chat shows each picture before
      /members answers (here held back 3 s) instead of initials. */

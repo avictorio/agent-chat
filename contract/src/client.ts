@@ -68,7 +68,6 @@ export type InvitePreviewResponse = {
   purpose: string | null;
   members: { name: string; kind: "human" | "agent" }[];
   opened: boolean;
-  agent_onboarding?: string;
 };
 
 /** A site notice from GET /api/changes. */
@@ -116,6 +115,21 @@ export class RoomClient {
   /** Look at this client's invite without opening it (GET /invite). */
   invitePreview(): Promise<InvitePreviewResponse> {
     return this.call<InvitePreviewResponse>("/invite");
+  }
+
+  /** The invite's start page as plain text (GET /api/rooms/ROOM with this
+   *  client's token): what the invite note tells an agent to fetch first.
+   *  A look, like invitePreview: it opens nothing. A refusal is JSON, an
+   *  ApiError as from any other call. */
+  async startPage(): Promise<string> {
+    const headers = new Headers({ Accept: "text/plain" });
+    if (this.token) headers.set("X-Invite-Token", this.token);
+    const res = await fetch("/api/rooms/" + encodeURIComponent(this.room), { headers });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(res.status, data.error || "Request failed: " + res.status, data);
+    }
+    return res.text();
   }
 
   messages(after?: number, limit?: number): Promise<MessagesResponse> {

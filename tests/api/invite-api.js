@@ -173,7 +173,7 @@ async function preview(ctx) {
   check('preview: answers with the invite, unopened', r.status === 200 && j.invite && j.invite.name === 'PrevP' && j.invite.kind === 'agent' && j.invite.status === 'unused' && j.opened === false && j.invite.invited_by === null, r.status + ' ' + JSON.stringify(j.invite));
   check('preview: purpose is the start of the constitution', j.purpose === 'We plan the Lima trip here. Be kind.', JSON.stringify(j.purpose));
   check('preview: members lists who joined (name and kind)', Array.isArray(j.members) && j.members.length === 1 && j.members[0].name === 'PrevH' && j.members[0].kind === 'human' && Object.keys(j.members[0]).length === 2, JSON.stringify(j.members));
-  check('preview: an agent invite carries its note over REST, the token once', typeof j.agent_onboarding === 'string' && j.agent_onboarding.split(P).length === 2 && j.agent_onboarding.startsWith('You are invited'), String(j.agent_onboarding).slice(0, 60));
+  check('preview: an agent invite\'s REST preview carries no note and no token, and its fields in order', !('agent_onboarding' in j) && !r.text.includes(P) && isDeepStrictEqual(Object.keys(j), ['room', 'invite', 'purpose', 'members', 'opened', 'next']) && isDeepStrictEqual(Object.keys(j.invite || {}), ['name', 'kind', 'status', 'invited_by', 'invited', 'joined']), JSON.stringify(Object.keys(j)));
   check('preview: next points at the start page, the docs, MCP and messages', j.next && j.next.start === START && /\/llms\.txt$/.test(j.next.docs) && /\/mcp$/.test(j.next.mcp) && Object.keys(j.next)[0] === 'start', JSON.stringify(j.next));
   let st = await statusOf('PrevP');
   check('preview: the member stays unused, never seen', st && st.status === 'unused' && st.last_seen === null, JSON.stringify(st));
@@ -294,7 +294,7 @@ async function primerDocs(ctx) {
   const inv = await req('POST', R + '/invites', { token: H, json: { name: 'DocA', kind: 'agent' } });
   check('onboarding: a member-made invite names who invited, in quotes', /^"DocH" invited you to the Agent Chat room/.test(inv.json.agent_onboarding || ''), String(inv.json.agent_onboarding).slice(0, 80));
   let r = await req('GET', R + '/invite', { token: inv.json.token });
-  check('onboarding: the preview\'s note does not carry the room\'s purpose', typeof r.json.agent_onboarding === 'string' && !r.json.agent_onboarding.includes('A room for testing the docs.'), String(r.json.agent_onboarding).slice(0, 200));
+  check('onboarding: the note does not carry the room\'s purpose; the preview carries no note but names the inviter (the web app builds the note from it)', typeof inv.json.agent_onboarding === 'string' && !inv.json.agent_onboarding.includes('A room for testing the docs.') && r.status === 200 && !('agent_onboarding' in r.json) && r.json.invite.invited_by === 'DocH', r.status + ' ' + JSON.stringify(Object.keys(r.json || {})));
   r = await req('GET', R, { token: inv.json.token });
   check('onboarding: ... the start page does', r.status === 200 && r.text.includes('in its members\' words: A room for testing the docs.'), r.status + ' ' + r.text.slice(0, 200));
   const own = await req('POST', R + '/invites', { owner: true, json: { name: 'DocB', kind: 'agent' } });
@@ -891,6 +891,11 @@ async function startPage(ctx) {
   let gHello = null;
   try { gHello = JSON.parse(gLines[gAt + 1]); } catch { /* checked below */ }
   check('start: a name with a backslash gets a hello body that is JSON, with that name', !!gHello && gHello.text === 'Hello, I am ' + BS + '.', gLines[gAt + 1]);
+  // inside the page's own quotes the name is a JSON string's body (quoted, worker/lib/text.ts)
+  const gTitle = /^Agent Chat start page: ("(?:[^"\\]|\\.)*") in the room /.exec(gLines[0]);
+  let gName = null;
+  try { gName = gTitle && JSON.parse(gTitle[1]); } catch { /* checked below */ }
+  check('start: the title quotes that name as a JSON string (the backslash escaped)', !!gTitle && gTitle[1] === '"Start\\\\Back"' && gName === BS, gLines[0]);
   if (gHello) {
     r = await req('POST', R + '/messages', { token: G, json: gHello });
     check('start: ... and it posts as written (201)', r.status === 201 && r.json.text === 'Hello, I am ' + BS + '.', r.status + ' ' + r.text.slice(0, 160));
@@ -918,9 +923,10 @@ async function startPage(ctx) {
 // points at the start page. Members: an agent listing them gets its own
 // row's invite_link only (its row found by its token); people and the
 // owner key, in every form, get every unrevoked row's link and the agent
-// rows' notes. The note: an agent's first messages read and MCP get_invite
-// carry no agent_onboarding; REST GET /invite, the invite's creation and
-// the owner's list do. A member that invites still gets what
+// rows' notes. The note: an agent's first messages read and the preview,
+// REST GET /invite and MCP get_invite, carry no agent_onboarding, before
+// the invite is opened and after; the invite's creation, the owner's list
+// and the members rows for people and the owner key do. A member that invites still gets what
 // it must hand over. The note's start address answers the start page, and
 // following it joins nothing.
 async function onboardingDecisions(ctx) {
@@ -988,14 +994,23 @@ async function onboardingDecisions(ctx) {
   r = await req('GET', R + '/members', { owner: true, token: AgA });
   fullView(rows(r.json), 'GET /members with the owner key beside AgA\'s token');
 
-  // the note: REST GET /invite keeps it; MCP get_invite never has it
-  r = await req('GET', R + '/invite', { token: AgC });
-  check('the note: REST GET /invite carries the note, the token once, and next.start', r.status === 200 && typeof r.json.agent_onboarding === 'string' && r.json.agent_onboarding.split(AgC).length === 2 && r.json.agent_onboarding.startsWith('You are invited') && r.json.next && r.json.next.start === START, r.status + ' ' + JSON.stringify(r.json && r.json.next));
-  const note = (r.json && r.json.agent_onboarding) || '';
-  r = await mcp({ token: AgC }, 'get_invite');
-  check('the note: MCP get_invite carries no note', !!sc(r).invite && !('agent_onboarding' in sc(r)) && !r.text.includes(AgC) && sc(r).next && sc(r).next.start === START, JSON.stringify(Object.keys(sc(r))));
-  r = await mcp({ owner: true, token: AgC }, 'get_invite');
-  check('the note: ... nor with the owner key beside the token', !!sc(r).invite && sc(r).invite.name === 'AgC' && !('agent_onboarding' in sc(r)), JSON.stringify(Object.keys(sc(r))));
+  // the note: the preview carries none, over REST or MCP, for an owner-made
+  // and a member-made agent invite; it keeps naming the inviter, from which
+  // the web app builds its note
+  const previewNoNote = async (tok, name, by, label) => {
+    let p = await req('GET', R + '/invite', { token: tok });
+    check('the note: REST GET /invite carries no note (' + label + '), names the inviter, and next.start', p.status === 200 && !('agent_onboarding' in p.json) && !p.text.includes(tok) && p.json.invite.name === name && p.json.invite.invited_by === by && !!p.json.next && p.json.next.start === START, p.status + ' ' + JSON.stringify(Object.keys(p.json || {})));
+    p = await mcp({ token: tok }, 'get_invite');
+    check('the note: MCP get_invite carries no note (' + label + ')', !!sc(p).invite && !('agent_onboarding' in sc(p)) && !p.text.includes(tok) && sc(p).next && sc(p).next.start === START, JSON.stringify(Object.keys(sc(p))));
+    p = await mcp({ owner: true, token: tok }, 'get_invite');
+    check('the note: ... nor with the owner key beside the token (' + label + ')', !!sc(p).invite && sc(p).invite.name === name && !('agent_onboarding' in sc(p)), JSON.stringify(Object.keys(sc(p))));
+  };
+  await previewNoNote(AgC, 'AgC', null, 'unused, owner-made');
+  await previewNoNote(AgD, 'AgD', 'AgA', 'unused, member-made');
+  // the note to follow: AgC's, from the owner's members list
+  r = await req('GET', R + '/members', { owner: true });
+  const note = String((rows(r.json).find((m) => m.name === 'AgC') || {}).agent_onboarding || '');
+  check('the note: the owner\'s list holds AgC\'s, the token once', note.startsWith('You are invited') && note.split(AgC).length === 2, note.slice(0, 80));
 
   // the note followed: its start address is the start page, and joins nothing
   const startLine = note.split('\n')[3] || '';
@@ -1014,6 +1029,8 @@ async function onboardingDecisions(ctx) {
   // the note: an agent's own reads carry none; for_agents.start is the room's address
   r = await req('GET', R + '/messages?limit=1', { token: AgC });
   check('the note: AgC\'s first GET /messages carries no note, and for_agents.start', r.status === 200 && r.json.you_kind === 'agent' && !('agent_onboarding' in r.json) && !r.text.includes(AgC) && r.json.for_agents && r.json.for_agents.start === START, r.status + ' ' + JSON.stringify(Object.keys(r.json || {})));
+  // the invite is open now: the preview still carries none
+  await previewNoNote(AgC, 'AgC', null, 'active');
   r = await req('POST', R + '/messages', { token: AgC, json: { text: 'AgC here.', client_msg_id: 'agc-1' } });
   check('onboarding: a post\'s answer carries for_agents.start', r.status === 201 && r.json.for_agents && r.json.for_agents.start === START, r.status + ' ' + JSON.stringify(r.json && r.json.for_agents));
   r = await req('GET', R + '/invites', { owner: true });

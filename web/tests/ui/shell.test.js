@@ -1,12 +1,45 @@
 // UI scenarios: the room shell: error boundaries, the agent gate, layout, update banner, pull to refresh, the bell, access, unread, and the home page.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/shell.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
+const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, START_PAGE, badConsole, chromium, done, failed, run, shot } = require('./harness');
 
 // The device holds the agent Probe's invite (as an invite link stores it).
 const probeInvite = () => { try { localStorage.setItem('chat-invite:demo', 'tok_Probe'); } catch { /* the scenario fails visibly */ } };
 // ... and its person chose the web app (the gate's escape).
 const probeInWebApp = () => { try { localStorage.setItem('chat-invite:demo', 'tok_Probe'); localStorage.setItem('ac:agent-app:demo', '1'); } catch { /* the scenario fails visibly */ } };
+// A clipboard that takes what is copied (window.__copied), so a copy's toast
+// does not hang on the browser's permission.
+const fakeClipboard = () => { Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__copied = t; } }, configurable: true }); };
+const probeGate = '(' + probeInvite + ')(); (' + fakeClipboard + ')();';
+const INTRO = 'This invite belongs to Probe, an agent member of this room. Agents join through the API or MCP, with a tool that can send an HTTP header; an assistant that can only be given a link cannot join. Hand your agent this note:';
+const CLOSING = 'Opening the web app with this invite acts as Probe: if Probe has not joined yet, that joins the room. The same invite works in the web app, on REST and over MCP.';
+// The gate's note as the app builds it (agentNote) from the preview, which
+// carries none: GET /invite names Anthony as Probe's inviter, so the
+// member-made form, for the token on this device and the page's origin.
+const NOTE_BY_ANTHONY = '"Anthony" invited you to the Agent Chat room "demo" as the agent "Probe". Agent Chat hosts invite-only rooms where AI agents and people talk, play games and keep a shared board.\n' +
+  'To join you need a tool that can send an HTTP header: curl, an HTTP client, or an MCP client with custom headers. If you have none, you cannot join: stop here and tell your person.\n' +
+  'Send this header on every call to the room: X-Invite-Token: tok_Probe (or the same token as Authorization: Bearer). It is your password here: whoever holds it acts as "Probe", so never post it.\n' +
+  'Start here: GET https://chat.victorio.cloud/api/rooms/demo with that header. It changes nothing in the room, and its answer is your start page: what to do next, in order.\n' +
+  'Or, if your MCP client can set headers: connect to https://chat.victorio.cloud/api/rooms/demo/mcp with that header and call get_start_page for the same page. Neither step joins the room.';
+/** The gate's "What your agent reads first": closed, and nothing fetched for it. */
+async function startClosed(page, S) {
+  const d = await page.$eval('#agentStart', (e) => ({ open: e.open, summary: e.querySelector('summary').textContent.trim(), pre: !!e.querySelector('pre') }));
+  must(!d.open && d.summary === 'What your agent reads first' && !d.pre, 'the disclosure starts closed: ' + JSON.stringify(d));
+  must(!(S.hits || []).includes('GET /api/rooms/demo'), 'the start page was fetched before the disclosure was opened: ' + JSON.stringify(S.hits));
+}
+/** Opens it: the start page shows in its own scroll box, the whole page width kept. */
+async function startOpened(page, S) {
+  await page.click('#agentStart > summary');
+  await page.waitForSelector('#agentStartPage', { timeout: 5000 });
+  const box = await page.$eval('#agentStartPage', (e) => ({ text: e.textContent, sh: e.scrollHeight, ch: e.clientHeight, sw: e.scrollWidth, cw: e.clientWidth, oy: getComputedStyle(e).overflowY, h: Math.round(e.getBoundingClientRect().height), vh: window.innerHeight, doc: document.documentElement.scrollWidth, vw: window.innerWidth }));
+  must(box.text === START_PAGE, 'the start page, as served: ' + box.text.slice(0, 120));
+  must(box.oy === 'auto' && box.sh > box.ch && box.h <= box.vh * 0.56 + 2, 'the page scrolls in a box of bounded height: ' + JSON.stringify({ ...box, text: undefined }));
+  must(box.sw <= box.cw + 1 && box.doc <= box.vw + 1, 'nothing scrolls sideways: ' + JSON.stringify({ ...box, text: undefined }));
+  must((S.hits || []).filter((h) => h === 'GET /api/rooms/demo').length === 1, 'one read of the start page: ' + JSON.stringify(S.hits));
+  // the opened box and the closing sentence under it
+  await page.$eval('#agentStart', (e) => e.scrollIntoView({ block: 'start' }));
+  return { chars: box.text.length, boxHeight: box.h };
+}
 
 (async () => {
   // Error boundaries: a message the feed can't render (here malformed
@@ -55,21 +88,30 @@ const probeInWebApp = () => { try { localStorage.setItem('chat-invite:demo', 'to
   });
   // The device holds the agent's invite (a token is what reaches the gate:
   // without one the room answers 401): the gate shows the invite's note,
-  // five lines, from the preview.
-  await run('agent-gate', { state: { agentYou: true }, init: probeInvite }, async (page) => {
+  // five lines, which the app builds from the preview (it carries none).
+  await run('agent-gate', { state: { agentYou: true }, init: probeGate }, async (page, S) => {
     const out = {};
     await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
     out.block = await page.$eval('#agentBlock', e => e.textContent);
     out.intro = await page.$eval('#agentIntro', e => e.textContent.replace(/\s+/g, ' ').trim());
     out.note = await page.$eval('.agent-note', e => e.textContent.replace(/\s+/g, ' ').trim());
-    if (!/\/api\/rooms\/demo\/mcp/.test(out.block)) throw new Error('setup block must name the MCP endpoint: ' + out.block.slice(0, 80));
-    if (!/X-Invite-Token: tok_Probe/.test(out.block)) throw new Error('setup block must carry the invite header');
+    out.buttons = await page.$$eval('.agent-actions button', (bs) => bs.map((b) => b.textContent.trim()));
+    if (!/\/api\/rooms\/demo\/mcp/.test(out.block)) throw new Error('the note must name the MCP endpoint: ' + out.block.slice(0, 80));
+    if (!/X-Invite-Token: tok_Probe/.test(out.block)) throw new Error('the note must carry the invite header');
     must(out.block.split('\n').length === 5, 'the note is five lines: ' + out.block.split('\n').length);
     must(out.block.includes('Start here: GET https://chat.victorio.cloud/api/rooms/demo with that header'), 'the note names the start page: ' + out.block.slice(0, 200));
-    if (!/Probe/.test(out.intro)) throw new Error('intro must name the agent: ' + out.intro);
-    must(out.intro.includes('through the API or over MCP'), 'the intro says agents join through the API or over MCP: ' + out.intro);
-    must(out.note === 'This page restricts nothing: the same invite also works in this web app. It just leads with what agents use.', 'the closing sentence: ' + out.note);
+    must(out.block === NOTE_BY_ANTHONY, 'the note the app builds, member-made: ' + out.block.slice(0, 200));
+    must(out.intro === INTRO, 'the intro: ' + out.intro);
+    must(out.note === CLOSING, 'the closing sentence: ' + out.note);
+    must(JSON.stringify(out.buttons) === '["Copy the note","Open the web app anyway"]', 'the buttons: ' + JSON.stringify(out.buttons));
+    await startClosed(page, S);
     await shot(page, 'agent-gate.png');
+    // Copy the note: the note, and its toast
+    await page.click('#agentCopy');
+    await page.waitForFunction(() => /Note copied/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 4000 });
+    must(await page.evaluate(() => window.__copied) === out.block, 'Copy the note copies the note');
+    out.start = await startOpened(page, S);
+    await shot(page, 'agent-gate-start.png');
     await page.click('#agentApp');
     await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
     out.chatAfterEscape = true;
@@ -81,12 +123,12 @@ const probeInWebApp = () => { try { localStorage.setItem('chat-invite:demo', 'to
   });
 
   // An agent's invite opened in a browser with its token: the setup view
-  // comes from the preview (GET /invite), and nothing reads the room (which
+  // and its note come from the preview (GET /invite), and nothing reads the room (which
   // would open the invite as the agent) until the person picks the web app.
   await run('agent-gate-preview', { state: { agentYou: true }, hash: '#invite=tok_Probe' }, async (page, S) => {
     await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
     const block = await page.$eval('#agentBlock', e => e.textContent);
-    if (!/X-Invite-Token: tok_Probe/.test(block)) throw new Error('setup block must come from the preview: ' + block.slice(0, 80));
+    must(block === NOTE_BY_ANTHONY, 'the note is the app\'s, from the preview\'s inviter: ' + block.slice(0, 120));
     await page.waitForTimeout(800);
     const before = (S.hits || []).slice();
     if (!before.includes('GET /invite')) throw new Error('the preview was not asked: ' + JSON.stringify(before));
@@ -625,10 +667,108 @@ const probeInWebApp = () => { try { localStorage.setItem('chat-invite:demo', 'to
       return { chars: block.length };
     });
   }
+  // The owner's agent invite: the preview names no inviter, so the app's
+  // note is the owner-made form, the same text as the fallback's.
+  await run('agent-gate-owner-made', { state: { agentYou: true, probeBy: null }, init: probeInvite }, async (page, S) => {
+    await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+    const block = await page.$eval('#agentBlock', (e) => e.textContent);
+    must(block === FALLBACK, 'the owner-made note: ' + block.slice(0, 120));
+    must((S.hits || []).includes('GET /invite') && !(S.hits || []).includes('GET /messages'), 'from the preview, the room unread: ' + JSON.stringify(S.hits));
+    return { chars: block.length };
+  });
   await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
-  await run('agent-gate-dark', { state: { agentYou: true }, init: probeInvite, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
-  await run('agent-gate-mobile', { state: { agentYou: true }, init: probeInvite, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
-  await run('agent-gate-mobile-dark', { state: { agentYou: true }, init: probeInvite, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
+  // The gate at the other widths and schemes: closed, then opened (the
+  // start page in its own scroll box). At phone width the note shows whole
+  // (its box is not cut) and nothing scrolls sideways.
+  for (const [tag, o] of [['dark', { scheme: 'dark' }], ['mobile', { w: 390, h: 844, touch: true }], ['mobile-dark', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run('agent-gate-' + tag, { state: { agentYou: true }, init: probeInvite, ...o }, async (page, S) => {
+      await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+      await settle(page);
+      await startClosed(page, S);
+      must((await page.$eval('#agentBlock', (e) => e.textContent)) === NOTE_BY_ANTHONY, 'the note the app builds, member-made');
+      const fit = await page.$eval('#agentBlock', (e) => ({ sw: e.scrollWidth, cw: e.clientWidth, sh: e.scrollHeight, ch: e.clientHeight, doc: document.documentElement.scrollWidth, vw: window.innerWidth }));
+      must(fit.sw <= fit.cw + 1 && fit.doc <= fit.vw + 1, 'the note scrolls sideways: ' + JSON.stringify(fit));
+      if (o.w) must(fit.sh <= fit.ch + 1, 'the note is cut inside its box: ' + JSON.stringify(fit));
+      await shot(page, 'agent-gate-' + tag + '.png');
+      const start = await startOpened(page, S);
+      await settle(page);
+      await shot(page, 'agent-gate-start-' + tag + '.png');
+      return start;
+    });
+  }
+  // The start page did not load: the gate says so and offers Try again,
+  // which reads it again.
+  for (const [tag, o] of [['', {}], ['-mobile-dark', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run('agent-gate-start-failed' + tag, { state: { agentYou: true, startFail: 1 }, init: probeInvite, ...o }, async (page, S) => {
+      await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+      await page.click('#agentStart > summary');
+      await page.waitForSelector('#agentStartRetry', { timeout: 5000 });
+      const said = await page.$eval('#agentStart .agent-start-state', (e) => e.textContent.replace(/\s+/g, ' ').trim());
+      must(said === "Couldn't load the start page (HTTP 503).Try again", 'the failure and its way to try again: ' + said);
+      must(!(await page.$('#agentStartPage')), 'no page shown');
+      await page.$eval('#agentStart', (e) => e.scrollIntoView({ block: 'center' }));
+      await shot(page, 'agent-gate-start-failed' + tag + '.png');
+      await page.click('#agentStartRetry');
+      await page.waitForSelector('#agentStartPage', { timeout: 5000 });
+      const hits = (S.hits || []).filter((h) => h === 'GET /api/rooms/demo').length;
+      must(hits === 2 && (await page.$eval('#agentStartPage', (e) => e.textContent)) === START_PAGE, 'Try again reads the page again: ' + hits);
+      return { said, hits };
+    });
+  }
+  // Nothing joins before the person chooses. A device whose browser holds a
+  // push subscription (turned on in another room here) opens an agent's
+  // invite: until "Open the web app anyway" the page asks the room only
+  // with looks (GET /invite, the start page), whatever tab the address
+  // names and whatever wakes the page (it comes back into view, online, a
+  // storage change); the bell and Your voice are off meanwhile. The bell's
+  // status check, which runs access() and so opens an unused invite, comes
+  // after the choice.
+  const probePush = () => {
+    try {
+      if (!sessionStorage.getItem('seeded')) {
+        sessionStorage.setItem('seeded', '1');
+        localStorage.setItem('chat-invite:demo', 'tok_Probe');
+        localStorage.setItem('__fake_push_sub', 'https://fcm.googleapis.com/fcm/send/fake-other-room');
+        localStorage.setItem('chat-invite:demo-two', 'tok_two');
+        localStorage.setItem('chat-push-mode:/api/rooms/demo-two', 'all');
+      }
+    } catch { /* the scenario fails visibly */ }
+  };
+  for (const hash of ['', '#games', '#media', '#decisions']) {
+    await run('agent-gate-no-join' + (hash ? '-' + hash.slice(1) : ''), { state: { agentYou: true }, init: '(' + fakePush + ')(); (' + probePush + ')();', hash }, async (page, S, calls) => {
+      await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+      await settle(page, 300);
+      await page.evaluate(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('online'));
+        window.dispatchEvent(new StorageEvent('storage', { key: null }));
+      });
+      await settle(page, 300);
+      const roomCalls = () => calls.filter((c) => / \/api\/rooms\//.test(c));
+      const looksOnly = (list) => list.every((c) => /^GET \/api\/rooms\/demo(\/invite)?$/.test(c));
+      const early = roomCalls();
+      must(looksOnly(early) && early.includes('GET /api/rooms/demo/invite'), 'before the choice only looks reach the room: ' + JSON.stringify(early));
+      must(!(S.pushLog || []).length, 'the bell asked the room before the choice: ' + JSON.stringify(S.pushLog));
+      const off = await page.evaluate(() => ({ bells: [...document.querySelectorAll('.pushBtn')].map((b) => b.disabled), voice: document.getElementById('voiceBtn').disabled }));
+      must(off.bells.length === 2 && off.bells.every(Boolean) && off.voice, 'the bell and Your voice are off while the gate shows: ' + JSON.stringify(off));
+      await page.$$eval('.pushBtn', (bs) => bs.forEach((b) => b.click()));
+      must(!(await page.$('.pushMenu')), 'the bell opened its menu');
+      // the start page is a look too
+      await page.click('#agentStart > summary');
+      await page.waitForSelector('#agentStartPage', { timeout: 5000 });
+      await settle(page, 300);
+      const before = roomCalls();
+      must(looksOnly(before) && before.includes('GET /api/rooms/demo'), 'the start page is the only other call: ' + JSON.stringify(before));
+      await page.click('#agentApp');
+      await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
+      for (let i = 0; i < 250 && !(S.pushLog || []).includes('status tok_Probe'); i++) await new Promise((r) => setTimeout(r, 20));
+      const after = roomCalls().slice(before.length);
+      must((S.pushLog || []).includes('status tok_Probe'), 'the bell\'s status check runs after the choice: ' + JSON.stringify(S.pushLog));
+      must(after.some((c) => c.startsWith('GET /api/rooms/demo/messages')), 'the room is read after the choice: ' + JSON.stringify(after));
+      await page.waitForFunction(() => [...document.querySelectorAll('.pushBtn')].every((b) => !b.disabled) && !document.getElementById('voiceBtn').disabled, null, { timeout: 4000 });
+      return { early: early.length, before: before.length, after: after.length };
+    });
+  }
   // A person who opened the web app with an agent's invite: the members list
   // the Worker gives that invite holds its own row's link only, and no
   // row's note, so the rows show one link field and no Copy w/ Instructions.

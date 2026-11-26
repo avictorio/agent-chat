@@ -64,6 +64,9 @@ export function useRoomStream(opts: {
   onYou: (you: string) => void;
   /** show the agent setup view; resolves when the person picks the web app */
   onAgentGate: (g: { name: string; block: string }) => Promise<void>;
+  /** the agent gate is passed: the page may call room routes that join
+   *  (RoomShell holds them until then) */
+  onPassed: () => void;
   deny: (e: ApiError) => void;
   deniedRef: { current: boolean };
   closeRef: { current: () => void };
@@ -82,8 +85,8 @@ export function useRoomStream(opts: {
   // the room; the collaborators (feed, board, callbacks) are taken as
   // they are when it opens.
   useEffect(() => {
-    const { token, feed, board, gamesRef, speaker, setStatus, onYou, onAgentGate, deny, deniedRef } = live.current;
-    const fallbackBlock = (name: string) => agentNote(location.origin, room, name, token);
+    const { token, feed, board, gamesRef, speaker, setStatus, onYou, onAgentGate, onPassed, deny, deniedRef } = live.current;
+    const noteFor = (name: string, invitedBy?: string | null) => agentNote(location.origin, room, name, token, invitedBy);
     let cancelled = false;
     const streamRefLocal: { fn: () => void } = { fn: () => {} };
     // The stream being read: when it last said anything, whether it is
@@ -384,20 +387,26 @@ export function useRoomStream(opts: {
 
     (async () => {
       setStatus("connecting");
-      // An agent's invite opened in a browser: show the setup view from the
-      // preview (GET /invite), which leaves the invite unopened, and read
-      // nothing here until the person picks the web app - otherwise the
-      // first read would join the room as the agent. (The bell's status
-      // check, shell/push.tsx, is not held back: where the browser holds a
-      // push subscription it joins first.)
+      // An agent's invite opened in a browser: show the setup view, with the
+      // note agentNote builds from the preview (GET /invite, which leaves the
+      // invite unopened and carries no note), and read nothing here until
+      // the person picks the web app - otherwise the first read would join
+      // the room as the agent. Nothing else the page does on its own joins
+      // first either: RoomShell holds those calls (the bell's status check
+      // among them) until onPassed - after a person's preview, after the
+      // choice, or, when the preview failed, after the read below (which
+      // opens an unused invite itself). The views stay usable while the
+      // preview is in flight: a person who acts then (sends a message, say)
+      // is using the web app with this invite, which joins.
       if (token && !store("ac:agent-app:" + room)) {
         try {
           const pv = await client.invitePreview();
           if (cancelled) return;
           if (pv.invite && pv.invite.kind === "agent") {
-            await onAgentGate({ name: pv.invite.name, block: pv.agent_onboarding || fallbackBlock(pv.invite.name) });
+            await onAgentGate({ name: pv.invite.name, block: noteFor(pv.invite.name, pv.invite.invited_by) });
             if (cancelled) return;
           }
+          onPassed();
         } catch (e) {
           if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
             deny(e);
@@ -405,15 +414,16 @@ export function useRoomStream(opts: {
           }
           // no preview (an older server, a network error): the read below decides
         }
-      }
+      } else if (token) onPassed();
       // oxlint-disable-next-line no-unmodified-loop-condition -- the effect's cleanup sets cancelled; the feed and a refusal set the refs
       while (!cancelled && feed.lastRef.current === null && !deniedRef.current) {
         try {
           const d = await client.messages(undefined, BOOT_PAGE);
           if (cancelled) return;
+          onPassed();
           if (d.you) onYou(d.you);
           if (d.you_kind === "agent" && d.you && !store("ac:agent-app:" + room)) {
-            void onAgentGate({ name: d.you, block: fallbackBlock(d.you) });
+            void onAgentGate({ name: d.you, block: noteFor(d.you) });
           }
           if (d.room_state) board.applyState(d.room_state);
           const sorted = [...d.messages].sort((a, b) => a.id - b.id);

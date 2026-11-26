@@ -108,6 +108,21 @@ export function RoomShell({ room }: { room: string }) {
     const t = takeInvite(room);
     return { client: new RoomClient(room, t.token || null), token: t.token, offered: t.offered };
   }, [room]);
+  // Whether the agent gate is passed: this device chose the web app for the
+  // room before (ac:agent-app:), or useRoomStream says so (onPassed: the
+  // preview said a person's invite, the person picked the web app, or the
+  // app read the room itself after the preview failed). Until then the page
+  // makes no call of its own to a room route that joins, that read aside:
+  // each runs access() on the server, which opens an unused invite, so an
+  // agent's invite opened in a browser would join before the person chose.
+  // Held meanwhile: the bell's status check, the Games and Media views'
+  // loads and a board tab's load (a #games, #media or board hash). Off
+  // while the gate shows: the bell's menu and Your voice (its dialog reads
+  // GET /voice). A page with no token or a refused one is denied and never
+  // passes; its token joins nothing, so its bell and Your voice work as on
+  // any page.
+  const [passed, setPassed] = useState(() => !!token && !!store("ac:agent-app:" + room));
+  const roomCallsOk = gate === null && (passed || denied);
 
   // A link carrying a different invite than the one saved here: look at it
   // first (GET /invite, which leaves it unopened) while the room loads as
@@ -196,8 +211,8 @@ export function RoomShell({ room }: { room: string }) {
   const board = useBoardData({ client, tabRef, deny, deniedRef });
   const { refreshIfStale } = board;
   useEffect(() => {
-    if (tab !== "chat" && tab !== "games" && tab !== "media") refreshIfStale();
-  }, [tab, refreshIfStale]);
+    if (passed && tab !== "chat" && tab !== "games" && tab !== "media") refreshIfStale();
+  }, [passed, tab, refreshIfStale]);
 
   const feed = useMessages({ tabRef, nameRef, applyState: board.applyState });
   useLayoutEffect(() => {
@@ -330,7 +345,7 @@ export function RoomShell({ room }: { room: string }) {
     update();
     return games.subscribe(update);
   }, [games]);
-  const push = usePush(client, toast);
+  const push = usePush(client, toast, passed, roomCallsOk);
   const rx = useReactions({
     client,
     who,
@@ -365,6 +380,7 @@ export function RoomShell({ room }: { room: string }) {
         gateDoneRef.current = resolve;
         setGate(g);
       }),
+    onPassed: () => setPassed(true),
     deny,
     deniedRef,
     closeRef: streamCloseRef,
@@ -517,6 +533,7 @@ export function RoomShell({ room }: { room: string }) {
         copyLink={copyLink}
         push={push}
         voiceHidden={!token}
+        voiceDisabled={!roomCallsOk}
         onVoice={() => voiceRef.current?.open()}
         install={inst}
       />
@@ -548,6 +565,7 @@ export function RoomShell({ room }: { room: string }) {
             label={push.label}
             title={push.label}
             hidden={!push.visible}
+            disabled={!push.usable}
             onClick={(e) => push.bellClick(e.currentTarget)}
           >
             <I d={["M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z", "M10 20a2.2 2.2 0 0 0 4 0"]} />
@@ -568,8 +586,10 @@ export function RoomShell({ room }: { room: string }) {
           name={gate?.name ?? ""}
           block={gate?.block ?? ""}
           hidden={!gate}
+          loadStart={() => client.startPage()}
           onEscape={() => {
             store("ac:agent-app:" + room, "1");
+            setPassed(true);
             setGate(null);
             show("chat");
             gateDoneRef.current?.();
@@ -595,7 +615,7 @@ export function RoomShell({ room }: { room: string }) {
         <section className="view" id="view-games" hidden={denied || gate !== null || tab !== "games"}>
           <ErrorBoundary label="the games">
             <GamesView
-              active={!denied && !gate && tab === "games"}
+              active={passed && !denied && !gate && tab === "games"}
               onNewGame={(game?: string) => {
                 setNavOpen(false);
                 newGameRef.current?.open(game);
@@ -605,7 +625,7 @@ export function RoomShell({ room }: { room: string }) {
         </section>
         <section className="view" id="view-media" hidden={denied || gate !== null || tab !== "media"}>
           <ErrorBoundary label="the media shelf">
-            <MediaView active={!denied && !gate && tab === "media"} onJump={jumpToMessage} />
+            <MediaView active={passed && !denied && !gate && tab === "media"} onJump={jumpToMessage} />
           </ErrorBoundary>
         </section>
         <BoardSections tab={denied || gate ? "" : tab} photo={photo} />
