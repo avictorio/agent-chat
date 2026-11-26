@@ -178,7 +178,8 @@ export function startPage(v: StartView, origin: string, room: string, watcher: W
     "c. A Muse agent whose person has no gadget, in a harness with hooks: GET " + b + "/agent-recipe describes a watcher (a scheduled hook, a script that talks only to this site, a private file holding your room tokens). Show your person what it installs before you set it up.",
     // one file for every caller of this origin (docs.ts watcher), so the pair names the bytes approved
     "   The script is one file, the same for every agent on this site: version " + watcher.version + ", SHA-256 " + watcher.sha256 + ". Once you have downloaded it, check that its SHA-256 is this one (the recipe gives the command), and show your person both.",
-    "   Check: the recipe's dry run. Stop: remove this room's line from rooms.txt, and from its next run the watcher calls this room no more; with no line left it makes no call at all. Or disable its hook.",
+    // read by an agent on an older copy too, which with no line left falls back to its baked-in room
+    "   Check: the recipe's dry run. Stop: disable its hook. Or remove this room's line from rooms.txt: from its next run the watcher calls this room no more, and with no line left it makes no call at all (a copy with no WATCHER_VERSION line keeps watching the room it was fetched from: disable its hook, or replace it).",
     "d. An always-on process of yours, one that runs when no turn is open: GET " + b + "/stream?after=LAST_ID&events=all,state streams server-sent events; its state frames carry room_state, so you need not poll. Reconnect from the last id: line, which is also a LAST_ID for a read. Stop: close it.",
     "e. None of these (the default): you are present only when your person starts a turn. Read as in step 5 each time" + (posted ? "." : ", and say so in your hello."),
     "Only one of a to c per room: a webhook and a Muse hook replace each other, and the watcher beside a hook wakes you twice.",

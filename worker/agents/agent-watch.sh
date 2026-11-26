@@ -12,9 +12,10 @@
 WATCHER_VERSION="2026-11-26"
 
 # Rooms come only from a registry file in the state dir (rooms.txt): one
-# line per room, "room token" (space- or tab-separated); a blank line, or
-# one whose first word starts with #, names no room. With no registry, or
-# none of its lines naming a room, a run makes no network call: it logs
+# line per room, "room token" (separated by spaces, tabs or a CR); a
+# blank line, or one whose first word starts with #, names no room, and a
+# line that is not a room name and a token is skipped. With no registry,
+# or none of its lines naming a room, a run makes no network call: it logs
 # that there is nothing to watch and ends. The script asks the API for
 # your member name in each room and caches it; a name given as a third
 # field (older registries) is used as it is. The watcher keeps one cursor per room
@@ -37,15 +38,20 @@ WATCHER_VERSION="2026-11-26"
 # A token never goes on a command line, where any local user can read it
 # (ps): each room's poll writes its token header into the run's private
 # temporary directory with the shell's own printf, and every curl call
-# reads it from that file (-H @file, curl 7.55 or later). Everything the
-# script writes is created readable by its user alone (umask 077). Under
-# the state dir it keeps, per room, a cursor, the member name and the
-# awaiting signature, and no copy of the messages: the wake payload
-# carries them.
+# reads it from that file (-H @file, curl 7.55 or later; with an older
+# curl a run makes no call). Message and game text reaches jq on stdin or
+# from a file, never as an argument. Everything the script writes is
+# created readable by its user alone (umask 077), and a live run first
+# makes the state dir, the registry and the state files private (700 and
+# 600), so what an older copy made is private too. Under the state dir it
+# keeps, per room, a cursor, the member name and the awaiting signature,
+# and no copy of the messages: the wake payload carries them.
 #
-# A cursor advances only past message frames actually processed, and every
-# processed frame's id is persisted before the run ends, so a killed run
-# loses nothing. The cursor
+# A cursor advances only past message frames actually processed, and it is
+# saved at the end of the run, after the wake (if any) is built and just
+# before it is handed over, so a run that fails or is killed before then
+# saves no cursor, and the next run reads those messages again rather than
+# skipping them. The cursor
 # is a delivery number - a message frame's "id:" line, or a read's last_id -
 # never the message's own id: a message published late or sent again with
 # new media keeps its id but arrives under a higher number, and a cursor
@@ -86,13 +92,31 @@ trap 'rm -rf "$TMPD"' EXIT
 # Each entry is "room<TAB>token<TAB>self" in $TMPD/rooms.list.
 LIST="$TMPD/rooms.list"
 : > "$LIST"
+# A line is taken only as "room token": a room name as the site writes
+# one and a token in its alphabet. Anything else (fields swapped, a token
+# alone, a path, shell or curl glob characters, no token) would put a
+# token into a URL, a log line or a file name, or a file outside the
+# state dir, or call the site without a token: such a line is skipped,
+# and the log names its number, never its content. The characters are
+# listed, not given as ranges, so no locale widens them.
+ROOM_RE='^[abcdefghijklmnopqrstuvwxyz0123456789][abcdefghijklmnopqrstuvwxyz0123456789_-]{0,63}$'
+TOKEN_RE='^[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-]+$'
 if [ -f "$REGISTRY" ]; then
-  tr '\t' ' ' < "$REGISTRY" > "$TMPD/registry.txt"
+  # A tab or a CR (a registry saved with CRLF line ends) separates fields
+  # as a space does, and a UTF-8 byte order mark before the first line is
+  # dropped, so neither turns a comment or a name into something else.
+  LC_ALL=C awk 'NR == 1 { sub(/^\357\273\277/, "") } { gsub(/[\t\r]/, " "); print }' "$REGISTRY" > "$TMPD/registry.txt"
+  LINE_NO=0
   while IFS=' ' read -r R T S || [ -n "${R:-}" ]; do
+    LINE_NO=$((LINE_NO + 1))
     case "${R:-}" in
       ""|\#*) continue ;;
     esac
-    printf '%s\t%s\t%s\n' "$R" "${T:-}" "${S:-}" >> "$LIST"
+    if [[ "$R" =~ $ROOM_RE ]] && [[ "${T:-}" =~ $TOKEN_RE ]]; then
+      printf '%s\t%s\t%s\n' "$R" "$T" "${S:-}" >> "$LIST"
+    else
+      log "rooms.txt line $LINE_NO is not \"room token\"; skipped"
+    fi
   done < "$TMPD/registry.txt"
   # One line per room. A re-invite's line appended next to the old one
   # used to start two polls of the room that shared its scratch files:
@@ -106,6 +130,31 @@ if [ -f "$REGISTRY" ]; then
     log "rooms.txt lists $R more than once; using its last line"
   done < "$TMPD/rooms.dups"
   mv "$TMPD/rooms.dedup" "$LIST"
+fi
+# What the watcher keeps is private whoever made it: the state dir (700:
+# its file names are room names), the registry (it holds the tokens), an
+# invite.token and any ROOM.jsonl an older copy left there, and, for each
+# room listed (validated above, so every path stays in the state dir),
+# its cursor, name and awaiting files. Modes only: nothing is removed. A
+# file whose mode cannot change (another owner's, a read-only disk) is
+# left as it is: chmod goes on to the rest, and the run goes on. A dry
+# run leaves the state dir as it found it, modes included.
+if [ "$DRY" = "0" ]; then
+  chmod 700 "$STATE_DIR" 2>/dev/null || true
+  PRIVATE=()
+  if [ -f "$REGISTRY" ]; then PRIVATE+=("$REGISTRY"); fi
+  if [ -f "$STATE_DIR/invite.token" ]; then PRIVATE+=("$STATE_DIR/invite.token"); fi
+  for F in "$STATE_DIR"/*.jsonl; do
+    if [ -f "$F" ]; then PRIVATE+=("$F"); fi
+  done
+  while IFS=$'\t' read -r R REST; do
+    for F in "$STATE_DIR/$R.cursor" "$STATE_DIR/$R.self" "$STATE_DIR/$R.awaiting"; do
+      if [ -f "$F" ]; then PRIVATE+=("$F"); fi
+    done
+  done < "$LIST"
+  if [ "${#PRIVATE[@]}" -gt 0 ]; then
+    chmod 600 "${PRIVATE[@]}" 2>/dev/null || true
+  fi
 fi
 # Nothing names a room: no call at all, so removing the last line (or
 # never writing the file) stops the watcher reaching the site.
@@ -121,6 +170,31 @@ if [ ! -s "$LIST" ]; then
     silent "dry-run: nothing to watch"
   else
     silent "nothing to watch"
+  fi
+  exit 0
+fi
+
+# Every call reads its token header from a file (-H @file), which curl
+# does from 7.55: an older curl sends no token, and every run would only
+# report the rooms failed. Checked once, before any call.
+CURL_TOO_OLD=""
+if ! command -v curl >/dev/null 2>&1; then
+  CURL_TOO_OLD="curl is not installed"
+else
+  CURL_V=$(curl --version 2>/dev/null | awk 'NR == 1 { print $2 }' || true)
+  CURL_RE='^([0123456789]+)\.([0123456789]+)'
+  if [[ "$CURL_V" =~ $CURL_RE ]]; then
+    if [ "${BASH_REMATCH[1]}" -lt 7 ] || { [ "${BASH_REMATCH[1]}" -eq 7 ] && [ "${BASH_REMATCH[2]}" -lt 55 ]; }; then
+      CURL_TOO_OLD="curl $CURL_V is older than 7.55"
+    fi
+  fi
+fi
+if [ -n "$CURL_TOO_OLD" ]; then
+  log "$CURL_TOO_OLD: the watcher needs curl 7.55 or later to send your token from a file; install a newer curl. Until then it makes no call."
+  if [ "$DRY" = "1" ]; then
+    silent "dry-run: $CURL_TOO_OLD"
+  else
+    silent "$CURL_TOO_OLD"
   fi
   exit 0
 fi
@@ -179,7 +253,7 @@ poll_room() {
   # does not replay history. The same read resolves the member name.
   if [ ! -f "$CURSOR_FILE" ]; then
     local INIT_RESP=""
-    INIT_RESP=$(curl --fail --silent --show-error --max-time 15 "${AUTH_ARGS[@]}" "$BASE/messages?limit=1" 2>/dev/null || true)
+    INIT_RESP=$(curl -g --fail --silent --show-error --max-time 15 "${AUTH_ARGS[@]}" "$BASE/messages?limit=1" 2>/dev/null || true)
     local INIT_ID=""
     if [ -n "$INIT_RESP" ]; then
       INIT_ID=$(printf '%s' "$INIT_RESP" | jq -r '.last_id // empty' 2>/dev/null || true)
@@ -209,7 +283,7 @@ poll_room() {
   # Still no name (a cursor from an earlier run, the cached name gone):
   # ask before listening, so the stream slice can tell your own posts.
   if [ -z "$P_SELF" ]; then
-    P_SELF=$(curl --fail --silent --show-error --max-time 10 "${AUTH_ARGS[@]}" "$BASE/me" 2>/dev/null | jq -r '.name // empty' 2>/dev/null || true)
+    P_SELF=$(curl -g --fail --silent --show-error --max-time 10 "${AUTH_ARGS[@]}" "$BASE/me" 2>/dev/null | jq -r '.name // empty' 2>/dev/null || true)
     if [ -n "$P_SELF" ] && [ "$DRY" = "0" ]; then
       printf '%s' "$P_SELF" > "$SELF_FILE"
     fi
@@ -226,7 +300,7 @@ poll_room() {
   local STREAM_BASE="${AGENTCHAT_STREAM_BASE:-$BASE/stream}"
   local FIFO="$RDIR/stream.fifo"
   mkfifo "$FIFO"
-  curl -sN --fail --no-buffer --max-time $((SLICE + 5)) "${AUTH_ARGS[@]}" "$STREAM_BASE?after=$CURSOR&events=all" > "$FIFO" &
+  curl -g -sN --fail --no-buffer --max-time $((SLICE + 5)) "${AUTH_ARGS[@]}" "$STREAM_BASE?after=$CURSOR&events=all" > "$FIFO" &
   local CPID=$!
   exec 3< "$FIFO"
 
@@ -303,7 +377,10 @@ poll_room() {
     esac
   done
 
-  exec 3<&- 2>/dev/null || true
+  # The braces scope the silence to closing the descriptor: on exec itself
+  # the redirect would send the rest of this poll's stderr (its log lines
+  # included) to /dev/null.
+  { exec 3<&-; } 2>/dev/null || true
   kill "$CPID" 2>/dev/null || true
   wait "$CPID" 2>/dev/null || true
 
@@ -316,7 +393,7 @@ poll_room() {
   fi
   if [ "$SAW_LINE" = "0" ] && [ ! -s "$COLLECTED" ]; then
     local RESP=""
-    if RESP=$(curl --fail --silent --show-error --max-time $((FALLBACK_WAIT + 5)) "${AUTH_ARGS[@]}" "$BASE/messages?after=$START_CURSOR&wait=$FALLBACK_WAIT" 2>/dev/null); then
+    if RESP=$(curl -g --fail --silent --show-error --max-time $((FALLBACK_WAIT + 5)) "${AUTH_ARGS[@]}" "$BASE/messages?after=$START_CURSOR&wait=$FALLBACK_WAIT" 2>/dev/null); then
       READ_OK=1
       local LAST_ID=""
       LAST_ID=$(printf '%s' "$RESP" | jq -r '.last_id // empty' 2>/dev/null || true)
@@ -326,7 +403,7 @@ poll_room() {
         if [ "$LAST_ID" -ge 0 ] 2>/dev/null; then
           CURSOR=$LAST_ID
         fi
-        printf '%s' "$RESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' > "$COLLECTED" || true
+        printf '%s' "$RESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' > "$COLLECTED" 2>/dev/null || true
         SAW_FRAME=1
         log "stream unavailable in $P_ROOM; used REST fallback"
       fi
@@ -351,7 +428,7 @@ poll_room() {
   local FRAME_IDS="[]"
   FRAME_IDS=$(jq -s -c '[.[] | .game.id? // empty]' "$GAMES" 2>/dev/null || echo "[]")
   local SRESP=""
-  if SRESP=$(curl --fail --silent --show-error --max-time 10 "${AUTH_ARGS[@]}" "$BASE/messages?after=$CURSOR&wait=0" 2>/dev/null); then
+  if SRESP=$(curl -g --fail --silent --show-error --max-time 10 "${AUTH_ARGS[@]}" "$BASE/messages?after=$CURSOR&wait=0" 2>/dev/null); then
     READ_OK=1
     if [ -z "$P_SELF" ]; then
       P_SELF=$(printf '%s' "$SRESP" | jq -r '.you // empty' 2>/dev/null || true)
@@ -360,7 +437,7 @@ poll_room() {
       fi
     fi
     # Anything posted since the stream slice closed is real news too.
-    printf '%s' "$SRESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' >> "$COLLECTED" || true
+    printf '%s' "$SRESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' >> "$COLLECTED" 2>/dev/null || true
     local S_LAST=""
     S_LAST=$(printf '%s' "$SRESP" | jq -r '.last_id // empty' 2>/dev/null || true)
     # last_id answers a read from this cursor, made after the stream
@@ -381,14 +458,15 @@ poll_room() {
       OLD_SIG=$(cat "$AWAIT_FILE")
     fi
     if [ "$SIG" != "$OLD_SIG" ]; then
+      # staged with the cursor, and saved with it (commit_polls)
       if [ "$DRY" = "0" ]; then
-        printf '%s' "$SIG" > "$AWAIT_FILE.tmp.$$"
-        mv "$AWAIT_FILE.tmp.$$" "$AWAIT_FILE"
+        printf '%s' "$SIG" > "$RDIR/awaiting.next"
       fi
       local FRESH="[]"
       FRESH=$(printf '%s' "$ITEMS" | jq -c --argjson seen "$FRAME_IDS" '[.[] | select((.id as $i | $seen | any(. == $i)) | not)]' 2>/dev/null || echo "[]")
       if [ "$FRESH" != "[]" ]; then
-        jq -n --argjson items "$FRESH" '{awaiting_games: $items, via: "room_state"}' >> "$GAMES"
+        # the items come from the server: they go to jq on stdin, never as an argument
+        printf '%s' "$FRESH" | jq '{awaiting_games: ., via: "room_state"}' >> "$GAMES"
       fi
     fi
   fi
@@ -398,9 +476,10 @@ poll_room() {
     return 0
   fi
 
+  # The new cursor is staged here and saved once the wake is built
+  # (commit_polls), so a run that fails before then moves no cursor.
   if [ "$DRY" = "0" ]; then
-    printf '%s' "$CURSOR" > "$CURSOR_FILE.tmp.$$"
-    mv "$CURSOR_FILE.tmp.$$" "$CURSOR_FILE"
+    printf '%s' "$CURSOR" > "$RDIR/cursor.next"
   fi
 
   local MC=0 GC=0
@@ -445,21 +524,43 @@ for N in "${!ORDER[@]}"; do
   fi
   if [ "$COUNT" -gt 0 ]; then
     TOTAL_COUNT=$((TOTAL_COUNT + COUNT))
-    MSGS_JSON=$(jq -s '.' "$RD/messages.jsonl")
-    GAMES_JSON=$(jq -s '.' "$RD/games.jsonl")
     if [ -z "$FIRST_ROOM" ]; then
       FIRST_ROOM="$R"
-      FIRST_MSGS=$(printf '%s' "$MSGS_JSON" | jq 'length')
-      FIRST_GAMES=$(printf '%s' "$GAMES_JSON" | jq 'length')
+      FIRST_MSGS=$(jq -s 'length' "$RD/messages.jsonl")
+      FIRST_GAMES=$(jq -s 'length' "$RD/games.jsonl")
     fi
-    jq -n --arg room "$R" --argjson messages "$MSGS_JSON" --argjson games "$GAMES_JSON" \
+    # Message and game text is read from the poll's files (--slurpfile),
+    # never passed as an argument: a command line is readable by other
+    # local users, and one argument over the kernel's limit fails the run.
+    jq -n --arg room "$R" --slurpfile messages "$RD/messages.jsonl" --slurpfile games "$RD/games.jsonl" \
       '{room: $room} + (if ($messages | length) > 0 then {messages: $messages} else {} end) + (if ($games | length) > 0 then {games: $games} else {} end)' >> "$ROOMS_JSON"
   fi
 done
 
 log "polled $NROOMS room(s)"
 
+# Saves what each poll staged (a dry run stages nothing): its cursor and,
+# when it changed, its awaiting signature, each written atomically. It
+# runs at the end, after the wake (if any) is built and just before the
+# result is handed over, so a run that fails or is killed before then
+# saves no cursor, and the next run reads those messages again.
+commit_polls() {
+  local N R K V
+  for N in "${!ORDER[@]}"; do
+    R=$(printf '%s' "${ORDER[$N]}" | cut -f1)
+    for K in cursor awaiting; do
+      if [ -f "$TMPD/line.$N/$K.next" ]; then
+        V=""
+        IFS= read -r V < "$TMPD/line.$N/$K.next" || true
+        printf '%s' "$V" > "$STATE_DIR/$R.$K.tmp.$$"
+        mv "$STATE_DIR/$R.$K.tmp.$$" "$STATE_DIR/$R.$K"
+      fi
+    done
+  done
+}
+
 if [ "$TOTAL_COUNT" = "0" ]; then
+  commit_polls
   if [ "$FAILED" = "$NROOMS" ]; then
     if [ "$DRY" = "1" ]; then
       silent "dry-run: room fetch failed"
@@ -490,6 +591,8 @@ if [ "$DRY" = "1" ]; then
   wake "dry-run: would wake on room activity" "{\"count\":$TOTAL_COUNT}"
   exit 0
 fi
+
+commit_polls
 
 if [ "$ACTIVE_ROOMS" = "1" ] && [ "$FIRST_MSGS" -gt 0 ]; then
   wake "new messages in $FIRST_ROOM" "$PAYLOAD"

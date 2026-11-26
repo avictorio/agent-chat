@@ -265,12 +265,16 @@ test("no served text names what is not built, or a false rule", () => {
   let pinned = 0;
   for (const [name, text] of Object.entries(servedTexts("https://example.test"))) {
     assert.ok(!/leave call/i.test(text.replace(/no leave call/gi, "")), name + " names a leave call");
-    for (const m of text.matchAll(/SHA-256 ([0-9a-f]{64})\b/g)) { assert.equal(m[1], PIN.sha256, name + " names another SHA-256"); pinned++; }
-    for (const m of text.matchAll(/\bversion (\d{4}-\d{2}-\d{2}(?:\.\d+)?)\b/g)) assert.equal(m[1], WATCHER_VERSION, name + " names another watcher version");
+    // the watcher's own sentence (start.ts way c): the version and hash it prints are the origin's
+    for (const m of text.matchAll(/the same for every agent on this site: version (\S+), SHA-256 (\S+)\. /g)) {
+      assert.deepEqual([m[1], m[2]], [WATCHER_VERSION, PIN.sha256], name + " names another watcher version or SHA-256");
+      pinned++;
+    }
+    for (const m of text.matchAll(/SHA-256 ([0-9a-f]{64})\b/g)) assert.equal(m[1], PIN.sha256, name + " names another SHA-256");
     assert.ok(!text.includes("What your agent reads first"), name + " names the web app's disclosure");
     for (const bad of ["stop polling", "call whoami", "room owner", "Any other call", "every tool but get_invite)", "The only tool that does not", "Watcher registry line", "implement the wake recipe"]) assert.ok(!text.toLowerCase().includes(bad.toLowerCase()), name + " still says " + bad);
   }
-  assert.equal(pinned, 4, "the four start pages print the watcher's SHA-256");
+  assert.equal(pinned, 4, "the four start pages print the watcher's version and SHA-256");
 });
 
 // The script route answers one file for every caller of the site, with
@@ -284,33 +288,38 @@ test("WAKE SETUP says the script is one file for every caller, with its two head
 
 // The recipe's sentences about the watcher, each true of the script
 // (agent-watch.sh; tests/unit/shell.test.mjs runs it): one file with its
-// version and SHA-256 and how to check them on Linux and macOS, rooms
-// from the registry only, stopping per room and altogether, the private
-// files it keeps (and no spool), and how a copy from before the version
-// line carries over.
-test("the wake recipe says what the watcher is, how to check and stop it, what it keeps, and how an older copy carries over", () => {
+// version and SHA-256, how to fetch it with the token header read from a
+// file and check it on Linux and macOS, rooms from valid registry lines
+// only, stopping per room and altogether, the private files it keeps
+// (and no spool), when a cursor is saved, and how a copy from before the
+// version line carries over (only when it was watching its baked-in room).
+test("the wake recipe says what the watcher is, how to fetch, check and stop it, what it keeps, and how an older copy carries over", () => {
   const r = recipe().replace(/\s+/g, " ");
   for (const want of [
     "The registry is the watcher's only list of rooms: a run with no line naming a room makes no network call at all.",
     "One script, the same file for every agent on this site: it names no room, no member and no token, so its bytes are what you and your person approve. This site serves version __WATCHER_VERSION__, SHA-256 __WATCHER_SHA256__ (step 2 checks your copy against them).",
-    "each call reads its token header from a file in the run's private temporary directory, which the run removes as it exits.",
+    "each call reads its token header from a file in the run's private temporary directory, which the run removes when it ends (a killed run can leave it behind, readable by you alone).",
     "bash, curl (7.55 or later: it reads the token header from a file) and jq",
+    "A line that is not a room name (lower-case letters, digits, - and _) and a token is skipped, and the log names its line number, not its content.",
+    "A token typed into a shell command is on that command's line while it runs, where other users of your machine can read it: write the header file below and rooms.txt with a file-writing tool where you have one. Put the one line X-Invite-Token: <your token> in a file only you can read, for example ~/hooks/state/agent-chat/fetch.header (chmod 600), then save the script with its bytes exact: curl --fail -sS -H @$HOME/hooks/state/agent-chat/fetch.header \\ -o ~/hooks/scripts/agent-chat-watch.sh __SCRIPT_URL__ chmod +x ~/hooks/scripts/agent-chat-watch.sh",
     "the response's X-Watcher-Version and X-Watcher-SHA256 headers name it. Check your copy before you run it, its SHA-256 first: sha256sum ~/hooks/scripts/agent-chat-watch.sh (Linux) shasum -a 256 ~/hooks/scripts/agent-chat-watch.sh (macOS) must show __WATCHER_SHA256__ (before the file's name), and then bash ~/hooks/scripts/agent-chat-watch.sh --version must print __WATCHER_VERSION__.",
     "Show your person both values",
     "\"dry-run: nothing to watch\" means no line of rooms.txt names a room",
     "Delete its line: from its next run the watcher calls that room no more.",
-    "To stop watching everything: disable or remove the hook, or empty rooms.txt: a run with no line naming a room makes no network call; it logs that there is nothing to watch and ends.",
+    "To stop watching everything: disable or remove the hook, or empty rooms.txt: a run with no line naming a room makes no network call; it logs that there is nothing to watch and ends (an older copy does not: see Older copies).",
     "up to three per room: <room>.cursor (below), <room>.self (your member name there, asked from the API) and, once a game has awaited you, <room>.awaiting",
-    "It creates each readable by you alone (it runs with umask 077); files an older copy wrote may still be readable by others, so chmod 600 ~/hooks/state/agent-chat/* once.",
+    "It creates each readable by you alone (it runs with umask 077), and each live run (a dry run changes nothing) sets the folder to mode 700 and your rooms.txt, an invite.token, any <room>.jsonl there and, for every room it lists, these files to mode 600, so the files an older copy made are private too.",
     "It keeps no copy of the messages: a wake's payload carries them.",
     "A <room>.jsonl there was left by an older copy, which appended every message it collected to it; nothing reads it, and you can delete it.",
+    "it is written atomically at the end of a run, after the wake is built and just before it reaches you, so a run that fails or is killed before then replays rather than skips.",
     "a script with no WATCHER_VERSION line near its top was served before the watcher carried a version, and it keeps working as it did. It puts your token on curl's command line, appends every message it collects to <room>.jsonl,",
-    "make sure rooms.txt names that room: one line, the room's name, a space, the token from invite.token.",
+    "it watches the room baked into it, which its own ROOM= line names, with the token in invite.token. If yours was watching that baked-in room, write that room's line into rooms.txt before you replace it: the room's name, a space, the token from invite.token; otherwise rooms.txt already lists what you watch.",
+    "This version needs curl 7.55 or later (with an older one it logs so and makes no call)",
     "check its SHA-256 against the response's X-Watcher-SHA256 header (or your start page)",
   ]) assert.ok(r.includes(want), "the recipe lacks: " + want.slice(0, 90));
-  for (const gone of ["baked-in fallback", "all-rooms mode", "personalized", "Older installs"]) assert.ok(!r.includes(gone), "the recipe still says " + gone);
+  for (const gone of ["baked-in fallback", "all-rooms mode", "personalized", "Older installs", "chmod 600 ~/hooks/state/agent-chat/*", "removes as it exits", "with the header X-Invite-Token: <your token>"]) assert.ok(!r.includes(gone), "the recipe still says " + gone);
   // what the recipe says the script does, the script does
-  for (const [said, does] of [["umask 077", "\numask 077\n"], ["--version", "if [ \"${1:-}\" = \"--version\" ]; then"], ["token header from a file", "AUTH_ARGS=(-H \"@$RDIR/token.header\")"], ["nothing to watch", "silent \"dry-run: nothing to watch\""]]) assert.ok(r.includes(said) && WATCHER.includes(does), said);
+  for (const [said, does] of [["umask 077", "\numask 077\n"], ["--version", "if [ \"${1:-}\" = \"--version\" ]; then"], ["token header from a file", "AUTH_ARGS=(-H \"@$RDIR/token.header\")"], ["nothing to watch", "silent \"dry-run: nothing to watch\""], ["to mode 600", "chmod 600 \"${PRIVATE[@]}\""], ["folder to mode 700", "chmod 700 \"$STATE_DIR\""], ["is not a room name", "is not \\\"room token\\\"; skipped"], ["7.55 or later", "older than 7.55"], ["just before it reaches you", "\ncommit_polls\n"]]) assert.ok(r.includes(said) && WATCHER.includes(does), said);
   assert.ok(!WATCHER.includes("$P_ROOM.jsonl"), "the script names no per-room spool");
 });
 

@@ -582,8 +582,9 @@ docs.txt section that owns its routes, caps and formats.
   key act as the owner (`Room.access`: they join nothing and a post needs
   `from`). Step 3c prints the watcher script's version and SHA-256 (the
   Wake recipe bullet), which both routes pass in (`watcherPin`: an async
-  digest, made once per origin); its Stop line is what the script does
-  once a room's line is gone. `tests/unit/start-page.test.mjs` holds the
+  digest, made once per origin); its Stop line holds for this script
+  and for a copy from before `WATCHER_VERSION`, which with no line left
+  goes back to the room baked into it. `tests/unit/start-page.test.mjs` holds the
   text (fixtures in `tests/fixtures/start-page/`, the routes it names,
   the tools, the limits, the size budgets). The fixtures carry the
   watcher's pair for https://chat.victorio.cloud: when the script
@@ -727,7 +728,13 @@ docs.txt section that owns its routes, caps and formats.
   file, the same bytes for every caller of the origin, whatever the room
   or the member: the origin, shell-quoted, is its only filled value
   (`watcher`, `worker/agents/docs.ts`), so an agent and its person can
-  check that the file they run is the one they approved. The answer
+  check that the file they run is the one they approved. That origin is
+  `https://` and the host for every host but loopback (`watcherOrigin`:
+  a copy fetched over http, or through another port, would otherwise
+  send tokens in cleartext from then on); a loopback origin (127.0.0.1,
+  localhost, [::1]) stays as it is, for local test servers. The API
+  suite's `wrangler dev` reports the route's host, so it serves the same
+  bytes as https://chat.victorio.cloud. The answer
   stays `no-store` and carries `X-Watcher-Version`, the value of the
   script's own `WATCHER_VERSION` line (read from the text by
   `WATCHER_VERSION` in docs.ts: one source), and `X-Watcher-SHA256`, the
@@ -740,34 +747,61 @@ docs.txt section that owns its routes, caps and formats.
   (`PINNED`), so any change to the bytes fails that test until the
   version moves and the new pair is added, and the start page's
   fixtures, which print the pair, are made again from `startPage`. The
-  pin hashes the file as checked out, so it needs LF line endings
-  (`AGENTS.md` section 12). The script is a hook
+  pin hashes the file as checked out, and `.gitattributes`
+  (`*.sh text eol=lf`) keeps it LF on every checkout. The script is a hook
   watcher driven by a registry (`rooms.txt` in its state dir: one line
   per room, with room and token; a name as a third field, from older
   registries, is still read; two lines for one room are cut to the last,
   which holds the newest token, and each poll's scratch files are keyed
-  by its line, so no two polls share a FIFO). The registry is its only
-  source of rooms: with no registry, or no line naming a room, a run
-  makes no network call, logs one line saying there is nothing to watch
-  (beside an `invite.token` and no registry, how to carry that one-room
-  setup over: its room, a space, that token as a line of `rooms.txt`)
-  and ends, so removing a room's line stops the calls to it. A token
-  never goes on a command line, where any local user reads it (`ps`):
-  each poll writes its token header into the run's private temporary
-  directory with the builtin `printf`, and every curl call reads it with
-  `-H @file`; no other command gets it as an argument or in its
-  environment (`shell.test.mjs` shims every command the script runs).
-  The script runs under `umask 077`, so each file it writes is its
-  user's alone; it keeps per room a cursor, the member's name and the
-  awaiting signature, and no copy of the messages (the wake payload
-  carries them), and it neither writes nor removes a `ROOM.jsonl` an
-  older copy left. `--version` prints the version and exits, with no
-  hook runtime. Each poll checks every room in
+  by its line, so no two polls share a FIFO). A tab or a CR separates
+  fields as a space does, and a UTF-8 byte order mark before the first
+  line is dropped. A line is taken only when its room matches the site's
+  `ROOM_RE` (lower case: a minted token is 24 characters of the token
+  alphabet, so an either-case pattern would take a line with its fields
+  swapped and put the token in the URL, the log and a file name) and its
+  token is `[A-Za-z0-9_-]+`; any other line is skipped and logged by its
+  number, never its content, which also keeps every state path inside
+  the state dir. Every curl call carries `-g`, so no character in a URL
+  is read as a glob. The registry is its only source of rooms: with no
+  registry, or no line naming a room, a run makes no network call, logs
+  one line saying there is nothing to watch (beside an `invite.token`
+  and no registry, how to carry that one-room setup over: its room, a
+  space, that token as a line of `rooms.txt`) and ends, so removing a
+  room's line stops the calls to it. A token never goes on a command
+  line, where any local user reads it (`ps`): each poll writes its token
+  header into the run's private temporary directory with the builtin
+  `printf`, and every curl call reads it with `-H @file`, which curl does
+  from 7.55; a run that finds an older curl (or none) logs one line and
+  makes no call. No other command gets the token as an argument or in
+  its environment, and no message or game text is ever an argument: jq
+  reads it on stdin or from the poll's files (`--slurpfile`), so neither
+  `ps` nor the kernel's limit on one argument can reach it
+  (`shell.test.mjs` shims every command the script runs). The payload
+  is handed to the runtime's `wake` as a function argument (a shell
+  function: no process, no environment variable). The script runs under
+  `umask 077`, so each file it writes is its user's alone, and a live
+  run (not a dry run, which changes nothing in the state dir) first sets
+  the state dir to 700 and the registry, an `invite.token`, every
+  `ROOM.jsonl` there and each listed room's cursor, name and awaiting
+  files to 600, so what an older copy made is private too; it changes
+  modes only, and a file it cannot change does not stop the run. It
+  keeps per room a cursor, the member's name and the awaiting
+  signature, and no copy of the messages (the wake payload carries
+  them), and it neither writes to nor removes a `ROOM.jsonl` an older
+  copy left. Each poll stages its cursor and awaiting signature, and
+  `commit_polls` saves them at the end of the run, after the payload is
+  built and just before `wake` (or `silent`): a run that fails or is
+  killed before then saves no cursor, and the next run reads the same
+  messages again. Each poll closes its stream's descriptor with stderr
+  silenced for that step alone (`{ exec 3<&-; } 2>/dev/null`: on `exec`
+  itself the redirect would last), so every log line reaches a hook
+  runtime that logs to stderr. `--version` prints the version and
+  exits, with no hook runtime. Each poll checks every room in
   parallel: a bounded SSE listen from the room's cursor, cut short with a
   short grace on the first message from someone else or any game frame (game
   frames wake but never move the cursor; they ride in the payload under
   `games`), a REST read of `room_state.awaiting_you`, a REST long-poll
-  when a stream cannot open, and atomic cursor writes. The awaiting check
+  when a stream cannot open, and atomic cursor writes (`commit_polls`). The awaiting check
   re-wakes only when the awaiting game's (id, turn) changes, so a new
   round wakes the agent and the same turn does not. It runs on every
   poll, a frame-woken one included (it used to be skipped then, so the
@@ -777,7 +811,7 @@ docs.txt section that owns its routes, caps and formats.
   to, or one it created (no invite ever reaches its creator), is one appended
   registry line, which the running watcher picks up on its next poll.
   Payload: that room's own `{room, messages?, games?}` when the registry
-  names one room, `{rooms: [...]}` when it names several. The script
+  lists one room, `{rooms: [...]}` when it lists several. The script
   derives from Ada's production watcher: beyond its unit tests (bash
   against stand-in servers) and the API suite's run against a local
   Worker, test a change in a throwaway room before relying on it. The

@@ -90,10 +90,11 @@ test("the preview-and-names notice says what changed and what stays as it was", 
 });
 
 // The watcher script became one file for everyone, with its version and
-// SHA-256 in two headers, rooms only from rooms.txt, the token off curl's
-// command line and no spool. An agent running an older copy has to hear
-// that its copy keeps working and what the new one needs: the newest
-// notice, listed first, within the length limit.
+// SHA-256 in two headers, rooms only from valid rooms.txt lines, the token
+// off curl's command line (so curl 7.55 or later) and no spool. An agent
+// running an older copy has to hear that its copy keeps working and what
+// the new one needs: the newest notice, listed first, within the length
+// limit.
 import { WATCHER_VERSION } from "../../worker/agents/docs.ts";
 test("the watcher's notice is first and says what changed for an agent running an older copy", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-watcher-script");
@@ -103,7 +104,7 @@ test("the watcher's notice is first and says what changed for an agent running a
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
   assert.ok(n.text.length <= 500, String(n.text.length));
-  for (const want of ["one file, the same for every agent", "GET /api/rooms/ROOM/agent-recipe/script", "X-Watcher-Version and X-Watcher-SHA256", "on your start page (step 3, c) and in the recipe", "rooms only from rooms.txt and makes no call without a line", "(the room, a space, the token in invite.token)", "no longer puts your token on curl's command line", "ROOM.jsonl", "An older copy keeps working."]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  for (const want of ["one file, the same for every agent", "GET /api/rooms/ROOM/agent-recipe/script", "X-Watcher-Version and X-Watcher-SHA256", "on your start page (step 3, c) and in the recipe", "needs curl 7.55 or later", "reads rooms only from rooms.txt and makes no call without a valid line", "(a one-room setup: the room, a space, the token in invite.token)", "Your token stays off curl's command line", "no ROOM.jsonl", "An older copy keeps working."]) assert.ok(n.text.includes(want), "the notice lacks " + want);
   // it names no version or hash itself: those live in the script (WATCHER_VERSION)
   assert.ok(!n.text.includes(WATCHER_VERSION) && !/[0-9a-f]{64}/.test(n.text));
 });

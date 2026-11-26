@@ -152,7 +152,11 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
   const sha = crypto.createHash('sha256').update(a.bytes).digest('hex');
   const version = (a.text.match(/^WATCHER_VERSION="([^"\n]+)"$/m) || [])[1];
   const file = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'agents', 'agent-watch.sh'), 'utf8');
-  check('watcher script: 200 text, no-store, the repository\'s file with only the origin filled in', a.status === 200 && a.headers.get('content-type') === 'text/plain; charset=utf-8' && a.headers.get('cache-control') === 'no-store' && a.text === file.replace('__ORIGIN__', "'" + ORIGIN + "'"), a.status + ' ' + a.headers.get('content-type'));
+  // https for every host but loopback (docs.ts watcherOrigin): wrangler dev reports the route's host over http
+  const host = new URL(ORIGIN);
+  const served = ['127.0.0.1', 'localhost', '[::1]'].includes(host.hostname) ? host.origin : 'https://' + host.hostname;
+  check('watcher script: 200 text, no-store, the repository\'s file with only the origin filled in', a.status === 200 && a.headers.get('content-type') === 'text/plain; charset=utf-8' && a.headers.get('cache-control') === 'no-store' && a.text === file.replace('__ORIGIN__', "'" + served + "'"), a.status + ' ' + a.headers.get('content-type') + ' ' + (a.text.match(/^ORIGIN=.*$/m) || [''])[0]);
+  check('watcher script: the origin it calls is https unless loopback', a.text.includes("|| ORIGIN='" + served + "'\n") && (served.startsWith('https://') || host.hostname === 'localhost' || host.hostname === '127.0.0.1' || host.hostname === '[::1]'), ORIGIN + ' -> ' + served);
   check('watcher script: X-Watcher-Version is its version line, X-Watcher-SHA256 the SHA-256 of the body', !!version && a.headers.get('x-watcher-version') === version && a.headers.get('x-watcher-sha256') === sha, JSON.stringify([version, a.headers.get('x-watcher-version'), a.headers.get('x-watcher-sha256'), sha]));
   check('watcher script: no placeholder, room, name or token in it', !/__[A-Z_]+__/.test(a.text) && !a.text.includes(RNAME) && !a.text.includes('ApiB') && !a.text.includes(TB));
   // a member of a second room, whose name is shell syntax
@@ -184,8 +188,8 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     const script = path.join(dir, 'agent-chat-watch.sh');
     fs.writeFileSync(script, a.bytes);
     const runtime = path.join(dir, 'runtime.sh');
-    // log lines go to a descriptor of their own, as a runtime that logs to a file is unaffected by the poll's own stderr redirect
-    fs.writeFileSync(runtime, 'exec 7>&2\nlog() { printf "LOG %s\\n" "$1" >&7; }\nsilent() { printf "SILENT %s\\n" "$1"; }\nwake() { printf "WAKE %s\\n%s\\n" "$1" "$2"; }\n');
+    // the result to stdout, log lines to the script's own stderr
+    fs.writeFileSync(runtime, 'log() { printf "LOG %s\\n" "$1" >&2; }\nsilent() { printf "SILENT %s\\n" "$1"; }\nwake() { printf "WAKE %s\\n%s\\n" "$1" "$2"; }\n');
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);
     const bash = execFileSync('bash', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
@@ -209,11 +213,14 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     try { payload = JSON.parse(run.out.split('\n').slice(1).join('\n')); } catch { /* checked below */ }
     check('watcher run: a message from another member wakes it with that message', run.code === 0 && run.out.startsWith('WAKE new messages in ' + RNAME + '\n') && !!payload && payload.room === RNAME && payload.messages.length === 1 && payload.messages[0].id === posted.json.id && payload.messages[0].from === 'ApiA', run.code + ' ' + run.out.slice(0, 200) + ' ' + run.err.slice(0, 300));
     const calls = (fs.existsSync(argv) ? fs.readFileSync(argv, 'utf8') : '').split('\n').filter(Boolean);
-    const curls = calls.filter((l) => l.startsWith('curl '));
-    check('watcher run: every curl call went to this server, reading the token from a file, the token on no command line', curls.length >= 3 && !calls.some((l) => l.startsWith('REFUSED')) && !calls.some((l) => l.includes(TB)) && curls.every((l) => / -H @\S+\/token\.header /.test(l)), calls.join('\n').slice(0, 400));
+    // the calls to the site (the run also asks curl its version, once)
+    const curls = calls.filter((l) => l.startsWith('curl ') && l !== 'curl --version');
+    check('watcher run: every curl call went to this server with -g, reading the token from a file, the token on no command line', calls.filter((l) => l === 'curl --version').length === 1 && curls.length >= 3 && !calls.some((l) => l.startsWith('REFUSED')) && !calls.some((l) => l.includes(TB)) && curls.every((l) => l.startsWith('curl -g ') && / -H @\S+\/token\.header /.test(l)), calls.join('\n').slice(0, 400));
     const files = fs.readdirSync(state).sort();
     const mode = (f) => fs.statSync(path.join(state, f)).mode & 0o777;
-    check('watcher run: the cursor moved past the message, the name came from the API, no spool, each file private', files.join(' ') === [RNAME + '.cursor', RNAME + '.self', 'rooms.txt'].join(' ') && Number(fs.readFileSync(path.join(state, RNAME + '.cursor'), 'utf8')) > last && fs.readFileSync(path.join(state, RNAME + '.self'), 'utf8') === 'ApiB' && mode(RNAME + '.cursor') === 0o600 && mode(RNAME + '.self') === 0o600, files.join(' '));
+    check('watcher run: the cursor moved past the message, the name came from the API, no spool, each file private (the registry too)', files.join(' ') === [RNAME + '.cursor', RNAME + '.self', 'rooms.txt'].join(' ') && Number(fs.readFileSync(path.join(state, RNAME + '.cursor'), 'utf8')) > last && fs.readFileSync(path.join(state, RNAME + '.self'), 'utf8') === 'ApiB' && files.every((f) => mode(f) === 0o600), files.map((f) => f + ' ' + mode(f).toString(8)).join(', '));
+    // the stream was held open to the end of its grace and its curl killed: stderr has the log lines and nothing else
+    check('watcher run: its stderr holds its log lines only, and no token', run.err.split('\n').filter(Boolean).every((l) => l.startsWith('LOG ')) && run.err.includes('LOG polled 1 room(s)') && !run.err.includes(TB), run.err.slice(0, 300));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

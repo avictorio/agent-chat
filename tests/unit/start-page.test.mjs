@@ -54,14 +54,16 @@ test("the builder takes the view, the origin, the room and the watcher's pair, a
 
 // Way c installs the watcher: one file for every agent on the origin
 // (docs.ts watcher), so the page prints its version and SHA-256, the pair
-// the script route sends, with what to do with them. Its Stop line is what
-// the script does (tests/unit/shell.test.mjs runs it): a room whose line is
-// gone is not called, and with no line left the watcher makes no call.
-test("way c names the watcher's one file, its version and SHA-256, and how removing the line stops it", async () => {
+// the script route sends, with what to do with them. Its Stop line is
+// true for every agent who reads it: disabling the hook stops any copy; a
+// room whose line is gone is not called, and with no line left this
+// script makes no call (tests/unit/shell.test.mjs runs it), while a copy
+// from before WATCHER_VERSION goes back to the room baked into it.
+test("way c names the watcher's one file, its version and SHA-256, and a Stop true for an older copy too", async () => {
   const c = [
     "c. A Muse agent whose person has no gadget, in a harness with hooks: GET " + ORIGIN + "/api/rooms/" + ROOM + "/agent-recipe describes a watcher (a scheduled hook, a script that talks only to this site, a private file holding your room tokens). Show your person what it installs before you set it up.",
     "   The script is one file, the same for every agent on this site: version " + WATCHER_VERSION + ", SHA-256 " + createHash("sha256").update(watcher(ORIGIN)).digest("hex") + ". Once you have downloaded it, check that its SHA-256 is this one (the recipe gives the command), and show your person both.",
-    "   Check: the recipe's dry run. Stop: remove this room's line from rooms.txt, and from its next run the watcher calls this room no more; with no line left it makes no call at all. Or disable its hook.",
+    "   Check: the recipe's dry run. Stop: disable its hook. Or remove this room's line from rooms.txt: from its next run the watcher calls this room no more, and with no line left it makes no call at all (a copy with no WATCHER_VERSION line keeps watching the room it was fetched from: disable its hook, or replace it).",
   ].join("\n");
   for (const [name, t] of Object.entries(PAGES)) assert.ok(t.includes("\n" + c.replaceAll("/api/rooms/" + ROOM + "/", "/api/rooms/" + (name.includes("worst") ? "r".repeat(64) : ROOM) + "/") + "\n"), name + ": way c");
   // the pair is the origin's: another origin's page prints another hash
@@ -394,17 +396,18 @@ test("Now, by state: the Since line, the Lost line, the hook and the items", () 
 
 // The example pages keep the design's budgets; the worst ones leave room
 // for the double quotes around MAX_ACTIVE_INVITES names. Step 3c's
-// watcher line (its version and 64-digit SHA-256) adds about 375
-// characters to every page.
+// watcher lines (the script's version and 64-digit SHA-256, and a Stop
+// that holds for an older copy too) add about 490 characters to every
+// page.
 test("the page stays within its size budgets", () => {
-  const budgets = { "start.txt": 8700, "start-joined.txt": 9600, "start-worst": 12500, "start-joined-worst": 16600, "start-joined-worst-not-posted": 16600 };
+  const budgets = { "start.txt": 8800, "start-joined.txt": 9700, "start-worst": 12600, "start-joined-worst": 16700, "start-joined-worst-not-posted": 16700 };
   for (const [name, max] of Object.entries(budgets)) assert.ok(PAGES[name].length <= max, name + " is " + PAGES[name].length + " characters, over " + max);
   // the worst cases are worst: the longest names, members, purpose, URL and items
   const w = viewOf("start-worst"), wj = viewOf("start-joined-worst");
   assert.equal(w.members.length, LIM.MAX_ACTIVE_INVITES);
   assert.equal(wj.hook.url.length, LIM.WEBHOOK_URL_MAX);
   assert.ok(new TextEncoder().encode(JSON.stringify({ v: 1, board_rev: 99999, awaiting_you: wj.awaiting, awaiting_you_more: 99 })).length <= LIM.STATE_MAX_BYTES);
-  for (const t of Object.values(PAGES)) assert.ok(t.length <= 16600);
+  for (const t of Object.values(PAGES)) assert.ok(t.length <= 16700);
   // The budgets are for a token alone. With the owner key beside it the
   // page gains one line, the title's name in it: at most that much more.
   const keyLine = 260 + MAX_NAME;

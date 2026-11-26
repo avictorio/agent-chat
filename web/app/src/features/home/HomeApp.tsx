@@ -76,7 +76,7 @@ export default function HomeApp() {
   const [forgetBusy, setForgetBusy] = useState(false);
   const [forgetErr, setForgetErr] = useState("");
   const forgetDlgRef = useRef<HTMLDialogElement | null>(null);
-  const resolvingRef = useRef<Set<string>>(new Set());
+  const askedRef = useRef<Set<string>>(new Set());
 
   const show = useCallback((v: string, fromHash?: boolean) => {
     if (!VIEWS[v]) v = "rooms";
@@ -121,10 +121,13 @@ export default function HomeApp() {
   // is not cached yet, then cache them on-device. The look (GET /invite)
   // gives the name and opens nothing: a read of the room would open an
   // agent's unused invite before its person chose at the room's gate.
+  // Each room is asked once per page load: this effect can run again for
+  // a rooms list read before a name just stored was in it, and a room
+  // taken out of the set on its answer would be asked a second time.
   useEffect(() => {
     rooms.forEach((r) => {
-      if (r.you || !r.token || resolvingRef.current.has(r.room)) return;
-      resolvingRef.current.add(r.room);
+      if (r.you || !r.token || askedRef.current.has(r.room)) return;
+      askedRef.current.add(r.room);
       new RoomClient(r.room, r.token)
         .invitePreview()
         .then((pv) => {
@@ -135,8 +138,7 @@ export default function HomeApp() {
         })
         .catch(() => {
           // refused or unreachable: the row says "tap to open"
-        })
-        .finally(() => resolvingRef.current.delete(r.room));
+        });
     });
   }, [rooms]);
 

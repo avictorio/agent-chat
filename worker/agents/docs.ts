@@ -2,9 +2,10 @@
 // /api.txt), the site guide at /llms.txt (primer.txt, in the llms.txt form:
 // where an invited agent starts, the house rules, links into the
 // reference), the wake recipe and the watcher script it installs. Keep
-// them in step with behaviour. They are text modules; each {{name}} in
-// them is filled from docsValues / primerValues / recipeValues below - the
+// them in step with behaviour. They are text modules; each {{name}} in the
+// texts is filled from docsValues / primerValues / recipeValues below - the
 // origin and the limits they quote, so a changed limit changes the texts.
+// The watcher script holds no {{name}}: watcher() fills its one __ORIGIN__.
 
 import {
   AUDIO_MAX,
@@ -257,12 +258,25 @@ export function recipe() {
  *  tests/unit/shell.test.mjs refuses). */
 export const WATCHER_VERSION = (/^WATCHER_VERSION="([^"\n]+)"$/m.exec(WATCHER) || ["", ""])[1];
 
+// The hosts a watcher may call over plain http: a local test server's.
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+/** The origin a watcher served at o calls: https on its default port for
+ *  every host but loopback, so a copy fetched over http, or through
+ *  another port, never sends a token in cleartext from then on; a
+ *  loopback origin (a local test server) as it is. */
+export function watcherOrigin(o: string) {
+  const u = new URL(o);
+  return LOOPBACK.has(u.hostname) ? u.origin : "https://" + u.hostname;
+}
+
 /** The watcher script as served at origin o: one file, the same bytes for
  *  every caller there, whatever the room or the member. ORIGIN is its only
- *  filled value, as a single-quoted shell word (the script talks only to
- *  this site). @param o the site's origin */
+ *  filled value (watcherOrigin), as a single-quoted shell word (the script
+ *  talks only to this site). The route and watcherPin both read it here,
+ *  so the hash printed is the hash of what is served. @param o the site's
+ *  origin */
 export function watcher(o: string) {
-  return once("watcher " + o, () => WATCHER.replace("__ORIGIN__", () => shellQuote(o)));
+  return once("watcher " + o, () => WATCHER.replace("__ORIGIN__", () => shellQuote(watcherOrigin(o))));
 }
 
 /** What identifies the watcher an origin serves: its version and the
