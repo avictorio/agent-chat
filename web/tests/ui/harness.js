@@ -86,7 +86,7 @@ function noteOf(name, by) {
 // The agent Probe's start page in demo before joining (GET /api/rooms/demo):
 // the real page of the fixture (tests/fixtures/start-page/start.txt, the
 // agent Scout in example-room, also invited by Anthony) with the names
-// swapped, about 8,000 characters.
+// swapped, about 8,600 characters.
 const START_PAGE = fs.readFileSync(FIXTURES + 'start-page/start.txt', 'utf8').replace(/\r\n/g, '\n').replace(/example-room/g, 'demo').replace(/Scout/g, 'Probe').replace(/scout-hello/g, 'probe-hello');
 function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 // A two-captain Battleship fixture's record, as the server sends it:

@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 # Watches one or more Agent Chat rooms for new activity.
 #
-# Rooms come from a registry file in the state dir (rooms.txt): one line
-# per room, "room token" (space- or tab-separated). The script asks the
-# API for your member name in each room and caches it; a name given as a
-# third field (older registries) is used as it is. The watcher keeps one cursor per room
+# WATCHER_VERSION is the date this file last changed, with .2, .3 for a
+# later change the same day. The site serves this file as the same bytes
+# to every caller (it fills in ORIGIN below and nothing else), with the
+# version and the SHA-256 of those bytes in the X-Watcher-Version and
+# X-Watcher-SHA256 headers. A unit test in the site's repository
+# (tests/unit/shell.test.mjs) pins the version to that SHA-256, so any
+# change to these bytes fails it until the version moves too.
+# "bash agent-chat-watch.sh --version" prints the version and exits.
+WATCHER_VERSION="2026-11-26"
+
+# Rooms come only from a registry file in the state dir (rooms.txt): one
+# line per room, "room token" (space- or tab-separated); a blank line, or
+# one whose first word starts with #, names no room. With no registry, or
+# none of its lines naming a room, a run makes no network call: it logs
+# that there is nothing to watch and ends. The script asks the API for
+# your member name in each room and caches it; a name given as a third
+# field (older registries) is used as it is. The watcher keeps one cursor per room
 # and, each run, polls every registered room in parallel: for each room
 # it opens the SSE stream at the saved cursor for a bounded slice - the server
 # replays everything after the cursor first, then live frames arrive as
@@ -21,32 +34,39 @@
 # long-poll, so a stream outage degrades to plain polling instead of
 # blindness.
 #
-# With no registry file, the script watches the single room baked into
-# this generated copy, using the token in the state dir's invite.token
-# (the one-room setup).
+# A token never goes on a command line, where any local user can read it
+# (ps): each room's poll writes its token header into the run's private
+# temporary directory with the shell's own printf, and every curl call
+# reads it from that file (-H @file, curl 7.55 or later). Everything the
+# script writes is created readable by its user alone (umask 077). Under
+# the state dir it keeps, per room, a cursor, the member name and the
+# awaiting signature, and no copy of the messages: the wake payload
+# carries them.
 #
-# Cursors + spools live under the state dir; a cursor advances only past
-# message frames actually processed, and every processed frame's id is
-# persisted before the run ends, so a killed run loses nothing. The cursor
+# A cursor advances only past message frames actually processed, and every
+# processed frame's id is persisted before the run ends, so a killed run
+# loses nothing. The cursor
 # is a delivery number - a message frame's "id:" line, or a read's last_id -
 # never the message's own id: a message published late or sent again with
 # new media keeps its id but arrives under a higher number, and a cursor
 # kept from the id fetched it again on the next read.
 #
-# Instance configuration (a generated copy normally carries the room,
-# origin and name as literals; the environment overrides exist for
-# testing):
-#   AGENTCHAT_ROOM, AGENTCHAT_ORIGIN, AGENTCHAT_SELF, AGENTCHAT_STATE_DIR,
-#   AGENTCHAT_REGISTRY (registry path), AGENTCHAT_STREAM_BASE (test hook:
-#   point the stream somewhere broken to exercise the REST fallback)
+# The site fills in ORIGIN when it serves this file. The environment
+# overrides exist for testing:
+#   AGENTCHAT_ORIGIN, AGENTCHAT_STATE_DIR, AGENTCHAT_REGISTRY (registry
+#   path), AGENTCHAT_STREAM_BASE (test hook: point the stream somewhere
+#   broken to exercise the REST fallback)
 set -euo pipefail
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "$WATCHER_VERSION"
+  exit 0
+fi
+umask 077
 source "$HATCH_HOOK_RUNTIME"
 
-# The site fills these three in as single-quoted literals (a member name is
-# someone else's text: inside "${VAR:-...}" a name like $(cmd) would run).
-ROOM="${AGENTCHAT_ROOM:-}"; [ -n "$ROOM" ] || ROOM=__ROOM__
+# The site fills this in as a single-quoted literal, so nothing in it is
+# expanded or run.
 ORIGIN="${AGENTCHAT_ORIGIN:-}"; [ -n "$ORIGIN" ] || ORIGIN=__ORIGIN__
-SELF="${AGENTCHAT_SELF:-}"; [ -n "$SELF" ] || SELF=__SELF__
 STATE_DIR="${AGENTCHAT_STATE_DIR:-$HOME/hooks/state/agent-chat}"
 REGISTRY="${AGENTCHAT_REGISTRY:-$STATE_DIR/rooms.txt}"
 WINDOW=20   # max seconds spent listening to one room's stream per run
@@ -87,12 +107,22 @@ if [ -f "$REGISTRY" ]; then
   done < "$TMPD/rooms.dups"
   mv "$TMPD/rooms.dedup" "$LIST"
 fi
+# Nothing names a room: no call at all, so removing the last line (or
+# never writing the file) stops the watcher reaching the site.
 if [ ! -s "$LIST" ]; then
-  LEGACY_TOKEN=""
-  if [ -f "$STATE_DIR/invite.token" ]; then
-    LEGACY_TOKEN=$(cat "$STATE_DIR/invite.token")
+  if [ ! -f "$REGISTRY" ] && [ -f "$STATE_DIR/invite.token" ]; then
+    log "nothing to watch: there is no $REGISTRY. $STATE_DIR/invite.token holds the token of a one-room setup: to keep watching that room, write its name, a space and that token as a line of $REGISTRY"
+  elif [ ! -f "$REGISTRY" ]; then
+    log "nothing to watch: there is no $REGISTRY (one line per room: its name, a space, your token for it)"
+  else
+    log "nothing to watch: $REGISTRY names no room"
   fi
-  printf '%s\t%s\t%s\n' "$ROOM" "$LEGACY_TOKEN" "$SELF" > "$LIST"
+  if [ "$DRY" = "1" ]; then
+    silent "dry-run: nothing to watch"
+  else
+    silent "nothing to watch"
+  fi
+  exit 0
 fi
 NROOMS=$(wc -l < "$LIST" | tr -d ' ')
 
@@ -111,17 +141,16 @@ else
 fi
 
 # --- Per-room poll ------------------------------------------------------------
-# Polls one room: fills $TMPD/<n>/messages.jsonl and games.jsonl (n is
-# the room's line in the list, so no two polls ever share a scratch
-# directory), writes the room's cursor and spool (unless dry run), and
-# leaves the number of wake-worthy items in $TMPD/<n>/count (-1 when
+# Polls one room: fills $TMPD/line.<n>/messages.jsonl and games.jsonl (n
+# is the room's line in the list, so no two polls ever share a scratch
+# directory), writes the room's cursor (unless dry run), and
+# leaves the number of wake-worthy items in $TMPD/line.<n>/count (-1 when
 # every read for the room failed, so the caller can tell a dead room
 # from a quiet one).
 poll_room() {
   local P_ROOM="$1" P_TOKEN="$2" P_SELF="$3" P_LINE="$4"
   local BASE="$ORIGIN/api/rooms/$P_ROOM"
   local CURSOR_FILE="$STATE_DIR/$P_ROOM.cursor"
-  local SPOOL_FILE="$STATE_DIR/$P_ROOM.jsonl"
   local SELF_FILE="$STATE_DIR/$P_ROOM.self"
   local AWAIT_FILE="$STATE_DIR/$P_ROOM.awaiting"
   local RDIR="$TMPD/line.$P_LINE"
@@ -132,9 +161,12 @@ poll_room() {
   : > "$GAMES"
   printf '%s' "-1" > "$RDIR/count"
 
+  # The token header goes to curl as a file, never as an argument: printf
+  # is a shell builtin, so writing the file starts no process that holds it.
   local AUTH_ARGS=()
   if [ -n "$P_TOKEN" ]; then
-    AUTH_ARGS=(-H "X-Invite-Token: $P_TOKEN")
+    printf 'X-Invite-Token: %s\n' "$P_TOKEN" > "$RDIR/token.header"
+    AUTH_ARGS=(-H "@$RDIR/token.header")
   fi
 
   # Resolve the member name for this room if the registry did not give
@@ -369,9 +401,6 @@ poll_room() {
   if [ "$DRY" = "0" ]; then
     printf '%s' "$CURSOR" > "$CURSOR_FILE.tmp.$$"
     mv "$CURSOR_FILE.tmp.$$" "$CURSOR_FILE"
-    if [ -s "$COLLECTED" ]; then
-      jq -s '.' "$COLLECTED" | jq -c '.[]' >> "$SPOOL_FILE"
-    fi
   fi
 
   local MC=0 GC=0
@@ -449,7 +478,9 @@ fi
 
 ACTIVE_ROOMS=$(jq -s 'length' "$ROOMS_JSON")
 if [ "$NROOMS" = "1" ]; then
-  # Legacy payload shape for a one-room install: {room, messages, games?}.
+  # A registry of one room: the payload is that room's own object,
+  # {room, messages?, games?}; with several, each active room's object
+  # rides under rooms.
   PAYLOAD=$(jq -s '.[0]' "$ROOMS_JSON")
 else
   PAYLOAD=$(jq -n --slurpfile rooms "$ROOMS_JSON" '{rooms: $rooms}')

@@ -3,7 +3,9 @@
 // invite-only invariants, public room creation (validation, name race
 // surface, rollback on email failure), publish-on-complete, draft-media
 // privacy, room destruction, the upload engine (direct-upload signing
-// included), MCP, stream frames, the game engines and Muse delivery hooks
+// included), MCP, stream frames, the game engines, the wake recipe's
+// watcher script (one file for every caller, and one real run of it with
+// bash, curl and jq against this server: watcherScript) and Muse delivery hooks
 // (tests/api/muse-hooks.js: the real bridge, against a fake Muse,
 // tests/api/fake-muse.mjs), and the official MCP client libraries against
 // the MCP endpoint (tests/api/mcp-clients.js). Exits non-zero on any failure.
@@ -129,6 +131,94 @@ async function takenPortRefused() {
   return { refused: got !== 'started' && /exited before it was ready/.test(got), got: got.split('\n')[0], ms: Date.now() - t0 };
 }
 
+// The watcher script (worker/agents/agent-watch.sh) as this Worker serves
+// it: one file for every caller of the site (only the origin, the route's
+// host under wrangler dev, is filled in), the same bytes for two members of
+// two rooms, with its version and SHA-256 in headers that the start page's
+// step 3c and the recipe repeat. Then one real run of that file with bash
+// against this server, in the suite's room, under a stand-in for the Muse
+// hook runtime (HATCH_HOOK_RUNTIME): AGENTCHAT_ORIGIN points it at BASE,
+// never at the origin it carries, and a curl shim refuses any other
+// address and records every argument list, none of which may hold the token.
+async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
+  const fs = require('fs'), os = require('os'), path = require('path'), crypto = require('crypto');
+  const { execFile, execFileSync } = require('child_process');
+  const fetchScript = async (p, token) => {
+    const res = await fetch(BASE + p, { headers: token ? { 'X-Invite-Token': token } : {} });
+    const bytes = Buffer.from(await res.arrayBuffer());
+    return { status: res.status, headers: res.headers, bytes, text: bytes.toString('utf8') };
+  };
+  const a = await fetchScript(R + '/agent-recipe/script', TB);
+  const sha = crypto.createHash('sha256').update(a.bytes).digest('hex');
+  const version = (a.text.match(/^WATCHER_VERSION="([^"\n]+)"$/m) || [])[1];
+  const file = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'agents', 'agent-watch.sh'), 'utf8');
+  check('watcher script: 200 text, no-store, the repository\'s file with only the origin filled in', a.status === 200 && a.headers.get('content-type') === 'text/plain; charset=utf-8' && a.headers.get('cache-control') === 'no-store' && a.text === file.replace('__ORIGIN__', "'" + ORIGIN + "'"), a.status + ' ' + a.headers.get('content-type'));
+  check('watcher script: X-Watcher-Version is its version line, X-Watcher-SHA256 the SHA-256 of the body', !!version && a.headers.get('x-watcher-version') === version && a.headers.get('x-watcher-sha256') === sha, JSON.stringify([version, a.headers.get('x-watcher-version'), a.headers.get('x-watcher-sha256'), sha]));
+  check('watcher script: no placeholder, room, name or token in it', !/__[A-Z_]+__/.test(a.text) && !a.text.includes(RNAME) && !a.text.includes('ApiB') && !a.text.includes(TB));
+  // a member of a second room, whose name is shell syntax
+  const R2 = '/api/rooms/apitest-watch-' + SUF;
+  await req('POST', R2, { owner: true });
+  const inv = await req('POST', R2 + '/invites', { owner: true, json: { name: '$(touch pwned)', kind: 'agent' } });
+  const T2 = (inv.json && inv.json.token) || '';
+  const b = await fetchScript(R2 + '/agent-recipe/script', T2);
+  check('watcher script: a member of another room, named in shell syntax, gets the same bytes and headers', inv.status === 201 && b.status === 200 && b.bytes.equals(a.bytes) && b.headers.get('x-watcher-version') === version && b.headers.get('x-watcher-sha256') === sha && !b.text.includes('touch pwned'), inv.status + ' ' + b.status);
+  const bad = await fetchScript(R2 + '/agent-recipe/script', 'bogus-token');
+  check('watcher script: still gated, a bad token gets the refusal and no pin', bad.status === 403 && !bad.headers.get('x-watcher-sha256') && !bad.text.includes('WATCHER_VERSION'), bad.status);
+  // the start page's way c, over REST and MCP, and the recipe show the same pair
+  let r = await req('GET', R, { token: TB });
+  const wayC = r.text.split('\n').find((l) => l.startsWith('   The script is one file')) || '';
+  check('start page: way c shows the script\'s version and SHA-256', wayC === '   The script is one file, the same for every agent on this site: version ' + version + ', SHA-256 ' + sha + '. Once you have downloaded it, check that its SHA-256 is this one (the recipe gives the command), and show your person both.', wayC);
+  r = await req('POST', R2 + '/mcp', { token: T2, json: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_start_page', arguments: {} } } });
+  const page2 = (((r.json || {}).result || {}).content || [{}])[0].text || '';
+  check('start page: MCP get_start_page in the other room shows the same pair', page2.includes('\n   The script is one file, the same for every agent on this site: version ' + version + ', SHA-256 ' + sha + '. Once'), r.text.slice(0, 120));
+  r = await req('GET', R + '/agent-recipe', { token: TB });
+  check('recipe: names the same version and SHA-256, with the check commands', r.text.includes('This site serves version ' + version + ', SHA-256\n  ' + sha + ' (step 2') && r.text.includes('must show ' + sha + ' (before') && r.text.includes('must print ' + version + '.') && r.text.includes('shasum -a 256') && r.text.includes('sha256sum'), r.text.slice(0, 80));
+  await req('DELETE', R2 + '/invites', { owner: true });
+  await req('DELETE', R2 + '?confirm=apitest-watch-' + SUF, { owner: true });
+
+  // One real run: a message from ApiA past ApiB's cursor wakes ApiB.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apitest-watch-'));
+  try {
+    const state = path.join(dir, 'state');
+    fs.mkdirSync(state);
+    const script = path.join(dir, 'agent-chat-watch.sh');
+    fs.writeFileSync(script, a.bytes);
+    const runtime = path.join(dir, 'runtime.sh');
+    // log lines go to a descriptor of their own, as a runtime that logs to a file is unaffected by the poll's own stderr redirect
+    fs.writeFileSync(runtime, 'exec 7>&2\nlog() { printf "LOG %s\\n" "$1" >&7; }\nsilent() { printf "SILENT %s\\n" "$1"; }\nwake() { printf "WAKE %s\\n%s\\n" "$1" "$2"; }\n');
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const bash = execFileSync('bash', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
+    const realCurl = execFileSync(bash, ['-c', 'command -v curl'], { encoding: 'utf8' }).trim();
+    const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+    const argv = path.join(dir, 'curl.log');
+    fs.writeFileSync(path.join(bin, 'curl'), [
+      '#!' + bash,
+      'r="curl"; for a in "$@"; do printf -v x \'%q\' "$a"; r+=" $x"; done',
+      'printf \'%s\\n\' "$r" >> ' + q(argv),
+      'for a in "$@"; do case "$a" in http://*|https://*) case "$a" in ' + q(BASE + '/') + '*) ;; *) printf \'REFUSED %s\\n\' "$a" >> ' + q(argv) + '; exit 7 ;; esac ;; esac; done',
+      'exec ' + q(realCurl) + ' "$@"',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    fs.writeFileSync(path.join(state, 'rooms.txt'), RNAME + ' ' + TB + '\n');
+    const last = (await req('GET', R + '/messages?limit=1', { token: TB })).json.last_id;
+    fs.writeFileSync(path.join(state, RNAME + '.cursor'), String(last));
+    const posted = await req('POST', R + '/messages', { token: TA, json: { text: 'watcher run ' + SUF } });
+    const run = await new Promise((resolve) => execFile(bash, [script], { env: { PATH: bin + ':' + process.env.PATH, HOME: dir, HATCH_HOOK_RUNTIME: runtime, AGENTCHAT_STATE_DIR: state, AGENTCHAT_ORIGIN: BASE }, encoding: 'utf8', timeout: 60000 }, (e, out, err) => resolve({ code: e ? e.code || 1 : 0, out: out || '', err: err || '' })));
+    let payload = null;
+    try { payload = JSON.parse(run.out.split('\n').slice(1).join('\n')); } catch { /* checked below */ }
+    check('watcher run: a message from another member wakes it with that message', run.code === 0 && run.out.startsWith('WAKE new messages in ' + RNAME + '\n') && !!payload && payload.room === RNAME && payload.messages.length === 1 && payload.messages[0].id === posted.json.id && payload.messages[0].from === 'ApiA', run.code + ' ' + run.out.slice(0, 200) + ' ' + run.err.slice(0, 300));
+    const calls = (fs.existsSync(argv) ? fs.readFileSync(argv, 'utf8') : '').split('\n').filter(Boolean);
+    const curls = calls.filter((l) => l.startsWith('curl '));
+    check('watcher run: every curl call went to this server, reading the token from a file, the token on no command line', curls.length >= 3 && !calls.some((l) => l.startsWith('REFUSED')) && !calls.some((l) => l.includes(TB)) && curls.every((l) => / -H @\S+\/token\.header /.test(l)), calls.join('\n').slice(0, 400));
+    const files = fs.readdirSync(state).sort();
+    const mode = (f) => fs.statSync(path.join(state, f)).mode & 0o777;
+    check('watcher run: the cursor moved past the message, the name came from the API, no spool, each file private', files.join(' ') === [RNAME + '.cursor', RNAME + '.self', 'rooms.txt'].join(' ') && Number(fs.readFileSync(path.join(state, RNAME + '.cursor'), 'utf8')) > last && fs.readFileSync(path.join(state, RNAME + '.self'), 'utf8') === 'ApiB' && mode(RNAME + '.cursor') === 0o600 && mode(RNAME + '.self') === 0o600, files.join(' '));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 (async () => {
   let server;
   let taken;
@@ -209,7 +299,8 @@ async function takenPortRefused() {
     check('members list: human carries invite_link, no onboarding', !!(memA && memA.invite_link && !('agent_onboarding' in memA)));
     await req('DELETE', R + '/invites/' + invM.json.token, { owner: true });
 
-    // Wake recipe: personalized text + the watcher script, never the token.
+    // Wake recipe: text for the caller, and the watcher script: one file for
+    // every caller of the site, with its version and SHA-256 in headers; never the token.
     const RNAME = 'apitest-main-' + SUF;
     r = await req('GET', R + '/agent-recipe', {});
     check('recipe requires access', r.status === 403 || r.status === 401, r.status);
@@ -222,17 +313,7 @@ async function takenPortRefused() {
     check('recipe: stale-frame rule - re-read the live match before moving', r.text.includes('always re-read the live match before moving'));
     check('recipe: exact game calls (no get_game_state)', r.text.includes('There is no get_game_state tool'));
     check('recipe: never contains the caller token', !r.text.includes(TB));
-    r = await req('GET', R + '/agent-recipe/script', { token: TB });
-    check('recipe script: 200 shell with room + self substituted', r.status === 200 && r.text.includes("|| ROOM='" + RNAME + "'") && r.text.includes("|| SELF='ApiB'") && r.text.includes(':-$BASE/stream') && r.text.includes('STREAM_BASE?after='), r.text.slice(0, 80));
-    check('recipe script: no placeholders left, no token', !r.text.includes('__ROOM__') && !r.text.includes('__SELF__') && !r.text.includes(TB));
-    // A member's name is someone else's text, and the script is shell that
-    // runs on the agent's machine: a name that is shell syntax must arrive
-    // as a single-quoted literal (tests/unit/shell.test.mjs runs it in bash).
-    const hostile = '$(touch pwned)';
-    const invX = await req('POST', R + '/invites', { owner: true, json: { name: hostile, kind: 'agent' } });
-    r = await req('GET', R + '/agent-recipe/script', { token: invX.json && invX.json.token });
-    check('recipe script: a name that is shell syntax is filled in as a quoted literal', invX.status === 201 && r.status === 200 && r.text.includes("|| SELF='$(touch pwned)'") && !/:-[^}\n]*\$\(touch/.test(r.text) && !/"[^"\n]*\$\(touch pwned\)[^"\n]*"/.test(r.text), invX.status + ' ' + r.status + ' ' + (r.text.match(/^SELF=.*$/m) || [''])[0]);
-    if (invX.json && invX.json.token) await req('DELETE', R + '/invites/' + invX.json.token, { owner: true });
+    await watcherScript({ R, RNAME, ORIGIN, TA, TB });
     r = await req('POST', R + '/agent-recipe', { token: TB, json: {} });
     check('recipe is GET only', r.status === 405, r.status);
 

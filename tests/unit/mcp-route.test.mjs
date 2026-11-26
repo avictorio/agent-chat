@@ -8,6 +8,7 @@ import { MCP_NO_TOKEN, mcpInstructions } from "../../worker/agents/onboarding.ts
 import { MCP_CATALOG_VERSION, MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS, mcpProtocolVersion } from "../../worker/agents/mcp.ts";
 import { API_VERSION } from "../../worker/agents/notices.ts";
 import { OWNER_NO_START_PAGE, START_INVALID, startPage } from "../../worker/agents/start.ts";
+import { watcherPin } from "../../worker/agents/docs.ts";
 import { base, joined } from "./start-views.mjs";
 
 // Node wants duplex: "half" on a Request built with a stream body, which
@@ -34,6 +35,8 @@ function call(body, invite, search, lookup, owner, view) {
   return { asked, args, res: mcpRoute({ request, env, url, path: url.pathname, owner: !!owner, invite }, m) };
 }
 const ORIGIN = "http://localhost";
+/** the watcher's version and SHA-256 at ORIGIN, which the page's step 3c prints */
+const PIN = await watcherPin(ORIGIN);
 const INIT = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
 const REVOKED = { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask whoever gave it to you for a new one." };
 const GOOD = { ok: true, row: { name: "Ada", revoked: null, used: null, seen: null, kind: "agent", invited_by: null, created: 1, posted: null } };
@@ -191,7 +194,7 @@ test("get_start_page returns the page's text once, from startView, and never ope
     const r = await res;
     assert.equal(r.status, 200);
     const j = await r.json();
-    assert.deepEqual(j, { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: startPage(view, ORIGIN, "unit") }] } });
+    assert.deepEqual(j, { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: startPage(view, ORIGIN, "unit", PIN) }] } });
     assert.deepEqual(asked, ["lookupInvite", "startView"], "a look: no access()");
     assert.deepEqual(args[1], ["tok-good", "unit"]);
   }
@@ -217,7 +220,7 @@ test("get_start_page: the owner key alone gets a tool error; with a token, that 
   let args;
   ({ asked, args, res } = call(START, "tok-good", "", undefined, true, joined));
   j = await (await res).json();
-  assert.equal(j.result.content[0].text, startPage(joined, ORIGIN, "unit", undefined, true));
+  assert.equal(j.result.content[0].text, startPage(joined, ORIGIN, "unit", PIN, undefined, true));
   assert.match(j.result.content[0].text, /\nThis request also carried the owner key\. Calls that carry it act as the owner, not as "Scout": they join nothing, and a post needs "from" \(over MCP, "as"\)\./);
   assert.deepEqual(asked, ["startView"], "the owner key skips the lookup; the view is the token's");
   assert.deepEqual(args[0], ["tok-good", "unit"]);

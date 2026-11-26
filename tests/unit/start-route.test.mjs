@@ -7,9 +7,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { roomRoute } from "../../worker/routes/rooms.ts";
 import { OWNER_NO_START_PAGE, START_INVALID, START_NO_TOKEN, startPage } from "../../worker/agents/start.ts";
+import { watcherPin } from "../../worker/agents/docs.ts";
 import { base, joined } from "./start-views.mjs";
 
 const ORIGIN = "http://localhost";
+/** the watcher's version and SHA-256 at ORIGIN, which the page's step 3c prints */
+const PIN = await watcherPin(ORIGIN);
 const INVALID = { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
 const REVOKED = { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask whoever gave it to you for a new one." };
 const MISSING_ROOM = { error: "No room with that name yet. Create it from the home page." };
@@ -48,7 +51,7 @@ test("GET with a good token is the page: text, no-store, CORS, startPage of the 
     assert.equal(r.res.headers.get("Content-Type"), "text/plain; charset=utf-8");
     assert.equal(r.res.headers.get("Cache-Control"), "no-store");
     assert.equal(r.res.headers.get("Access-Control-Allow-Origin"), "*");
-    assert.equal(r.text, startPage(view, ORIGIN, "unit"));
+    assert.equal(r.text, startPage(view, ORIGIN, "unit", PIN));
     assert.deepEqual(r.asked, [["exists"], ["startView", "tok-good", "unit"]], "a look: no access()");
   }
 });
@@ -104,7 +107,7 @@ test("a token only in the URL is answered as no token", async () => {
 test("the owner key with a token gets that token's page, opening with the owner-key line", async () => {
   const r = await call("GET", { owner: true, invite: "tok-good" });
   assert.equal(r.res.status, 200);
-  assert.equal(r.text, startPage(joined, ORIGIN, "unit", undefined, true));
+  assert.equal(r.text, startPage(joined, ORIGIN, "unit", PIN, undefined, true));
   assert.ok(r.text.startsWith("Agent Chat start page: \"Scout\" in the room \"unit\"\n\nThis request also carried the owner key. Calls that carry it act as the owner, not as \"Scout\":"), r.text.slice(0, 200));
   const alone = (await call("GET", { invite: "tok-good" })).text;
   assert.ok(!alone.includes("owner key. Calls"), "a token alone gets no such line");
@@ -149,7 +152,7 @@ test("POST and DELETE stay the owner's, other methods 405, as before", async () 
 test("the address with a trailing slash is the same page; a deeper path is not", async () => {
   const r = await call("GET", { invite: "tok-good", path: "/api/rooms/unit/" });
   assert.equal(r.res.status, 200);
-  assert.equal(r.text, startPage(joined, ORIGIN, "unit"));
+  assert.equal(r.text, startPage(joined, ORIGIN, "unit", PIN));
   const deeper = await call("GET", { invite: "tok-good", path: "/api/rooms/unit/welcome" });
   assert.equal(deeper.res, undefined, "roomRoute leaves it to the router");
   assert.deepEqual(deeper.names, ["exists"]);
@@ -177,7 +180,7 @@ test("the web app's startPage() reads the page through the router as a look, and
   };
   try {
     const text = await new RoomClient("unit", "tok-good").startPage();
-    assert.equal(text, startPage(base, ORIGIN, "unit"));
+    assert.equal(text, startPage(base, ORIGIN, "unit", PIN));
     assert.deepEqual(sent, [["GET", "/api/rooms/unit", "tok-good"]], "GET of the room's own address, the token in the header");
     assert.deepEqual(asked.map((a) => a[0]), ["exists", "startView"], "a look: no access()");
     view = INVALID;

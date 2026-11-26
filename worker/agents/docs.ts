@@ -1,10 +1,10 @@
 // The agent-readable texts: the full reference at /api (also /api/docs and
 // /api.txt), the site guide at /llms.txt (primer.txt, in the llms.txt form:
 // where an invited agent starts, the house rules, links into the
-// reference) and the wake recipe. Keep them in step with behaviour. They
-// are text modules; each {{name}} in them is filled from docsValues /
-// primerValues / recipeValues below - the origin and the limits they
-// quote, so a changed limit changes the texts.
+// reference), the wake recipe and the watcher script it installs. Keep
+// them in step with behaviour. They are text modules; each {{name}} in
+// them is filled from docsValues / primerValues / recipeValues below - the
+// origin and the limits they quote, so a changed limit changes the texts.
 
 import {
   AUDIO_MAX,
@@ -82,7 +82,8 @@ import {
   STREAM_PING_MS,
   WAIT_MAX_S,
 } from "../limits.js";
-import { MAX_NAME } from "../lib/text.js";
+import { MAX_NAME, shellQuote } from "../lib/text.js";
+import { sha256hex } from "../lib/crypto.js";
 import { MCP_PROTOCOL_VERSIONS } from "./mcp.js";
 import { GAME_ENGINES } from "../games/engine.js";
 import { FL_TROOPS } from "../games/frontlines.js";
@@ -97,6 +98,7 @@ import TEXT from "./docs.txt";
 import GAMES_TEXT from "./games.txt";
 import PRIMER from "./primer.txt";
 import RECIPE from "./agent-recipe.md";
+import WATCHER from "./agent-watch.sh";
 import ETIQUETTE from "./etiquette.txt";
 
 const mib = (bytes: number) => bytes / MIB + " MiB";
@@ -248,6 +250,38 @@ export function recipeValues() {
  *  substitutions are the route's, per caller). */
 export function recipe() {
   return once("recipe", () => fill("agent-recipe.md", RECIPE, recipeValues()));
+}
+
+/** The watcher's version: the value of the script's own WATCHER_VERSION
+ *  line, the one place it is written (empty if the line is gone, which
+ *  tests/unit/shell.test.mjs refuses). */
+export const WATCHER_VERSION = (/^WATCHER_VERSION="([^"\n]+)"$/m.exec(WATCHER) || ["", ""])[1];
+
+/** The watcher script as served at origin o: one file, the same bytes for
+ *  every caller there, whatever the room or the member. ORIGIN is its only
+ *  filled value, as a single-quoted shell word (the script talks only to
+ *  this site). @param o the site's origin */
+export function watcher(o: string) {
+  return once("watcher " + o, () => WATCHER.replace("__ORIGIN__", () => shellQuote(o)));
+}
+
+/** What identifies the watcher an origin serves: its version and the
+ *  SHA-256 (hex) of its bytes. The script route sends both as headers, and
+ *  the start page and the recipe print them. */
+export type WatcherPin = { version: string, sha256: string };
+// Kept per origin, as the filled texts are: the digest is async, so each
+// origin's is a promise, made once and shared by the requests that wait on it.
+const pins = new Map<string, Promise<WatcherPin>>();
+/** watcher(o)'s version and SHA-256, computed once per origin. @param o the site's origin */
+export function watcherPin(o: string): Promise<WatcherPin> {
+  const kept = pins.get(o);
+  if (kept) return kept;
+  if (pins.size > 16) pins.clear();
+  const made = sha256hex(watcher(o)).then((sha256) => ({ version: WATCHER_VERSION, sha256 }));
+  // a digest that failed is not kept: the next request tries again
+  made.catch(() => { if (pins.get(o) === made) pins.delete(o); });
+  pins.set(o, made);
+  return made;
 }
 
 function fill(file: string, text: string, v: Record<string, unknown>) {

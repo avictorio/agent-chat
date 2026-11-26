@@ -2,9 +2,8 @@
 
 import { FETCH_DAILY_CAP, FETCH_URL_MAX, MAX_TEXT, MIB, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
 import { CORS, bodyText, deny, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
-import AGENT_WATCH from "../agents/agent-watch.sh";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
-import { MAX_NAME, oneLine, quotedBody, shellQuote } from "../lib/text.js";
+import { MAX_NAME, oneLine, quotedBody } from "../lib/text.js";
 import {
   MCP_CATALOG_VERSION,
   mcpCallTool,
@@ -17,15 +16,19 @@ import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { invitePreviewBody } from "./members.js";
 import { MCP_NO_TOKEN, mcpInstructions, type McpVariant } from "../agents/onboarding.js";
-import { recipe } from "../agents/docs.js";
+import { recipe, watcher, watcherPin } from "../agents/docs.js";
 import { OWNER_NO_START_PAGE, START_INVALID, START_LIMITS, START_NO_TOKEN, startPage } from "../agents/start.js";
 import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
-// by docs.ts), plus the watcher script it installs, with the room, the
-// caller's name and this origin substituted in. The caller's token is
-// never substituted anywhere: the recipe tells the agent to use the token
-// its invite already gave it.
+// by docs.ts) with the room, the caller's name, this origin and the
+// watcher's version and SHA-256 substituted in; and the watcher script it
+// installs, one file for every caller of this origin (docs.ts watcher:
+// only the origin is filled in, so an agent and its person can check the
+// bytes they approved), sent with its version and SHA-256 in
+// X-Watcher-Version and X-Watcher-SHA256. The caller's token is never
+// substituted anywhere: the recipe tells the agent to use the token its
+// invite already gave it.
 export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -34,28 +37,26 @@ export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
-  const who = acc.name || "agent";
-  const subs = {
+  const pin = await watcherPin(url.origin);
+  const headers = { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" };
+  if (m[2]) return new Response(watcher(url.origin), { headers: { ...headers, "X-Watcher-Version": pin.version, "X-Watcher-SHA256": pin.sha256 } });
+  // The recipe's text prints the name inside its own double quotes
+  // ("__NAME__"), folded onto its line and escaped as the note and the
+  // start page print it (oneLine, then quotedBody: a name may hold a NEL,
+  // a look-alike quotation mark or a bidi override).
+  const subs: Record<string, string> = {
     __SCRIPT_URL__: url.origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe/script",
     __ORIGIN__: url.origin,
     __ROOM__: room,
-    __NAME__: who,
-    __SELF__: who,
+    __NAME__: quotedBody(oneLine(acc.name || "agent")),
+    __WATCHER_VERSION__: pin.version,
+    __WATCHER_SHA256__: pin.sha256,
   };
   // One pass with a lookup, never a chain: substituted values are not
   // rescanned, so a member (or room) whose name IS a placeholder string
   // gets it verbatim instead of being rewritten by a later pass.
-  const fill = (t: string, v: Record<string, string>) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => v[mm]);
-  // The script is shell code that runs on the agent's machine, and a
-  // member's name is chosen by whoever invited them: every value goes in
-  // as a single-quoted literal, so none of it can be expanded or run. The
-  // recipe's text prints the name inside its own double quotes ("__NAME__"),
-  // folded onto its line and escaped as the note and the start page print
-  // it (oneLine, then quotedBody: a name may hold a NEL, a look-alike
-  // quotation mark or a bidi override); the script gets the name as it is.
-  const shown = quotedBody(oneLine(who));
-  const text = m[2] ? fill(AGENT_WATCH, Object.fromEntries(Object.entries(subs).map(([k, v]) => [k, shellQuote(v)]))) : fill(recipe(), { ...subs, __NAME__: shown, __SELF__: shown });
-  return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  const text = recipe().replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__WATCHER_VERSION__|__WATCHER_SHA256__/g, (mm) => subs[mm]);
+  return new Response(text, { headers });
 }
 
 /** The start page's refusal from the lookup: a token that is none of the
@@ -72,13 +73,16 @@ function startRefusal(v: Refusal): Refusal {
 // opening with a line that calls carrying the key act as the owner. A token
 // only in the URL is not read (lib/tokens.ts): answered as none. The room
 // exists (roomRoute answered 404 before the token, as on every room route).
+// Step 3c prints the watcher's version and SHA-256 for this origin
+// (watcherPin: an async digest, made once per origin).
 export async function startPageRoute(rc: RouteContext, stub: DurableObjectStub, room: string): Promise<Response> {
   const { request, url, owner, invite } = rc;
   if (!invite) return owner ? json({ error: OWNER_NO_START_PAGE }, 400) : json({ error: START_NO_TOKEN, code: "invite_missing" }, 401);
   const v = await stub.startView(invite, room);
   if (!v.ok) return deny(startRefusal(v));
   const headers = Object.assign({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }, CORS);
-  return new Response(request.method === "HEAD" ? null : startPage(v, url.origin, room, START_LIMITS, owner), { headers });
+  if (request.method === "HEAD") return new Response(null, { headers });
+  return new Response(startPage(v, url.origin, room, await watcherPin(url.origin), START_LIMITS, owner), { headers });
 }
 
 export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
@@ -221,7 +225,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
         if (!invite) { if (owner) return ok(mcpErr(OWNER_NO_START_PAGE)); const none = missing(); return fail(-32001, none.error, { code: none.code }); }
         const v = await stub.startView(invite, room);
         if (!v.ok) { const no = startRefusal(v); return fail(-32001, no.error, { code: no.code }); }
-        return ok({ content: [{ type: "text", text: startPage(v, url.origin, room, START_LIMITS, owner) }] });
+        return ok({ content: [{ type: "text", text: startPage(v, url.origin, room, await watcherPin(url.origin), START_LIMITS, owner) }] });
       }
       const acc = owner || invite ? await getAcc() : missing();
       if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });

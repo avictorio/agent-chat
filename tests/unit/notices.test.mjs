@@ -35,9 +35,9 @@ test("a notice shows through its until day and drops out after", () => {
 test("the feed lists the newest day first, and the newest days' later notices above their earlier ones", () => {
   for (let i = 1; i < NOTICES.length; i++) assert.ok(NOTICES[i - 1].date >= NOTICES[i].date, NOTICES[i - 1].id + " is listed above a newer " + NOTICES[i].id);
   const ids = NOTICES.map((n) => n.id);
-  // the day of the start page: the preview and the names, MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
+  // the day of the start page: the watcher's one file, the preview and the names, MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
   const day = ids.filter((id) => id.startsWith("2026-11-26-"));
-  assert.deepEqual(day, ["2026-11-26-preview-and-names", "2026-11-26-mcp-versions", "2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
+  assert.deepEqual(day, ["2026-11-26-watcher-script", "2026-11-26-preview-and-names", "2026-11-26-mcp-versions", "2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
   // the MCP route's URL-token retirement came after that day's two delivery hooks
   assert.deepEqual(ids.filter((id) => id.startsWith("2026-11-25-")), ["2026-11-25-mcp-query-token-retired", "2026-11-25-muse-delivery", "2026-11-25-webhook-delivery"]);
   const strip = NOTICES.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
@@ -65,7 +65,7 @@ import { ESCAPED_SET } from "./start-views.mjs";
 test("the preview-and-names notice says what changed and what stays as it was", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-preview-and-names");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[0].id, n.id, "listed first");
+  assert.equal(NOTICES[1].id, n.id, "listed second, below the watcher's");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -87,6 +87,25 @@ test("the preview-and-names notice says what changed and what stays as it was", 
   const fewer = NOTICES.find((x) => x.id === "2026-11-26-fewer-tokens").text;
   assert.ok(!/GET \/invite still/.test(fewer), fewer);
   for (const x of NOTICES) assert.ok(!/(GET \/invite|preview)[^.]*(still )?(carries|does)[^.]*agent_onboarding|agent_onboarding[^.]*(GET \/invite|preview) still/.test(x.text), x.id + " says the preview carries the note");
+});
+
+// The watcher script became one file for everyone, with its version and
+// SHA-256 in two headers, rooms only from rooms.txt, the token off curl's
+// command line and no spool. An agent running an older copy has to hear
+// that its copy keeps working and what the new one needs: the newest
+// notice, listed first, within the length limit.
+import { WATCHER_VERSION } from "../../worker/agents/docs.ts";
+test("the watcher's notice is first and says what changed for an agent running an older copy", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-26-watcher-script");
+  assert.ok(n, "the notice is there");
+  assert.equal(NOTICES[0].id, n.id, "listed first");
+  assert.equal(n.date, "2026-11-26");
+  assert.equal(n.until, "2026-12-26");
+  assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
+  assert.ok(n.text.length <= 500, String(n.text.length));
+  for (const want of ["one file, the same for every agent", "GET /api/rooms/ROOM/agent-recipe/script", "X-Watcher-Version and X-Watcher-SHA256", "on your start page (step 3, c) and in the recipe", "rooms only from rooms.txt and makes no call without a line", "(the room, a space, the token in invite.token)", "no longer puts your token on curl's command line", "ROOM.jsonl", "An older copy keeps working."]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  // it names no version or hash itself: those live in the script (WATCHER_VERSION)
+  assert.ok(!n.text.includes(WATCHER_VERSION) && !/[0-9a-f]{64}/.test(n.text));
 });
 
 // A list dir used to be joined with commas and worked by accident in

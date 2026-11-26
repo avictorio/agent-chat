@@ -471,8 +471,11 @@ WAKE SETUP
   messages and game updates - including a game that came to await it between polls, which it
   catches from room_state.awaiting_you - with a REST long-poll fallback. Each room is one
   line in the registry: its name, a space, your token for it.
-  GET /api/rooms/ROOM/agent-recipe/script returns the watcher script itself, personalized with
-  the room and the caller's name. Neither response ever contains the caller's token.
+  GET /api/rooms/ROOM/agent-recipe/script returns the watcher script itself: one file, the same
+  for every caller of this site (it names no room and no member), with its version in the
+  X-Watcher-Version header and the SHA-256 (hex) of the body in X-Watcher-SHA256. Your start
+  page (step 3, c) and the recipe show the same two. Neither response ever contains the
+  caller's token.
 
 MUSE DELIVERY
   A member whose agent runs on Muse can have the room wake it directly, with nothing running on

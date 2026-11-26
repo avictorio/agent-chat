@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import TEXT from "../../worker/agents/docs.txt";
 import GAMES_TEXT from "../../worker/agents/games.txt";
 import RECIPE from "../../worker/agents/agent-recipe.md";
-import { docs, docsValues, gamesDocs, recipe, recipeValues } from "../../worker/agents/docs.ts";
+import { WATCHER_VERSION, docs, docsValues, gamesDocs, recipe, recipeValues, watcherPin } from "../../worker/agents/docs.ts";
 import { GAME_ENGINES } from "../../worker/games/engine.ts";
 
 const used = new Set([...(TEXT + GAMES_TEXT).matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
@@ -211,6 +211,8 @@ import { makeRoom } from "./room-harness.mjs";
 import { ROOM as START_ROOM, base as startBase, joined as startJoined, viewOf } from "./start-views.mjs";
 
 const VARIANTS = ["ok", "owner", "none", "invalid", "revoked"];
+/** the watcher's version and SHA-256 at https://example.test, the origin every servedTexts call below passes */
+const PIN = await watcherPin("https://example.test");
 
 /** the sentence a revoked token is refused with, as the room gives it */
 function revokedSentence() {
@@ -238,10 +240,10 @@ function servedTexts(o) {
     "agent recipe": recipe(),
     "agent watcher": WATCHER,
     "room page note": agentNoteText(o, "lima"),
-    "start page": startPage(startBase, o, START_ROOM),
-    "start page, joined": startPage(startJoined, o, START_ROOM),
-    "start page, with the owner key": startPage(startJoined, o, START_ROOM, undefined, true),
-    "start page, a person's invite": startPage(viewOf("start-person"), o, START_ROOM),
+    "start page": startPage(startBase, o, START_ROOM, PIN),
+    "start page, joined": startPage(startJoined, o, START_ROOM, PIN),
+    "start page, with the owner key": startPage(startJoined, o, START_ROOM, PIN, undefined, true),
+    "start page, a person's invite": startPage(viewOf("start-person"), o, START_ROOM, PIN),
     "start page refusals": START_NO_TOKEN + " " + OWNER_NO_START_PAGE + " " + START_INVALID,
   };
 }
@@ -252,19 +254,64 @@ test("the served texts are all there", () => {
 });
 
 // Every text is true of the code as it is: none names what is not built
-// (a leave call, a version or hash of the watcher, the web app's "What your
-// agent reads first"), none points at the note's old registry line, and
-// none repeats a statement that was false: stopping reads stops no hook or
+// (a leave call, the web app's "What your agent reads first"), a watcher
+// version or SHA-256 a text prints is the one the origin serves (docs.ts
+// watcherPin), none points at the note's old registry line, and none
+// repeats a statement that was false: stopping reads stops no hook or
 // webhook, whoami joins, no room owner revokes, "any other call joins" was
 // wrong both ways, and get_invite is not the only tool that looks without
 // joining.
 test("no served text names what is not built, or a false rule", () => {
+  let pinned = 0;
   for (const [name, text] of Object.entries(servedTexts("https://example.test"))) {
     assert.ok(!/leave call/i.test(text.replace(/no leave call/gi, "")), name + " names a leave call");
-    assert.ok(!/watcher'?s? (script )?version|script version|its hash|SHA-256 of the script/i.test(text), name + " names the watcher's version or hash");
+    for (const m of text.matchAll(/SHA-256 ([0-9a-f]{64})\b/g)) { assert.equal(m[1], PIN.sha256, name + " names another SHA-256"); pinned++; }
+    for (const m of text.matchAll(/\bversion (\d{4}-\d{2}-\d{2}(?:\.\d+)?)\b/g)) assert.equal(m[1], WATCHER_VERSION, name + " names another watcher version");
     assert.ok(!text.includes("What your agent reads first"), name + " names the web app's disclosure");
     for (const bad of ["stop polling", "call whoami", "room owner", "Any other call", "every tool but get_invite)", "The only tool that does not", "Watcher registry line", "implement the wake recipe"]) assert.ok(!text.toLowerCase().includes(bad.toLowerCase()), name + " still says " + bad);
   }
+  assert.equal(pinned, 4, "the four start pages print the watcher's SHA-256");
+});
+
+// The script route answers one file for every caller of the site, with
+// its version and SHA-256 in two headers (routes/agents.ts recipeRoute):
+// WAKE SETUP says so, and names no room or caller filled into it.
+test("WAKE SETUP says the script is one file for every caller, with its two headers", () => {
+  const wake = sectionOf(docs("https://example.test"), "WAKE SETUP").replace(/\s+/g, " ");
+  assert.ok(wake.includes("GET /api/rooms/ROOM/agent-recipe/script returns the watcher script itself: one file, the same for every caller of this site (it names no room and no member), with its version in the X-Watcher-Version header and the SHA-256 (hex) of the body in X-Watcher-SHA256. Your start page (step 3, c) and the recipe show the same two. Neither response ever contains the caller's token."), wake);
+  assert.ok(!/personali[sz]ed/i.test(wake), "WAKE SETUP still says personalized");
+});
+
+// The recipe's sentences about the watcher, each true of the script
+// (agent-watch.sh; tests/unit/shell.test.mjs runs it): one file with its
+// version and SHA-256 and how to check them on Linux and macOS, rooms
+// from the registry only, stopping per room and altogether, the private
+// files it keeps (and no spool), and how a copy from before the version
+// line carries over.
+test("the wake recipe says what the watcher is, how to check and stop it, what it keeps, and how an older copy carries over", () => {
+  const r = recipe().replace(/\s+/g, " ");
+  for (const want of [
+    "The registry is the watcher's only list of rooms: a run with no line naming a room makes no network call at all.",
+    "One script, the same file for every agent on this site: it names no room, no member and no token, so its bytes are what you and your person approve. This site serves version __WATCHER_VERSION__, SHA-256 __WATCHER_SHA256__ (step 2 checks your copy against them).",
+    "each call reads its token header from a file in the run's private temporary directory, which the run removes as it exits.",
+    "bash, curl (7.55 or later: it reads the token header from a file) and jq",
+    "the response's X-Watcher-Version and X-Watcher-SHA256 headers name it. Check your copy before you run it, its SHA-256 first: sha256sum ~/hooks/scripts/agent-chat-watch.sh (Linux) shasum -a 256 ~/hooks/scripts/agent-chat-watch.sh (macOS) must show __WATCHER_SHA256__ (before the file's name), and then bash ~/hooks/scripts/agent-chat-watch.sh --version must print __WATCHER_VERSION__.",
+    "Show your person both values",
+    "\"dry-run: nothing to watch\" means no line of rooms.txt names a room",
+    "Delete its line: from its next run the watcher calls that room no more.",
+    "To stop watching everything: disable or remove the hook, or empty rooms.txt: a run with no line naming a room makes no network call; it logs that there is nothing to watch and ends.",
+    "up to three per room: <room>.cursor (below), <room>.self (your member name there, asked from the API) and, once a game has awaited you, <room>.awaiting",
+    "It creates each readable by you alone (it runs with umask 077); files an older copy wrote may still be readable by others, so chmod 600 ~/hooks/state/agent-chat/* once.",
+    "It keeps no copy of the messages: a wake's payload carries them.",
+    "A <room>.jsonl there was left by an older copy, which appended every message it collected to it; nothing reads it, and you can delete it.",
+    "a script with no WATCHER_VERSION line near its top was served before the watcher carried a version, and it keeps working as it did. It puts your token on curl's command line, appends every message it collects to <room>.jsonl,",
+    "make sure rooms.txt names that room: one line, the room's name, a space, the token from invite.token.",
+    "check its SHA-256 against the response's X-Watcher-SHA256 header (or your start page)",
+  ]) assert.ok(r.includes(want), "the recipe lacks: " + want.slice(0, 90));
+  for (const gone of ["baked-in fallback", "all-rooms mode", "personalized", "Older installs"]) assert.ok(!r.includes(gone), "the recipe still says " + gone);
+  // what the recipe says the script does, the script does
+  for (const [said, does] of [["umask 077", "\numask 077\n"], ["--version", "if [ \"${1:-}\" = \"--version\" ]; then"], ["token header from a file", "AUTH_ARGS=(-H \"@$RDIR/token.header\")"], ["nothing to watch", "silent \"dry-run: nothing to watch\""]]) assert.ok(r.includes(said) && WATCHER.includes(does), said);
+  assert.ok(!WATCHER.includes("$P_ROOM.jsonl"), "the script names no per-room spool");
 });
 
 test("the etiquette's fourth line says to remove a wake when leaving", () => {

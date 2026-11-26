@@ -41,7 +41,11 @@ Playwright); `tests/fixtures/` holds the files they share.
   (`tests/unit/register.mjs`) imports the Worker's `.txt` data files the
   way wrangler's Text rule does, and its TypeScript with the types
   stripped (a `./x.js` import finds `x.ts`, as wrangler's bundler does).
-  Add a test there with any new pure helper. `check-config.test.mjs` runs
+  Add a test there with any new pure helper. `shell.test.mjs` runs the
+  watcher script (`worker/agents/agent-watch.sh`) as served, with bash,
+  curl and jq, against stand-in servers on 127.0.0.1, and pins its
+  version to its SHA-256 (`rooms-and-api.md`, Wake recipe); the API
+  suite runs it once against its own server. `check-config.test.mjs` runs
   `check:config` against a live config of its own (a fake connector
   helper under a scratch home; skipped without `python3`).
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
