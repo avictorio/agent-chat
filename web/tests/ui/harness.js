@@ -606,9 +606,9 @@ async function setup(page, S, calls) {
     if (p.endsWith('/invite') && m === 'GET') {
       (S.hits = S.hits || []).push('GET /invite');
       if (S.noNote) return J({ error: 'upstream connect error' }, 500);
-      // S.previews: token -> the name its invite is for, or a refusal status (a number)
+      // S.previews: token -> the name its invite is for (a person's), {name, kind}, or a refusal status (a number)
       const tk = req.headers()['x-invite-token'] || '-';
-      if (S.previews && tk in S.previews) { const v = S.previews[tk]; S.hits.push('GET /invite ' + tk); return typeof v === 'number' ? J({ error: "This invite link isn't valid for this room." }, v) : J({ room: 'demo', invite: { name: v, kind: 'human', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: null, members: [], opened: false }); }
+      if (S.previews && tk in S.previews) { const v = S.previews[tk]; S.hits.push('GET /invite ' + tk); return typeof v === 'number' ? J({ error: "This invite link isn't valid for this room." }, v) : J({ room: 'demo', invite: { name: typeof v === 'string' ? v : v.name, kind: typeof v === 'string' ? 'human' : v.kind, status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: null, members: [], opened: false }); }
       return J(S.agentYou
         ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: S.probeBy, invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false }
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });

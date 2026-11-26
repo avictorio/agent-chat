@@ -53,13 +53,19 @@ async function subscribeBrowser(reg: ServiceWorkerRegistration): Promise<PushSub
  *  invite that the server asks for is still on the device. Forget used to
  *  delete only the invite, so the room kept notifying whoever held the
  *  device and nothing on it could stop that any more. Resolves when the
- *  room will not notify this device; throws when that is not certain. */
+ *  room will not notify this device; throws when that is not certain.
+ *  It looks first (GET /invite): an invite never opened holds no
+ *  registration (subscribing opens it), and the push routes run access(),
+ *  which would open it, so an unopened invite is left unopened. */
 export async function forgetRoomPush(room: string, token: string): Promise<void> {
   if (!pushSupported()) return;
   const reg = await navigator.serviceWorker.getRegistration("/");
   const sub = reg ? await reg.pushManager.getSubscription() : null;
+  if (!sub) return;
   try {
-    if (sub) await new RoomClient(room, token || null).pushUnsubscribe(sub.endpoint);
+    const client = new RoomClient(room, token || null);
+    const pv = await client.invitePreview();
+    if (pv.opened) await client.pushUnsubscribe(sub.endpoint);
   } catch (e) {
     // a revoked invite (its registrations went with it), a token the room
     // never knew, or a deleted room: nothing there notifies this device

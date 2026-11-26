@@ -144,11 +144,12 @@ test("the recipe's quoted names are JSON string bodies that give back the folded
     assert.equal(got.length - 1, 4, "four quoted names");
     for (const q of got.slice(1)) {
       assert.ok(!ESCAPED_SET.test(q), JSON.stringify(name) + ": a raw escapable character in " + q);
-      assert.equal(JSON.parse(q), oneLine(name), JSON.stringify(name));
+      // as served: UTF-8 has no lone surrogate, so the response carries U+FFFD in its place
+      assert.equal(JSON.parse(q), new TextDecoder().decode(new TextEncoder().encode(oneLine(name))), JSON.stringify(name));
     }
     if (name === "Scout") assert.ok(text.includes("You are the agent \"Scout\"."), "an ordinary name prints as it is");
     const script = await serve("/api/rooms/lima/agent-recipe/script");
-    assert.ok(script.includes("SELF=" + shellQuote(name)), JSON.stringify(name) + ": the script's name is the stored one, shell-quoted");
+    assert.ok(script.includes("SELF=" + new TextDecoder().decode(new TextEncoder().encode(shellQuote(name)))), JSON.stringify(name) + ": the script's name is the stored one, shell-quoted (as served)");
   }
 });
 

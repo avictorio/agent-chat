@@ -242,12 +242,14 @@ test("quoted writes a name as a JSON string's body, escaping what the rule names
   assert.equal(quoted("Scout"), "\"Scout\"");
   assert.equal(quoted("Иван"), "\"Иван\"");
   assert.equal(quoted("a\\b\"c"), "\"a\\\\b\\\"c\"");
-  for (const cp of [0x201c, 0x201d, 0x201e, 0x201f, 0x2033, 0x2036, 0x02ba, 0x02dd, 0x02ee, 0x05f4, 0x275d, 0x275e, 0x301d, 0x301e, 0x301f, 0xff02, 0x3003, 0x2e42, 0x00ad, 0x061c, 0x200b, 0x200e, 0x200f, 0x202a, 0x202e, 0x2060, 0x2066, 0x2069, 0xfeff]) {
+  for (const cp of [0x201c, 0x201d, 0x201e, 0x201f, 0x2033, 0x2036, 0x02ba, 0x02dd, 0x02ee, 0x05f4, 0x275d, 0x275e, 0x301d, 0x301e, 0x301f, 0xff02, 0x3003, 0x2e42, 0x2760, 0x02f6, 0x1cd3, 0x00ad, 0x061c, 0x200b, 0x200e, 0x200f, 0x202a, 0x202e, 0x2060, 0x2066, 0x2069, 0xfeff]) {
     assert.equal(quoted("a" + String.fromCodePoint(cp) + "b"), "\"a\\u" + cp.toString(16).padStart(4, "0") + "b\"", cp.toString(16));
   }
   // above U+FFFF: the surrogate pair, lower-case hex
   assert.equal(quoted("t\u{E0041}"), "\"t\\udb40\\udc41\"");
   assert.equal(quoted("\u{E0001}"), "\"\\udb40\\udc01\"");
+  // the ornament quotation marks above U+FFFF
+  for (const [cp, pair] of [[0x1f676, "\\ud83d\\ude76"], [0x1f677, "\\ud83d\\ude77"], [0x1f678, "\\ud83d\\ude78"]]) assert.equal(quoted("a" + String.fromCodePoint(cp) + "b"), "\"a" + pair + "b\"", cp.toString(16));
   // the two joiners stay, and so does an emoji built with one
   for (const s of ["a\u200cb", "a\u200db", "\u{1F468}\u200d\u{1F469}\u200d\u{1F467}", "\u{1F3F3}\ufe0f\u200d\u{1F308}"]) assert.equal(quoted(s), "\"" + s + "\"", JSON.stringify(s));
   for (const name of HOSTILE_NAMES) {

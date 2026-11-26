@@ -117,8 +117,10 @@ export const HOSTILE_NAMES = [
   "\u{1F468}\u200d\u{1F469}\u200d\u{1F467} Fam", // a ZWJ emoji: stays as typed
   "Soft\u00adhy\ufeffphen \u2066iso\u2069", // a soft hyphen, a BOM (folded by oneLine), an isolate
   "Ra\u201ch\u00a0\u0085el", // a look-alike beside a no-break space and a NEL, folded
+  "Lone\ud800x", // a lone surrogate (half a character; storage keeps U+FFFD in its place)
+  "\u201c\u201d\u202e\u200b\u{1f676}", // nothing but escaped characters
 ];
 /** The characters quoted (worker/lib/text.ts) must never leave raw inside
  *  the quotes: the look-alike double quotation marks and every format
  *  character (Cf) but the joiners U+200C and U+200D. */
-export const ESCAPED_SET = /[\u201c\u201d\u201e\u201f\u2033\u2036\u02ba\u02dd\u02ee\u05f4\u275d\u275e\u301d\u301e\u301f\uff02\u3003\u2e42]|(?![\u200c\u200d])\p{Cf}/u;
+export const ESCAPED_SET = /[\u201c\u201d\u201e\u201f\u2033\u2036\u02ba\u02dd\u02ee\u05f4\u275d\u275e\u301d\u301e\u301f\uff02\u3003\u2e42\u2760\u02f6\u1cd3\u{1f676}-\u{1f678}]|(?![\u200c\u200d])\p{Cf}/u;

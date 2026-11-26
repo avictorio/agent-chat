@@ -3,7 +3,7 @@ import { Icon as I } from "../../ui/Icon";
 import { CreateView } from "./CreateRoom";
 import { AgentsView, HowView } from "./StaticViews";
 import { HomeInstallStrip, HomeUpdateStrip, useHomeInstall } from "./install";
-import { store } from "../../lib/index";
+import { store, storeInvite } from "../../lib/index";
 import { registerServiceWorker } from "../shell/shell";
 import { forgetRoomPush } from "../shell/push";
 import { usePullToRefresh } from "../shell/strips";
@@ -12,6 +12,7 @@ import { Button } from "../../ui/Button";
 import { Count, NavTab } from "../../ui/Nav";
 import { Page } from "../../ui/Page";
 import { Card } from "../../ui/Card";
+import { RoomClient } from "@chat/contract";
 
 // The home page: your rooms on this device (invite tokens + identities
 // kept in local storage by the room pages themselves), the invite-link
@@ -117,26 +118,24 @@ export default function HomeApp() {
   usePullToRefresh();
 
   // Resolve identities for rooms whose token we hold but whose name
-  // is not cached yet, then cache them on-device.
+  // is not cached yet, then cache them on-device. The look (GET /invite)
+  // gives the name and opens nothing: a read of the room would open an
+  // agent's unused invite before its person chose at the room's gate.
   useEffect(() => {
     rooms.forEach((r) => {
       if (r.you || !r.token || resolvingRef.current.has(r.room)) return;
       resolvingRef.current.add(r.room);
-      fetch("/api/rooms/" + encodeURIComponent(r.room) + "/messages?limit=1", {
-        headers: { "X-Invite-Token": r.token },
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((d: { you?: string } | null) => {
-          if (d && d.you) {
-            try {
-              localStorage.setItem("chat-you:" + r.room, d.you);
-            } catch {
-              // storage unavailable
-            }
+      new RoomClient(r.room, r.token)
+        .invitePreview()
+        .then((pv) => {
+          if (pv.invite && pv.invite.name) {
+            store("chat-you:" + r.room, pv.invite.name);
             setRooms(savedRooms());
           }
         })
-        .catch(() => {})
+        .catch(() => {
+          // refused or unreachable: the row says "tap to open"
+        })
         .finally(() => resolvingRef.current.delete(r.room));
     });
   }, [rooms]);
@@ -255,11 +254,7 @@ export default function HomeApp() {
       return;
     }
     const room = rm[1]!.toLowerCase();
-    try {
-      localStorage.setItem("chat-invite:" + room, tok);
-    } catch {
-      // storage unavailable
-    }
+    storeInvite(room, tok);
     location.href = "/r/" + room + "#invite=" + tok;
   };
 

@@ -40,6 +40,30 @@ test("the web app's note is the server's note, owner-made and member-made, for e
   }
 });
 
+// An empty inviter is none: the owner-made form, in both builders.
+test("an empty inviter gives the owner-made form", () => {
+  for (const name of ["Scout", ...HOSTILE_NAMES]) {
+    const note = agentNote(O, "lima", name, TOKEN, "");
+    assert.equal(note, agentOnboarding(O, "lima", name, TOKEN, { invitedBy: "" }), JSON.stringify(name));
+    assert.ok(note.startsWith("You are invited to the Agent Chat room \"lima\" as the agent "), JSON.stringify(name));
+  }
+});
+
+// The two copies of the escaping (worker/lib/text.ts and agentNote.ts)
+// agree on every character: each BMP code unit, lone surrogates included,
+// and the astral ones the rule names or that are format characters, in
+// the agent's name and in the inviter's.
+test("the two builders agree on every character of the BMP and the astral ones the rule covers", () => {
+  const astral = [0x1f676, 0x1f677, 0x1f678, 0x110bd, 0x110cd, 0x13430, 0x1bca0, 0x1d173, 0xe0001, 0xe0020, 0xe0041, 0xe007f, 0x1f600, 0x10000, 0x10ffff];
+  const chars = [];
+  for (let cu = 0; cu <= 0xffff; cu++) chars.push(String.fromCharCode(cu));
+  for (const cp of astral) chars.push(String.fromCodePoint(cp));
+  for (const ch of chars) {
+    const name = "a" + ch + "b", by = "b" + ch + "a";
+    if (agentNote(O, "lima", name, TOKEN, by) !== agentOnboarding(O, "lima", name, TOKEN, { invitedBy: by })) assert.fail("the builders differ at U+" + ch.codePointAt(0).toString(16));
+  }
+});
+
 test("the example's fallback note is the fixture byte for byte", () => {
   const fixture = readFileSync(new URL("../fixtures/start-page/note-owner.txt", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.equal(agentNote(O, "example-room", "Scout", "EXAMPLE_TOKEN"), fixture);

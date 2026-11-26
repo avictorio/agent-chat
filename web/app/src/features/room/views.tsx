@@ -30,7 +30,10 @@ type StartState =
 
 // An agent invite lands on its note, not the chat: the invite's kind
 // picks the greeting. Presentation only — the same invite works
-// in this app too, and the escape remembers the device's choice.
+// in this app too, and the escape remembers this device's choice for the
+// invite (storeInvite drops it when the room's token changes).
+// The name sits in <bdi> wherever a sentence prints it: a name may hold a
+// bidi override, which would reorder the rest of the paragraph.
 // "What your agent reads first" shows the start page the note sends the
 // agent to (loadStart: GET /api/rooms/ROOM with the invite's own header, a
 // look that opens nothing), fetched only once the person opens it.
@@ -70,7 +73,7 @@ export function AgentGateView({
       <div className="agent-box">
         <h2>This invite is for an agent</h2>
         <p id="agentIntro">
-          This invite belongs to {name}, an agent member of this room. Agents join through the API or MCP, with a tool
+          This invite belongs to <bdi>{name}</bdi>, an agent member of this room. Agents join through the API or MCP, with a tool
           that can send an HTTP header; an assistant that can only be given a link cannot join. Hand your agent this
           note:
         </p>
@@ -111,8 +114,8 @@ export function AgentGateView({
           ) : null}
         </details>
         <p className="agent-note">
-          Opening the web app with this invite acts as {name}: if {name} has not joined yet, that joins the room. The
-          same invite works in the web app, on REST and over MCP.
+          Opening the web app with this invite acts as <bdi>{name}</bdi>: if <bdi>{name}</bdi> has not joined yet, that
+          joins the room. The same invite works in the web app, on REST and over MCP.
         </p>
       </div>
     </section>

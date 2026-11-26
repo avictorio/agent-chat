@@ -22,34 +22,38 @@ Front-end conventions.
   (`room/agentNote.ts`) from the preview, `GET /invite`, which carries no
   note: the member-made form when the preview names an inviter, the
   owner-made form when it names none. The room's messages are not read
-  until the person picks the web app. Under the buttons, "What your
-  agent reads first" (closed until opened, nothing fetched before) shows
-  the start page the note points at (`RoomClient.startPage`: `GET
-  /api/rooms/ROOM` with the invite's own header, a look that opens
-  nothing) in a box that scrolls by itself. The gate is passed when the
-  device chose the web app before (`ac:agent-app:<room>`), the preview
-  says a person's invite, the person picks the web app, or the app has
-  read the room itself. That last one is the fallback: when the preview
-  fails with something other than 401 or 403, the app reads the room
-  instead (that read opens an unused invite, so the agent has joined) and
-  then shows the gate with the owner-made form, without waiting for the
-  person's choice. Apart from that read, nothing the page does on its own
-  joins (calls a room route that runs `access()`, which opens an unused
-  invite) before the gate is passed: RoomShell's `passed` holds the
-  bell's status check (`shell/push.tsx` paints the bell from what the
-  browser alone knows meanwhile) and the Games, Media and board tabs'
-  loads (an address's #games, #media or board hash opens one at load).
-  The bell's menu and Your voice are off until the gate is passed and
-  while it shows, so on a person's page too for the length of the
+  until the person picks the web app, and meanwhile the room's status
+  reads "Not connected". Under the buttons, "What your agent reads first"
+  (closed until opened, nothing fetched before) shows the start page the
+  note points at (`RoomClient.startPage`: `GET /api/rooms/ROOM` with the
+  invite's own header, a look that opens nothing) in a box that scrolls
+  by itself. The gate is passed when the device chose the web app for
+  this invite before (`ac:agent-app:<room>`, which `storeInvite` in
+  `lib/index.ts` drops whenever a different token is saved for the room),
+  the preview says a person's invite, the person picks the web app, or
+  the app has read the room itself. That last one is the fallback: when
+  the preview fails with something other than 401 or 403, the app reads
+  the room instead (that read opens an unused invite, so the agent has
+  joined) and then shows the gate with the owner-made form, without
+  waiting for the person's choice. Apart from that read, nothing the page
+  does on its own joins (calls a room route that runs `access()`, which
+  opens an unused invite) before the gate is passed: RoomShell's `passed`
+  holds the bell's status check (`shell/push.tsx` paints the bell from
+  what the browser alone knows meanwhile) and the Games, Media and
+  board-tab loads (an address's #games, #media or board hash asks for one
+  at load). The bell's menu is off while the gate shows and until the
+  preview answers, so on a person's page too for the length of the
   preview request. The other views stay as they are while the preview is
   in flight: a person who acts in that moment (sends a message, for
   example) is using the web app with that invite, which joins. While the
   gate shows, tabs and views are hidden. A page with no token, or a
   refused one, is denied and never passes; its token joins nothing, so
-  its bell and Your voice work as on any page. With an agent's invite the
-  members list has no other member's link
-  (`docs/agents/rooms-and-api.md`, Members), and the rows without one
-  show no link field.
+  its bell asks the room and works as on any page. The home page looks
+  too: it names a room whose name it has not cached with `GET /invite`,
+  and Forget unsubscribes only an invite the look says was opened (one
+  never opened holds no registration). With an agent's invite the members
+  list has no other member's link (`docs/agents/rooms-and-api.md`,
+  Members), and the rows without one show no link field.
 
 - **Install strip:** the native install prompt on Android, Share steps on
   iOS, with one shared 30-day dismissal for the home banner and the room

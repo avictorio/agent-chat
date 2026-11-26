@@ -15,6 +15,17 @@ export function store(k: string, v?: string | null): string | null | void {
   return null;
 }
 
+/** Saves the invite this device holds for a room (chat-invite:<room>).
+ *  The agent gate's choice, "Open the web app anyway" (ac:agent-app:<room>),
+ *  belongs to the invite it was made with: a different token drops it, so
+ *  another agent invite for the room gets its own gate. The same token
+ *  again keeps it. */
+export function storeInvite(room: string, token: string): void {
+  if (store("chat-invite:" + room) === token) return;
+  store("chat-invite:" + room, token);
+  store("ac:agent-app:" + room, null);
+}
+
 export function isStandaloneApp(): boolean {
   return (
     (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||

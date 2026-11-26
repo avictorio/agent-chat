@@ -461,15 +461,18 @@ test("the room page's note and the web app's texts drop the false sentences", as
   const preview = client.slice(client.indexOf("export type InvitePreviewResponse"), client.indexOf("\n};", client.indexOf("export type InvitePreviewResponse")));
   assert.ok(preview.includes("opened: boolean") && !preview.includes("agent_onboarding"), "the contract's preview has no note");
   const views = readFileSync(new URL("web/app/src/features/room/views.tsx", root), "utf8").replace(/\s+/g, " ");
-  // the gate's sentences (React prints {name} where the source has it)
-  assert.ok(views.includes("This invite belongs to {name}, an agent member of this room. Agents join through the API or MCP, with a tool that can send an HTTP header; an assistant that can only be given a link cannot join. Hand your agent this note:"), "the gate's intro");
+  // the gate's sentences (React prints {name} where the source has it, each
+  // in <bdi>: a name may hold a bidi override)
+  assert.ok(views.includes("This invite belongs to <bdi>{name}</bdi>, an agent member of this room. Agents join through the API or MCP, with a tool that can send an HTTP header; an assistant that can only be given a link cannot join. Hand your agent this note:"), "the gate's intro");
   assert.ok(views.includes(">Copy the note<") || views.includes("> Copy the note <"), "the copy button");
   assert.ok(views.includes("toast(\"Note copied\")"), "the copy toast");
   assert.ok(views.includes("What your agent reads first"), "the start page's disclosure");
   // "Open the web app anyway" reads the room as the agent, which opens an
   // unused invite; and an agent invite's members list shows no other
   // member's link, so the gate does not say nothing is restricted
-  assert.ok(views.includes("Opening the web app with this invite acts as {name}: if {name} has not joined yet, that joins the room. The same invite works in the web app, on REST and over MCP."), "the gate's closing sentence");
+  assert.ok(views.includes("Opening the web app with this invite acts as <bdi>{name}</bdi>: if <bdi>{name}</bdi> has not joined yet, that joins the room. The same invite works in the web app, on REST and over MCP."), "the gate's closing sentence");
+  assert.equal(views.split("{name}").length - 1, 3, "the name, three times");
+  assert.equal(views.split("<bdi>{name}</bdi>").length - 1, 3, "each in <bdi>");
   assert.ok(!views.includes("Nothing is restricted") && !views.includes("restricts nothing"), "the gate says nothing is restricted");
   assert.ok(!/setup block|Setup block/.test(views.replace("select the block", "")), "the gate still calls the note a setup block");
   // the invite card's hint under Copy w/ Instructions (an agent invite's

@@ -23,6 +23,9 @@ const NOTE_BY_ANTHONY = '"Anthony" invited you to the Agent Chat room "demo" as 
   'Or, if your MCP client can set headers: connect to https://chat.victorio.cloud/api/rooms/demo/mcp with that header and call get_start_page for the same page. Neither step joins the room.';
 /** The gate's "What your agent reads first": closed, and nothing fetched for it. */
 async function startClosed(page, S) {
+  // nothing has read the room: the status says so, in the sidebar and on the top bar's dot
+  const st = await page.evaluate(() => ({ label: document.querySelector('#status .label').textContent, dot: document.getElementById('topDot').title }));
+  must(st.label === 'Not connected' && st.dot === 'Not connected', 'the gate\'s status: ' + JSON.stringify(st));
   const d = await page.$eval('#agentStart', (e) => ({ open: e.open, summary: e.querySelector('summary').textContent.trim(), pre: !!e.querySelector('pre') }));
   must(!d.open && d.summary === 'What your agent reads first' && !d.pre, 'the disclosure starts closed: ' + JSON.stringify(d));
   must(!(S.hits || []).includes('GET /api/rooms/demo'), 'the start page was fetched before the disclosure was opened: ' + JSON.stringify(S.hits));
@@ -655,6 +658,8 @@ async function startOpened(page, S) {
       // with no preview the read decides the invite's kind, so the room was
       // read (an unused invite opened) before the gate, unasked
       must((S.hits || []).includes('GET /messages'), 'the fallback gate follows the read: ' + JSON.stringify(S.hits));
+      // the room was read: the gate keeps the real status
+      must((await page.$eval('#status .label', (e) => e.textContent)) !== 'Not connected', 'the fallback gate shows the room\'s own status');
       const block = await page.$eval('#agentBlock', (e) => e.textContent);
       must(block === FALLBACK, 'the fallback is the owner-made note: ' + block.slice(0, 200));
       must(!/whoami|get_room_state/.test(block), 'the fallback names a call that joins: ' + block);
@@ -698,7 +703,7 @@ async function startOpened(page, S) {
   }
   // The start page did not load: the gate says so and offers Try again,
   // which reads it again.
-  for (const [tag, o] of [['', {}], ['-mobile-dark', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+  for (const [tag, o] of [['', {}], ['-dark', { scheme: 'dark' }], ['-mobile', { w: 390, h: 844, touch: true }], ['-mobile-dark', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run('agent-gate-start-failed' + tag, { state: { agentYou: true, startFail: 1 }, init: probeInvite, ...o }, async (page, S) => {
       await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
       await page.click('#agentStart > summary');
@@ -720,9 +725,9 @@ async function startOpened(page, S) {
   // invite: until "Open the web app anyway" the page asks the room only
   // with looks (GET /invite, the start page), whatever tab the address
   // names and whatever wakes the page (it comes back into view, online, a
-  // storage change); the bell and Your voice are off meanwhile. The bell's
-  // status check, which runs access() and so opens an unused invite, comes
-  // after the choice.
+  // storage change); the bell's menu is off and the status reads "Not
+  // connected" meanwhile. The bell's status check, which runs access() and
+  // so opens an unused invite, comes after the choice.
   const probePush = () => {
     try {
       if (!sessionStorage.getItem('seeded')) {
@@ -749,10 +754,9 @@ async function startOpened(page, S) {
       const early = roomCalls();
       must(looksOnly(early) && early.includes('GET /api/rooms/demo/invite'), 'before the choice only looks reach the room: ' + JSON.stringify(early));
       must(!(S.pushLog || []).length, 'the bell asked the room before the choice: ' + JSON.stringify(S.pushLog));
-      const off = await page.evaluate(() => ({ bells: [...document.querySelectorAll('.pushBtn')].map((b) => b.disabled), voice: document.getElementById('voiceBtn').disabled }));
-      must(off.bells.length === 2 && off.bells.every(Boolean) && off.voice, 'the bell and Your voice are off while the gate shows: ' + JSON.stringify(off));
-      await page.$$eval('.pushBtn', (bs) => bs.forEach((b) => b.click()));
-      must(!(await page.$('.pushMenu')), 'the bell opened its menu');
+      const off = await page.evaluate(() => ({ bells: [...document.querySelectorAll('.pushBtn')].map((b) => b.disabled), status: document.querySelector('#status .label').textContent, dot: document.getElementById('topDot').title }));
+      must(off.bells.length === 2 && off.bells.every(Boolean), 'the bell\'s menu is off while the gate shows: ' + JSON.stringify(off));
+      must(off.status === 'Not connected' && off.dot === 'Not connected', 'nothing is connecting while the gate holds the room: ' + JSON.stringify(off));
       // the start page is a look too
       await page.click('#agentStart > summary');
       await page.waitForSelector('#agentStartPage', { timeout: 5000 });
@@ -765,10 +769,81 @@ async function startOpened(page, S) {
       const after = roomCalls().slice(before.length);
       must((S.pushLog || []).includes('status tok_Probe'), 'the bell\'s status check runs after the choice: ' + JSON.stringify(S.pushLog));
       must(after.some((c) => c.startsWith('GET /api/rooms/demo/messages')), 'the room is read after the choice: ' + JSON.stringify(after));
-      await page.waitForFunction(() => [...document.querySelectorAll('.pushBtn')].every((b) => !b.disabled) && !document.getElementById('voiceBtn').disabled, null, { timeout: 4000 });
+      await page.waitForFunction(() => [...document.querySelectorAll('.pushBtn')].every((b) => !b.disabled) && document.querySelector('#status .label').textContent !== 'Not connected', null, { timeout: 4000 });
       return { early: early.length, before: before.length, after: after.length };
     });
   }
+  // A person's page whose preview fails with a 5xx: the app reads the room
+  // instead, and only after that read do the bell's status check and the
+  // Games tab's load (#games) run.
+  await run('person-fallback-held', { state: { noNote: true }, init: pushInitSrc, hash: '#games' }, async (page, S, calls) => {
+    for (let i = 0; i < 300 && !((S.pushLog || []).some((l) => l.startsWith('status')) && calls.some((c) => c === 'GET /api/rooms/demo/games')); i++) await new Promise((r) => setTimeout(r, 20));
+    const at = (pred) => calls.findIndex(pred);
+    const out = { preview: at((c) => c === 'GET /api/rooms/demo/invite'), read: at((c) => c.startsWith('GET /api/rooms/demo/messages')), status: at((c) => c.startsWith('GET /api/rooms/demo/push/status')), games: at((c) => c === 'GET /api/rooms/demo/games') };
+    must(out.preview >= 0 && out.read > out.preview && out.status > out.read && out.games > out.read, 'the read comes first, then the bell\'s check and the games: ' + JSON.stringify(out));
+    must(!(await page.$eval('#view-agent', (e) => !e.hidden)), 'no gate for a person');
+    return out;
+  });
+  // The home page names a room whose name it has not cached with the look
+  // (GET /invite): a read would open the agent's unused invite before its
+  // person chose at the room's gate ("All rooms" on the gate leads here).
+  await run('home-no-join', { state: { agentYou: true }, init: probeInvite }, async (page, S, calls) => {
+    await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+    await settle(page);
+    must(!(await page.evaluate(() => localStorage.getItem('chat-you:demo'))), 'no name cached before the home page');
+    const from = calls.length;
+    await page.goto('https://chat.victorio.cloud/');
+    await page.waitForFunction(() => /as Probe/.test(document.querySelector('.roomrow .who')?.textContent || ''), null, { timeout: 10000 });
+    await settle(page);
+    const room = calls.slice(from).filter((c) => / \/api\/rooms\//.test(c));
+    must(JSON.stringify(room) === '["GET /api/rooms/demo/invite"]', 'the home page only looks at the room: ' + JSON.stringify(room));
+    return { room, who: await page.$eval('.roomrow .who', (e) => e.textContent) };
+  });
+  // Forget with an agent's invite never opened, on a device whose browser
+  // holds a push subscription: the look says it was never opened, so no
+  // push route is called (it would open the invite), and the room is
+  // forgotten.
+  await run('push-forget-unopened', { state: { agentYou: true }, init: '(' + fakePush + ')(); (' + probePush + ')();' }, async (page, S, calls) => {
+    await page.goto('https://chat.victorio.cloud/');
+    await settle(page);
+    const from = calls.length;
+    await page.click('.roomrow:has(.rn:text-is("demo")) .forget');
+    await page.waitForSelector('#forgetDlg[open]', { timeout: 4000 });
+    await page.click('#forgetYes');
+    await page.waitForFunction(() => ![...document.querySelectorAll('.roomrow .rn')].some((r) => r.textContent === 'demo'), null, { timeout: 5000 });
+    await settle(page);
+    const room = calls.slice(from).filter((c) => / \/api\/rooms\/demo\//.test(c));
+    const out = { room, pushLog: S.pushLog || [], invite: await page.evaluate(() => localStorage.getItem('chat-invite:demo')), open: await page.$eval('#forgetDlg', (d) => d.open) };
+    must(JSON.stringify(out.room) === '["GET /api/rooms/demo/invite"]' && !out.pushLog.length, 'Forget only looks at an unopened invite: ' + JSON.stringify(out));
+    must(out.invite === null && !out.open, 'the room is forgotten: ' + JSON.stringify(out));
+    return out;
+  });
+  // The gate's choice belongs to one invite. A device that chose the web
+  // app for agent Probe's invite is offered agent Bot's for the same room
+  // and switches to it: Bot gets its own gate, and the room is not read.
+  const switchToBot = () => {
+    try {
+      if (!sessionStorage.getItem('seeded')) {
+        sessionStorage.setItem('seeded', '1');
+        localStorage.setItem('chat-invite:demo', 'tok_Probe');
+        localStorage.setItem('chat-you:demo', 'Probe');
+        localStorage.setItem('ac:agent-app:demo', '1');
+      }
+    } catch { /* the scenario fails visibly */ }
+    window.confirm = () => true;
+  };
+  await run('agent-gate-switch', { state: { agentYou: true, previews: { tok_Bot: { name: 'Bot', kind: 'agent' } } }, init: switchToBot, hash: '#invite=tok_Bot' }, async (page, S) => {
+    const asBot = () => (S.hits || []).filter((h) => h === 'GET /invite tok_Bot').length;
+    for (let i = 0; i < 500 && asBot() < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+    await settle(page, 300);
+    const out = await page.evaluate(() => ({ token: localStorage.getItem('chat-invite:demo'), flag: localStorage.getItem('ac:agent-app:demo'), intro: document.getElementById('agentIntro').textContent.replace(/\s+/g, ' ').trim(), block: document.getElementById('agentBlock').textContent }));
+    must(out.token === 'tok_Bot' && out.flag === null, 'the switch saved Bot\'s invite and dropped the choice: ' + JSON.stringify(out));
+    must(out.intro.startsWith('This invite belongs to Bot, an agent member') && out.block.includes('X-Invite-Token: tok_Bot '), 'Bot\'s gate: ' + JSON.stringify(out).slice(0, 300));
+    const lastBot = S.hits.lastIndexOf('GET /invite tok_Bot');
+    must(!S.hits.slice(lastBot).includes('GET /messages'), 'the room was read as Bot before the choice: ' + JSON.stringify(S.hits));
+    return { hits: S.hits.length };
+  });
   // A person who opened the web app with an agent's invite: the members list
   // the Worker gives that invite holds its own row's link only, and no
   // row's note, so the rows show one link field and no Copy w/ Instructions.
@@ -862,15 +937,19 @@ async function startOpened(page, S) {
     const page = await ctx.newPage();
     await installClock(page);
     const errs = [];
+    const roomCalls = [];
     page.on('pageerror', (e) => errs.push(e.message));
     page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
     await page.route('https://chat.victorio.cloud/**', async (route) => {
       const u = new URL(route.request().url());
       const pth = u.pathname;
       const J = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', body: JSON.stringify(o) });
+      if (pth.startsWith('/api/rooms/')) roomCalls.push(route.request().method() + ' ' + pth + u.search);
       if (pth === '/' || pth === '/index.html' || pth.startsWith('/r/')) return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
       if (pth === '/api/build') return J({ build: 'uitestbuild2' });
       if (pth.endsWith('/messages')) return J({ messages: [], you: 'Tester' });
+      // the home page names a room with the look, which opens nothing
+      if (pth.endsWith('/invite')) return J({ room: pth.split('/')[3], invite: { name: 'Tester', kind: 'human', status: 'active', invited_by: null, invited: 0, joined: 0 }, purpose: null, members: [], opened: true });
       if (pth.endsWith('/members')) return J({ room: 'demo', invite_only: true, members: [] });
       if (pth.startsWith('/assets/')) { try { const b2 = require('fs').readFileSync(DIST + pth); return route.fulfill({ status: 200, contentType: pth.endsWith('.css') ? 'text/css' : 'text/javascript', body: b2 }); } catch { return route.fulfill({ status: 404, body: 'nf' }); } }
       if (pth.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
@@ -893,6 +972,8 @@ async function startOpened(page, S) {
       out.forgetInsideLink = await page.$eval('body', () => !!document.querySelector('.roomrow a .forget'));
       out.forgetIsSibling = await page.$eval('body', () => !!document.querySelector('.roomrow > .forget'));
       out.asYou = await page.$$eval('.roomrow .who', (ws) => ws.map((w) => w.textContent));
+      // the names come from the look alone: nothing the home page asks opens an invite
+      if (JSON.stringify(roomCalls.slice().sort()) !== JSON.stringify(['GET /api/rooms/demo-room/invite', 'GET /api/rooms/second-room/invite'])) throw new Error('the home page asked the rooms more than a look: ' + JSON.stringify(roomCalls));
       await page.click('.tab[data-view="create"]');
       await settle(page);
       await page.fill('#cRoom', 'My Room');

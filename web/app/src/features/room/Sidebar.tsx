@@ -50,12 +50,14 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
-export type Status = "connecting" | "live" | "locked" | "reconnecting";
+// idle: the agent gate holds the room and nothing has read it (RoomShell)
+export type Status = "connecting" | "live" | "locked" | "reconnecting" | "idle";
 export const STATUS_LABEL: Record<Status, string> = {
   connecting: "Connecting…",
   live: "Live",
   locked: "Invite only",
   reconnecting: "Reconnecting…",
+  idle: "Not connected",
 };
 
 export interface SidebarProps {
@@ -74,8 +76,6 @@ export interface SidebarProps {
   copyLink: () => void;
   push: { visible: boolean; on: boolean; label: string; usable: boolean; bellClick: (btn: HTMLButtonElement) => void };
   voiceHidden: boolean;
-  /** Your voice waits while the agent gate holds the room (RoomShell) */
-  voiceDisabled: boolean;
   onVoice: () => void;
   install: { buttonVisible: boolean; runInstall: () => void };
 }
@@ -186,7 +186,7 @@ export function Sidebar(p: SidebarProps) {
             </Button>
           </div>
           <div className="foot-row">
-            <Button type="button" size="sm" id="voiceBtn" hidden={p.voiceHidden} disabled={p.voiceDisabled} onClick={p.onVoice}>
+            <Button type="button" size="sm" id="voiceBtn" hidden={p.voiceHidden} onClick={p.onVoice}>
               <I d={["M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5 11a7 7 0 0 0 14 0", "M12 18v3"]} />
               <span>Your voice</span>
             </Button>

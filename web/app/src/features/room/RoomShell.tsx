@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useLatest } from "../../lib/useLatest";
 import { Icon as I } from "../../ui/Icon";
 import { ApiError, RoomClient, type MemberKind } from "@chat/contract";
-import { same, store, toast } from "../../lib/index";
+import { same, store, storeInvite, toast } from "../../lib/index";
 import { InstallStrip, NoticeStrip, UpdateStrip, useInstall, usePullToRefresh } from "../shell/strips";
 import { ToastHost } from "../shell/ToastHost";
 import { AgentGateView, LockedView } from "./views";
@@ -67,7 +67,7 @@ export function takeInvite(room: string): { token: string; offered: string | nul
       // history unavailable: the fragment stays, harmless
     }
     if (saved && saved !== hm[1]) return { token: saved, offered: hm[1] };
-    store(invKey, hm[1]);
+    storeInvite(room, hm[1]);
     return { token: hm[1], offered: null };
   }
   return { token: saved, offered: null };
@@ -109,20 +109,24 @@ export function RoomShell({ room }: { room: string }) {
     return { client: new RoomClient(room, t.token || null), token: t.token, offered: t.offered };
   }, [room]);
   // Whether the agent gate is passed: this device chose the web app for the
-  // room before (ac:agent-app:), or useRoomStream says so (onPassed: the
-  // preview said a person's invite, the person picked the web app, or the
-  // app read the room itself after the preview failed). Until then the page
-  // makes no call of its own to a room route that joins, that read aside:
-  // each runs access() on the server, which opens an unused invite, so an
-  // agent's invite opened in a browser would join before the person chose.
-  // Held meanwhile: the bell's status check, the Games and Media views'
-  // loads and a board tab's load (a #games, #media or board hash). Off
-  // while the gate shows: the bell's menu and Your voice (its dialog reads
-  // GET /voice). A page with no token or a refused one is denied and never
-  // passes; its token joins nothing, so its bell and Your voice work as on
-  // any page.
+  // room with this invite (ac:agent-app:), or useRoomStream says so
+  // (onPassed: the preview said a person's invite, the person picked the
+  // web app, or the app read the room itself after the preview failed).
+  // Until then the page makes no call of its own to a room route that
+  // joins, that read aside: each runs access() on the server, which opens
+  // an unused invite, so an agent's invite opened in a browser would join
+  // before the person chose. Held meanwhile: the bell's status check and
+  // the Games, Media and board-tab loads (a #games, #media or board hash
+  // asks for one at load). Off while the gate shows, and until the preview
+  // answers: the bell's menu (subscribing registers with the room). A page
+  // with no token or a refused one is denied and never passes; its token
+  // joins nothing, so its bell asks and works as on any page.
   const [passed, setPassed] = useState(() => !!token && !!store("ac:agent-app:" + room));
-  const roomCallsOk = gate === null && (passed || denied);
+  const bellUsable = gate === null && (passed || denied);
+  // While the gate holds a room nothing has read, nothing is connecting:
+  // the status says so. A gate shown after the fallback's read keeps the
+  // real status.
+  const shownStatus: Status = gate !== null && !passed ? "idle" : status;
 
   // A link carrying a different invite than the one saved here: look at it
   // first (GET /invite, which leaves it unopened) while the room loads as
@@ -141,7 +145,7 @@ export function RoomShell({ room }: { room: string }) {
           ? "You are " + was + " in this room. Switch this device to " + name + "?"
           : "This device already has an invite for this room. Switch it to " + name + "'s?";
         if (!same(was, name) && !window.confirm(ask)) return;
-        store("chat-invite:" + room, offered);
+        storeInvite(room, offered);
         store("chat-you:" + room, name);
         location.reload();
       },
@@ -345,7 +349,7 @@ export function RoomShell({ room }: { room: string }) {
     update();
     return games.subscribe(update);
   }, [games]);
-  const push = usePush(client, toast, passed, roomCallsOk);
+  const push = usePush(client, toast, passed || denied, bellUsable);
   const rx = useReactions({
     client,
     who,
@@ -519,7 +523,7 @@ export function RoomShell({ room }: { room: string }) {
     <div className="app">
       <Sidebar
         room={room}
-        status={status}
+        status={shownStatus}
         inviteOnly={board.members.inviteOnly}
         denied={denied}
         gate={!!gate}
@@ -533,7 +537,6 @@ export function RoomShell({ room }: { room: string }) {
         copyLink={copyLink}
         push={push}
         voiceHidden={!token}
-        voiceDisabled={!roomCallsOk}
         onVoice={() => voiceRef.current?.open()}
         install={inst}
       />
@@ -570,7 +573,7 @@ export function RoomShell({ room }: { room: string }) {
           >
             <I d={["M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z", "M10 20a2.2 2.2 0 0 0 4 0"]} />
           </IconButton>
-          <span className={"topdot" + (status === "live" ? " live" : status === "locked" ? " locked" : "")} id="topDot" title={STATUS_LABEL[status]}></span>
+          <span className={"topdot" + (shownStatus === "live" ? " live" : shownStatus === "locked" ? " locked" : "")} id="topDot" title={STATUS_LABEL[shownStatus]}></span>
         </header>
 
         <div id="pullHint" hidden>

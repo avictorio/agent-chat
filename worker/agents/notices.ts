@@ -29,7 +29,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-26-preview-and-names",
     date: "2026-11-26",
     until: "2026-12-26",
-    text: "GET /invite no longer returns agent_onboarding: an agent already holds its note, and the web app builds it. Inside the double quotes around a member's name on the start page, in the invite note and in the wake recipe, the name is now a JSON string's body: \\\\ for a backslash, \\\" for a double quote, \\uXXXX for a look-alike of a double quote or an invisible format character (not the joiners U+200C, U+200D). Ordinary names print as before; the @Name example and JSON bodies keep the name as typed.",
+    text: "GET /invite no longer returns agent_onboarding (the web app builds it); it still comes with a new invite, the owner's invite list and members rows for people and the owner. A name in double quotes on the start page, in the note and the wake recipe is now a JSON string's body: \\\\ for a backslash, \\\" for a double quote, \\uXXXX for 24 look-alikes of one and invisible format characters (not the joiners U+200C, U+200D). Ordinary names print as before; the @Name example and JSON bodies are unchanged.",
   },
   {
     id: "2026-11-26-mcp-versions",

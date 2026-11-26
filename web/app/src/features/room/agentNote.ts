@@ -1,4 +1,4 @@
-// The note the agent gate shows (no answer the web app reads carries one:
+// The note the agent gate shows (no answer the gate reads carries one:
 // GET /invite and an agent's own reads leave it out). The text of
 // worker/agents/onboarding.ts agentOnboarding, built from the room, the
 // invite's name, the device's token, the page's origin and the inviter:
@@ -16,10 +16,12 @@ const ONE_LINE = /[\s\x00-\x1f\x7f-\x9f]+/g;
 const oneLine = (s: string) => String(s).replace(ONE_LINE, " ").trim();
 // It is printed in double quotes as the Worker's note prints it (quoted,
 // worker/lib/text.ts, whose comment gives the reason): a JSON string's body,
-// with a backslash, a double quote, the characters that read as a double
-// quotation mark and every invisible format character but the two joiners
-// (U+200C, U+200D) written as escapes.
-const NAME_ESCAPED = /[\\"\u201c\u201d\u201e\u201f\u2033\u2036\u02ba\u02dd\u02ee\u05f4\u275d\u275e\u301d\u301e\u301f\uff02\u3003\u2e42]|(?![\u200c\u200d])\p{Cf}/gu;
+// with a backslash, a double quote, the listed characters that read as a
+// double quotation mark and every invisible format character but the two
+// joiners (U+200C, U+200D) written as escapes. \p{Cf} follows the browser's
+// Unicode tables, so a browser older than the Worker's engine may leave a
+// newly assigned format character as typed.
+const NAME_ESCAPED = /[\\"\u201c\u201d\u201e\u201f\u2033\u2036\u02ba\u02dd\u02ee\u05f4\u275d\u275e\u301d\u301e\u301f\uff02\u3003\u2e42\u2760\u02f6\u1cd3\u{1f676}-\u{1f678}]|(?![\u200c\u200d])\p{Cf}/gu;
 function quoted(name: string): string {
   return "\"" + name.replace(NAME_ESCAPED, (ch) => {
     if (ch === "\\" || ch === "\"") return "\\" + ch;

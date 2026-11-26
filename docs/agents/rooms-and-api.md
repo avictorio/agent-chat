@@ -527,7 +527,8 @@ docs.txt section that owns its routes, caps and formats.
   owner-made form. `tests/unit/agent-note.test.mjs` keeps both forms
   equal to `agentOnboarding`'s.
   "Open the web app anyway" stores `ac:agent-app:<room>`, so a
-  device is asked once. Copy w/ Instructions copies the note from the
+  device is asked once per invite: saving a different token for the room
+  drops it (`storeInvite`, `web/app/src/lib/index.ts`). Copy w/ Instructions copies the note from the
   invite card at creation and from each agent's row in the members list
   (rows that carry one: the owner key's and people's).
   It is presentation only: the same token works on both surfaces.
@@ -849,7 +850,9 @@ docs.txt section that owns its routes, caps and formats.
   replacement still alerts. In the web
   app, Off is per room: the browser subscription is shared by every room
   on the device. A refused Off says so and leaves the bell on; Forget on
-  Home unsubscribes the room before it deletes the invite. Both clear the
+  Home unsubscribes the room before it deletes the invite, when the look
+  (`GET /invite`) says the invite was opened: one never opened holds no
+  registration, and the unsubscribe would open it. Both clear the
   room's saved mode before the unsubscribe and put it back if it fails:
   an open tab of the room re-registers quietly when its status check
   hears "not registered" and still finds a mode. That tab also repaints

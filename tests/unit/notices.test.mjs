@@ -61,6 +61,7 @@ test("the quoted names' notice says what changed and what an agent still sends a
 // notice, so one notice says both, that ordinary names print as before and
 // that what an agent sends keeps the name as typed.
 import { quoted } from "../../worker/lib/text.ts";
+import { ESCAPED_SET } from "./start-views.mjs";
 test("the preview-and-names notice says what changed and what stays as it was", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-preview-and-names");
   assert.ok(n, "the notice is there");
@@ -69,7 +70,15 @@ test("the preview-and-names notice says what changed and what stays as it was", 
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
   assert.ok(n.text.length <= 500, String(n.text.length));
-  for (const want of ["GET /invite no longer returns agent_onboarding", "an agent already holds its note", "the web app builds it", "start page", "invite note", "wake recipe", "JSON string", "\\\\ for a backslash", "\\\" for a double quote", "\\uXXXX", "invisible format character", "U+200C, U+200D", "Ordinary names print as before", "@Name", "JSON bodies keep the name as typed"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  for (const want of ["GET /invite no longer returns agent_onboarding (the web app builds it)", "it still comes with a new invite, the owner's invite list and members rows for people and the owner", "start page", "the note", "wake recipe", "JSON string's body", "\\\\ for a backslash", "\\\" for a double quote", "\\uXXXX for 24 look-alikes", "invisible format characters", "(not the joiners U+200C, U+200D)", "Ordinary names print as before", "@Name example and JSON bodies are unchanged"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  // the 24 it names are what quoted() escapes besides the Cf characters, \ and "
+  let lookalikes = 0;
+  for (let cp = 0; cp <= 0x10ffff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const ch = String.fromCodePoint(cp);
+    if (ESCAPED_SET.test(ch) && !/\p{Cf}/u.test(ch)) lookalikes++;
+  }
+  assert.equal(lookalikes, 24, "look-alikes escaped");
   // what it says of a backslash, a double quote and an ordinary name is what quoted() does
   assert.equal(quoted("a\\b"), "\"a\\\\b\"");
   assert.equal(quoted("a\"b"), "\"a\\\"b\"");

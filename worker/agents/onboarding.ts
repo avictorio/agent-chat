@@ -29,10 +29,10 @@ export function forAgents(origin: string, room: string) {
 // else that could go stale. Names are folded onto their line (oneLine: a
 // name may hold a NEL) and printed in double quotes with what could seem
 // to end them escaped (quoted, lib/text.ts: a name is written by whoever
-// made the invite and could read as part of the note). The web app builds
-// the owner-made form itself when the server sent none
-// (web/app/src/features/room/agentNote.ts): tests/unit/agent-note.test.mjs
-// keeps the two the same.
+// made the invite and could read as part of the note). The web app's agent
+// gate builds the note itself, both forms, from the preview (GET /invite
+// carries none: web/app/src/features/room/agentNote.ts), and
+// tests/unit/agent-note.test.mjs keeps the two builders the same.
 export function agentOnboarding(origin: string, room: string, name: string, token: string, opts?: { invitedBy?: string | null }) {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
   const me = quoted(oneLine(name));

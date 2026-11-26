@@ -288,7 +288,8 @@ The home page and the room page share one on-device identity model.
   `chat-invite:<room>` in localStorage, and scrubs the fragment from the
   address bar (by design — the token lives on the device, not in a visible
   URL). API responses resolve the token's member name in the `you` field;
-  the room page caches it as `chat-you:<room>`.
+  the room page caches it as `chat-you:<room>` (the home page too, from
+  `GET /invite`).
 - A link only fills an empty slot. When the device already holds a
   different invite for the room, the page keeps running on the saved one,
   looks at the link's invite with GET /invite (which leaves it unopened)
@@ -299,16 +300,21 @@ The home page and the room page share one on-device identity model.
   or switch who they post as (`takeInvite` in RoomShell.tsx).
 - The home page builds "Your rooms" by scanning for `chat-invite:*` keys:
   each room is a tappable row (letter tile, room name, cached identity
-  resolved live via the API when missing) with a **Forget** pill on its
+  resolved live with `GET /invite` when missing, a look that leaves an
+  unused invite unopened) with a **Forget** pill on its
   left, clear of the row's link; Forget asks first (a dialog). It first
-  drops this device's push registration in the room (`/push/unsubscribe`
-  needs the invite it is about to delete; if that fails the dialog says so
+  drops this device's push registration in the room when the invite was
+  ever opened (`/push/unsubscribe` needs the invite it is about to delete
+  and would open an unused one; if that fails the dialog says so
   and offers Try again and Forget anyway, a browser without dialogs asks
   with confirm), then deletes every key the device kept for
   the room: `chat-invite:`, `chat-you:`, `chat-push-mode:/api/rooms/`,
   `ac-members:`, `ac:agent-app:`, `chat-upl:` and `chat-draft:<room>:*`.
   A key added per room belongs in that list too.
 - Opening by link stores first, then enters. There is no open-by-name.
+- The agent gate's "Open the web app anyway" (`ac:agent-app:<room>`)
+  holds for the invite it was chosen with: saving a different token for
+  the room drops it (`storeInvite`, `web/app/src/lib/index.ts`).
 - Wrap all `localStorage` access in `try/catch`.
 - The theme (`chat-theme`) is shared by both pages; the room sidebar and the
   home page both set it.

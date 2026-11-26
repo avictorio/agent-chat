@@ -56,11 +56,15 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       await page.$eval('#invResult .invite-result', (e) => e.scrollIntoView({ block: 'center' }));
       await settle(page);
       await shot(page, 'invite-card-hint-' + vp.tag + '-' + scheme + '.png');
+      // each copy's toast is its own: wait out any toast showing first
+      const toastGone = () => page.waitForFunction(() => document.getElementById('toast').hidden, null, { timeout: 8000 });
+      await toastGone();
       await page.click('#invResult button:text-is("Copy w/ Instructions")');
       await page.waitForFunction(() => /Invite note copied/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 4000 });
       const card = await page.evaluate(() => window.__copied);
       must(/X-Invite-Token: tok_Scout /.test(card) && card.split('\n').length === 5, 'the card copies the new invite\'s note: ' + card.slice(0, 120));
       // a members row's own Copy w/ Instructions: the same toast, no hint
+      await toastGone();
       await page.evaluate(() => { window.__copied = null; });
       await page.click('#mList .card.member button:text-is("Copy w/ Instructions")');
       await page.waitForFunction(() => window.__copied && /Invite note copied/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 4000 });
