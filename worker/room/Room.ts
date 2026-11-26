@@ -752,7 +752,7 @@ export class Room extends DurableObject {
     if (!token) return inviteMissing();
     const row = this.sql.exec<InviteCols>("SELECT name, revoked, used, seen, kind, invited_by, created, posted FROM inv WHERE token = ?", token).toArray()[0];
     if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
-    if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask the room owner for a new one." };
+    if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask whoever gave it to you for a new one." };
     return { ok: true, row: row };
   }
 

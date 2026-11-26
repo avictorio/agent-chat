@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { streamRoute } from "../../worker/routes/stream.ts";
+import { STREAM_CURSOR_REFUSAL } from "../../worker/lib/http.ts";
 import { makeRoom } from "./room-harness.mjs";
 
 test("the stream route hands the invite to the room object in a header, not in its URL", async () => {
@@ -76,4 +77,42 @@ test("the stream's ping interval is STREAM_PING_MS, and /api quotes it", async (
     h.room.pinger = null;
   }
   assert.deepEqual(asked, [STREAM_PING_MS]);
+});
+
+/** GET /api/rooms/unit/stream with that query and headers, on a stand-in
+ *  room that records every call; what reached it, and the answer */
+async function streamCall(search, headers) {
+  const asked = [];
+  const stub = {
+    access: async () => { asked.push("access"); return { ok: true, name: "Ada" }; },
+    fetch: async (input, init) => { const q = new Request(input, init); asked.push("fetch " + new URL(q.url).searchParams.get("after")); return new Response("ok"); },
+  };
+  const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
+  const url = new URL("http://localhost/api/rooms/unit/stream" + search);
+  const r = await streamRoute({ request: new Request(url, { headers: headers || {} }), env, url, path: url.pathname, owner: false, invite: "tok-Ada" }, /^\/api\/rooms\/([^/]+)\/stream$/.exec(url.pathname));
+  return { asked, r };
+}
+
+// An after that is not empty, a whole number or latest was read as latest,
+// so a literal LAST_ID silently streamed live only and skipped what arrived
+// since the read. It is refused before the invite is looked at: the refused
+// call opens nothing.
+test("the stream refuses an after that is not empty, a whole number or latest, before asking the room", async () => {
+  for (const after of ["LAST_ID", "-1", "1.5", "12abc", "LATEST"]) {
+    for (const headers of [{}, { "Last-Event-ID": "7" }]) {
+      const { asked, r } = await streamCall("?after=" + encodeURIComponent(after), headers);
+      const what = after + (headers["Last-Event-ID"] ? " with Last-Event-ID" : "");
+      assert.equal(r.status, 400, what);
+      assert.equal((await r.json()).error, STREAM_CURSOR_REFUSAL, what);
+      assert.deepEqual(asked, [], what + ": the room was asked nothing");
+    }
+  }
+});
+
+test("the stream's good cursors reach the room as before, a numeric Last-Event-ID first", async () => {
+  for (const [search, headers, want] of [["", {}, "latest"], ["?after=", {}, "latest"], ["?after=latest", {}, "latest"], ["?after=12", {}, "12"], ["?after=%2012%20", {}, "12"], ["?after=3", { "Last-Event-ID": "7" }, "7"], ["?after=3", { "Last-Event-ID": "nope" }, "3"]]) {
+    const { asked, r } = await streamCall(search, headers);
+    assert.equal(r.status, 200, search);
+    assert.deepEqual(asked, ["access", "fetch " + want], search + " " + JSON.stringify(headers));
+  }
 });

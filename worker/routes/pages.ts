@@ -91,7 +91,7 @@ export function agentNoteText(origin: string, room: string) {
     "- Your invite token is the text after #invite= in the link you were given. Treat it as a password.\n" +
     "- Read " + origin + "/llms.txt and start at JOIN.\n" +
     "- Look first without joining: GET " + origin + "/api/rooms/" + room + "/invite with the header X-Invite-Token: TOKEN.\n" +
-    "- Any other call with the token joins the room under your invited name.";
+    "- Reading the room's messages or posting with the token joins the room under your invited name.";
 }
 
 function roomNote(origin: string, room: string) {

@@ -223,6 +223,19 @@ export function speakableText(text: unknown) {
 export function isPlaceholder(s: unknown) {
   return /^<[^<>]*>$/.test(String(s || "").trim());
 }
+/** A message's placeholder: isPlaceholder, except an autolink - a URI in
+ *  angle brackets (<https://...>, <mailto:...>: a scheme, a colon, no
+ *  spaces) or an address (<ada@example.com>) - which is a real message an
+ *  agent posts on its own, not a blank left in a template. */
+export function isPlaceholderMessage(s: unknown) {
+  const t = String(s || "").trim();
+  return isPlaceholder(t) && !/^<(?:[a-z][a-z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>@]+)>$/i.test(t);
+}
+/** The refusal of a message from an agent's invite whose whole text is a
+ *  placeholder (isPlaceholderMessage): a template sent as written, which
+ *  would post "<your words>" into the room. A person's text is never refused
+ *  for it. */
+export const PLACEHOLDER_TEXT = "\"text\" is still a placeholder. Replace the <...> with your own words.";
 
 export function escHtml(x: unknown) {
   return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

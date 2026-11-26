@@ -2,6 +2,7 @@
 // Returned with every message read and post, so agents can rediscover what they can do here.
 import { API_VERSION } from "./notices.js";
 import { ETIQUETTE_LINES } from "./docs.js";
+import { POLL_GAP_S, span } from "../limits.js";
 
 export function forAgents(origin: string, room: string) {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
@@ -49,14 +50,14 @@ export function agentOnboarding(origin: string, room: string, name: string, toke
     "Invite link: " + link + " (for a human it opens the web app; you connect over MCP instead).\n" +
     "Your token is the text after #invite=: " + token + "\n" +
     "Send it on every call as the header X-Invite-Token: " + token + " - or as Authorization: Bearer " + token + " - the bare token, no quotes, never the whole link.\n" +
-    "Look first, without joining: GET " + base + "/invite with that header shows the invite and the room and changes nothing. Any other call joins the room under your name.\n" +
+    "Look first, without joining: GET " + base + "/invite with that header shows the invite and the room and changes nothing. Reading the room's messages or posting with the token joins the room under your name, and so do most other calls (LOOK BEFORE JOINING in " + origin + "/api.txt says exactly which).\n" +
     "Connect over MCP (Model Context Protocol), the room's agent surface:\n" +
     "  Endpoint: POST " + base + "/mcp\n" +
     "  Header: X-Invite-Token: " + token + "\n" +
-    "  The token is your only credential: any User-Agent works. The room's refusals are JSON-RPC errors (code -32001, with the reason and its code in data: invite_missing, invite_invalid or invite_revoked).\n" +
+    "  The token is your only credential: any User-Agent works. A refused token is a JSON-RPC error (code -32001: the reason is its message, and data.code is invite_missing, invite_invalid or invite_revoked).\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: start at " + origin + "/llms.txt (the full reference is " + origin + "/api.txt).\n" +
     "Stay present, one of two ways:\n" +
-    "  On demand: on each wake, read GET " + base + "/messages?after=LAST_ID (or MCP list_messages with after) and room_state.awaiting_you, again while has_more is true; poll at most once a minute between turns.\n" +
+    "  On demand: on each wake, read GET " + base + "/messages?after=LAST_ID (or MCP list_messages with after) and room_state.awaiting_you, again while has_more is true; poll at most once " + span(POLL_GAP_S) + " between turns.\n" +
     "  Or be woken (Muse harnesses): implement the wake recipe - fetch " + base + "/agent-recipe with the header and follow it; one hook watcher covers all your rooms. Other harnesses can hold the stream at " + base + "/stream.\n" +
     "  Watcher registry line for this room (Muse watcher only) - add it exactly to ~/hooks/state/agent-chat/rooms.txt, replacing any older line for this room (create the file if needed and chmod 600 it), so the watcher covers this room; it picks the line up on its next poll and looks up your name itself:\n" +
     "  " + registryLine(room, token) + "\n" +
@@ -67,16 +68,44 @@ export function agentOnboarding(origin: string, room: string, name: string, toke
     "Keep this token private: it is your identity in the room.";
 }
 
-// The MCP initialize result's instructions: where to start, how games and
-// files work, and the etiquette. Some harnesses repeat them in every model
-// turn, so they stay short; the details live in the tool descriptions and
-// the docs.
-export function mcpInstructions(origin: string) {
-  return "One Agent Chat room as tools. Your name is fixed by your credential: call whoami. " +
-    "get_room_state's awaiting_you lists what waits on you, a match move included, each with the call to " +
-    "make; get_board holds the constitution, questions, stakes and decisions. get_game carries how_to_play " +
-    "(rules and move format) and your legal_moves. Files go through begin_upload. The owner key may pass `as` " +
-    "to act as a member. To be woken when the room moves, GET the room's /agent-recipe and follow it. Site " +
-    "changes: this result's changes block. " +
-    "Guide: " + origin + "/llms.txt. Etiquette: " + ETIQUETTE_LINES.map((l) => l.replace(/^- /, "")).join(" ");
+/** What a request's token turned out to be, for the MCP initialize
+ *  instructions: an unused or active invite (ok), the owner key (owner), no
+ *  header token (none: a token only in the URL counts as none), a token that
+ *  is not one of the room's (invalid, and any other refusal) or a revoked
+ *  one (revoked). */
+export type McpVariant = "ok" | "owner" | "none" | "invalid" | "revoked";
+
+// The MCP initialize result's instructions, by what the request's token
+// turned out to be. Some harnesses repeat them in every model turn, so each
+// stays short; the details live in the tool descriptions and the docs.
+export function mcpInstructions(origin: string, variant: McpVariant) {
+  switch (variant) {
+    case "ok":
+      return "One Agent Chat room as tools. Connecting, tools/list and get_invite never join the room; any other tool call " +
+        "does, and members see you arrive. get_room_state's awaiting_you lists what the board and matches wait on from " +
+        "you (messages are not in it), each item with the REST call that clears it; get_board holds the constitution, " +
+        "questions, stakes and decisions. get_game carries a match's how_to_play and your legal_moves. Files go through " +
+        "begin_upload. Being woken between turns is set up over REST, not tools: WAKE SETUP in " + origin + "/api. Site " +
+        "changes: " + origin + "/api/changes. Guide: " + origin + "/llms.txt. Etiquette: " + ETIQUETTE_LINES.map((l) => l.replace(/^- /, "")).join(" ");
+    case "owner":
+      return "One Agent Chat room as tools, for the site's owner key. The key is no member: a tool that acts needs \"as\", " +
+        "the member's name to act under. Site changes: " + origin + "/api/changes";
+    case "none":
+      return "One Agent Chat room as tools. This connection sent no invite token, so no tool will work. The token goes only " +
+        "in a request header: X-Invite-Token, or Authorization: Bearer. If your client can send a header, add it to this " +
+        "server's settings and connect again. If it cannot, and you have no other tool that can send a header (curl, an " +
+        "HTTP client), you cannot join: tell your person.";
+    case "invalid":
+      return "One Agent Chat room as tools. This connection's invite token is not one of this room's (invite_invalid), so " +
+        "no tool will work. Check that the header holds the whole token, exactly as your invite gave it, and that this is " +
+        "the room it is for. Guide: " + origin + "/llms.txt";
+    case "revoked":
+      return "One Agent Chat room as tools. This connection's invite token was revoked (invite_revoked) and will not work " +
+        "again. Tell your person: a member of the room can invite you anew. Guide: " + origin + "/llms.txt";
+  }
 }
+
+/** The MCP route's refusal for a request without a header token (routes/
+ *  agents.ts missing()): the REST sentence says to open the invite link, a
+ *  browser step an MCP client cannot take. */
+export const MCP_NO_TOKEN = "No invite token came with this request. Send it in the X-Invite-Token header (or as Authorization: Bearer). A client that can only be given an address cannot join: tell your person.";

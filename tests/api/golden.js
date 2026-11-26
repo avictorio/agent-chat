@@ -14,6 +14,11 @@
 // A deliberate break is edited into golden.json by hand and listed here:
 //   2026-11-22  "read: query token", "read: query token on media" - the URL
 //               token retired: 401 invite_missing with its own sentence.
+//   2026-11-26  "read: revoked token", "mcp: tools/list, revoked token" - the
+//               revoked sentence; "mcp: tools/list, no token" - the MCP
+//               tokenless sentence; "read: query token", "read: query token
+//               on media" - a token only in the URL is answered exactly as
+//               no token (no notice).
 // Values that differ per run (ids, timestamps, tokens) are never compared.
 'use strict';
 const fs = require('fs');

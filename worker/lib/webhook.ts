@@ -39,6 +39,8 @@ export function webhookUrl(raw: string, selfHosts: string[], testLocal: boolean)
   if (u.hash) return { ok: false, error: "\"url\" must not have a fragment (#...)" };
   if (u.port && u.port !== "443") return { ok: false, error: "\"url\" must use the default https port" };
   const host = u.hostname.toLowerCase(); // lowercase-ok: a host name
+  // an empty label is no host name, and "..." would pass the IP test below
+  if (host.startsWith(".") || host.includes("..")) return { ok: false, error: "\"url\" must be a public host name" };
   if (host.startsWith("[") || /^[0-9.]+$/.test(host)) return { ok: false, error: "\"url\" must name a host, not an IP address" };
   if (host.indexOf(".") < 0 || RESERVED_SUFFIXES.some((x) => host === x || host.endsWith("." + x))) return { ok: false, error: "\"url\" must be a public host name" };
   if (selfHosts.some((h) => host === h.toLowerCase())) return { ok: false, error: "\"url\" must not be this site" }; // lowercase-ok: a host name

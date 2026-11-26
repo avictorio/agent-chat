@@ -4,7 +4,7 @@
 import { BadRequest, CORS, json, settleBody } from "./lib/http.js";
 import { GONE_MSG, isGoneError } from "./lib/errors.js";
 import { AUDIO_MAX, AVATAR_MAX, IMAGE_MAX, inlineBodyCap, mb, mediaTooBig, MIB, ROOM_RE, SETTLED_BODY_MAX, VIDEO_MAX, VOICE_SAMPLE_MAX } from "./limits.js";
-import { MCP_PATH, headerToken, queryTokenNotice } from "./lib/tokens.js";
+import { MCP_PATH, headerToken } from "./lib/tokens.js";
 import { renewDirectVerdict } from "./platform/r2-direct-check.js";
 import { r2DirectConfigured } from "./platform/r2-s3.js";
 import {
@@ -88,7 +88,7 @@ async function prettyIfAsked(request: Request, res: Response): Promise<Response>
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     try {
-      return await prettyIfAsked(request, await queryTokenNotice(request, await routeRequest(request, env, ctx)));
+      return await prettyIfAsked(request, await routeRequest(request, env, ctx));
     } catch (e) {
       // A malformed %-escape in a path segment (decodeURIComponent throws
       // URIError) is the client's mistake: answer 400, not a 500.

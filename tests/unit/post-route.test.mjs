@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { messagesRoute, publishRoute } from "../../worker/routes/messages.ts";
 import { mcpCallTool } from "../../worker/agents/mcp.ts";
 import { BadRequest } from "../../worker/lib/http.ts";
+import { PLACEHOLDER_TEXT, isPlaceholder, isPlaceholderMessage } from "../../worker/lib/text.ts";
 import { makeRoom } from "./room-harness.mjs";
 import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MAX, CLIENT_MSG_ID_MS, DOC_MAX, HTML_MAX, IMAGE_MAX, INLINE_TOTAL_MAX, VIDEO_MAX } from "../../worker/limits.ts";
 
@@ -342,4 +343,111 @@ test("a page or document past its cap is refused with 413 by REST and MCP, as ra
   const doc = "data:text/markdown;base64," + Buffer.alloc(DOC_MAX + 1, 65).toString("base64");
   assert.equal((await post(h, JSON.stringify({ text: "doc", doc }), asJson)).status, 413);
   assert.equal(h.all("SELECT id FROM m").length, 0);
+});
+
+/** POST /api/rooms/unit/messages through the route as a given credential:
+ *  an invite token, or the owner key (owner: true, no token) */
+async function postAs(h, cred, body, headers = {}) {
+  const env = { ROOM: { idFromName: (n) => n, get: () => h.room } };
+  const url = new URL("http://localhost/api/rooms/" + R + "/messages");
+  const invite = cred.token || "";
+  const request = new Request(url, { method: "POST", body, headers: { ...(invite ? { "X-Invite-Token": invite } : {}), ...headers } });
+  let res;
+  try { res = await messagesRoute({ request, env, url, path: url.pathname, owner: !!cred.owner, invite }, /^\/api\/rooms\/([^/]+)\/messages$/.exec(url.pathname)); }
+  catch (e) { if (e instanceof BadRequest) return { status: 400, json: { error: e.message } }; throw e; }
+  return { status: res.status, json: await res.json() };
+}
+/** POST .../messages/ID/publish as Ada, with that body (or none) */
+async function publishAsAda(h, id, body) {
+  const env = { ROOM: { idFromName: (n) => n, get: () => h.room } };
+  const url = new URL("http://localhost/api/rooms/" + R + "/messages/" + id + "/publish");
+  const res = await publishRoute({ request: new Request(url, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }), env, url, path: url.pathname, owner: false, invite: "tok-Ada" }, /^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/publish$/.exec(url.pathname));
+  return { status: res.status, json: await res.json() };
+}
+
+// Agents post a lone link in autolink form, <https://...>: a real message,
+// though the digests' test (isPlaceholder) counts any <...> as a blank. The
+// message test leaves out a URI (a scheme, a colon, no spaces) and an
+// address in angle brackets; a placeholder with words or spaces stays one.
+test("a message's placeholder test leaves out a link or an address in angle brackets", () => {
+  for (const t of ["<your words>", "  <your words>\n", "<>", "<caption>", "<LAST_ID>", "<note: fill in>", "<x:y>", "<https://a link>", "<your email>"]) assert.equal(isPlaceholderMessage(t), true, t);
+  for (const t of ["<https://github.com/example/repo/pull/12>", " <http://example.com/a?b=c> ", "<mailto:ada@example.com>", "<ada@example.com>", "<3", "I said <hello> to Ada", "<b>news</b>", "hello"]) assert.equal(isPlaceholderMessage(t), false, t);
+  assert.equal(isPlaceholder("<https://example.com>"), true, "digests and resolve notes keep their test");
+});
+
+// A template sent as written posted "<your words>" into the room. From an
+// agent's invite, a text that is nothing but one <...> is refused before
+// anything is stored; a person's "<sigh>" posts, and so does the owner
+// key's text, and brackets inside a real text are fine, a lone link or
+// address in angle brackets included.
+test("an agent's placeholder-only text is refused, a draft's too; real text with brackets posts", async () => {
+  const h = makeRoom();
+  h.member("Ada"); // NULL kind: an agent, as access() reports it
+  const bodies = [
+    [JSON.stringify({ text: "<your words>" }), asJson],
+    ["  <your words>\n", { "Content-Type": "text/plain" }],
+    ["text=%3C%3E", { "Content-Type": "application/x-www-form-urlencoded" }],
+    [JSON.stringify({ text: "<caption>", draft: true }), asJson],
+    [JSON.stringify({ text: "<photo>", image: file("image", 100) }), asJson],
+  ];
+  for (const [body, headers] of bodies) {
+    const r = await post(h, body, headers);
+    assert.equal(r.status, 400, body);
+    assert.equal(r.json.error, PLACEHOLDER_TEXT, body);
+  }
+  assert.equal(h.all("SELECT id FROM m").length, 0, "nothing was stored");
+  assert.equal(h.objects.size, 0, "no file was stored either");
+  const real = ["I said <hello> to Ada", "<b>news</b>", "<https://github.com/example/repo/pull/12>", "<mailto:ada@example.com>", "<ada@example.com>", "<3"];
+  for (const text of real) assert.equal((await post(h, JSON.stringify({ text }), asJson)).status, 201, text);
+  assert.deepEqual(texts(h).map((x) => x.text), real);
+});
+
+test("a person's placeholder-like text and the owner key's are not refused", async () => {
+  const h = makeRoom();
+  h.member("Ada", "agent"); h.member("Bea", "human");
+  let r = await postAs(h, { token: "tok-Bea" }, JSON.stringify({ text: "<sigh>" }), asJson);
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  r = await postAs(h, { owner: true }, JSON.stringify({ from: "claude", text: "<note>" }), asJson);
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  r = await postAs(h, { token: "tok-Ada" }, JSON.stringify({ text: "<your words>" }), asJson);
+  assert.equal(r.status, 400, "an agent invite of kind agent is refused too");
+  assert.deepEqual(texts(h).map((x) => x.text), ["<sigh>", "<note>"]);
+});
+
+// A draft's text is the message's: it is checked where the agent writes
+// it, at the post that makes the draft and at a publish that replaces it.
+// A publish without new text is not checked again (publishRoute says why).
+test("a publish that sets an agent's text to a placeholder is refused and the draft stays a draft", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const d = await post(h, JSON.stringify({ text: "a caption", draft: true }), asJson);
+  assert.equal(d.status, 201);
+  let r = await publishAsAda(h, d.json.id, { text: "<caption>" });
+  assert.equal(r.status, 400);
+  assert.equal(r.json.error, PLACEHOLDER_TEXT);
+  assert.equal(h.one("SELECT draft, text FROM m WHERE id = ?", d.json.id).draft, 1, "still a draft");
+  assert.equal(h.one("SELECT text FROM m WHERE id = ?", d.json.id).text, "a caption");
+  r = await publishAsAda(h, d.json.id);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(h.one("SELECT draft FROM m WHERE id = ?", d.json.id).draft, null, "published");
+});
+
+test("over MCP an agent's placeholder-only text is a tool error for post_message, publish_message and begin_upload", async () => {
+  const h = makeRoom();
+  h.member("Ada"); h.member("Bea", "human");
+  const agent = { kind: "agent" };
+  await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, agent, "Ada", "post_message", { text: "<your words>" }), (e) => e.message === PLACEHOLDER_TEXT);
+  await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, agent, "Ada", "post_message", { text: "<caption>", draft: true }), (e) => e.message === PLACEHOLDER_TEXT);
+  const d = await post(h, JSON.stringify({ text: "a caption", draft: true }), asJson);
+  await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, agent, "Ada", "publish_message", { id: d.json.id, text: "<x>" }), (e) => e.message === PLACEHOLDER_TEXT);
+  assert.equal(h.one("SELECT draft FROM m WHERE id = ?", d.json.id).draft, 1, "the draft stays a draft");
+  const before = h.all("SELECT id FROM m").length;
+  await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, agent, "Ada", "begin_upload", { kind: "image", text: "<caption>" }), (e) => e.message === PLACEHOLDER_TEXT);
+  assert.equal(h.all("SELECT id FROM m").length, before, "begin_upload made no draft");
+  const link = await mcpCallTool({}, h.room, R, "http://localhost", false, agent, "Ada", "post_message", { text: "<https://github.com/example/repo/pull/12>" });
+  assert.equal(link.text, "<https://github.com/example/repo/pull/12>", "an agent's lone link in angle brackets posts");
+  const m = await mcpCallTool({}, h.room, R, "http://localhost", false, { kind: "human" }, "Bea", "post_message", { text: "<sigh>" });
+  assert.equal(m.text, "<sigh>");
+  const own = await mcpCallTool({}, h.room, R, "http://localhost", true, {}, "claude", "post_message", { text: "<note>" });
+  assert.equal(own.text, "<note>", "the owner key acting as a name is not refused");
 });

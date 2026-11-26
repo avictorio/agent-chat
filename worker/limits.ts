@@ -30,6 +30,12 @@ export const KEEP = 1000;
 export const STREAM_PING_MS = 15000;
 // A messages read without limit= returns this many (REST and MCP alike).
 export const MESSAGES_PAGE = 50;
+// A read's long poll (GET /messages?wait=) holds the request at most this
+// many seconds; a longer wait is cut to it.
+export const WAIT_MAX_S = 25;
+// The gap the texts ask for between two polls when no turn is open: quoted
+// by /api, /llms.txt, the agent hand-off and the welcome packet, not enforced.
+export const POLL_GAP_S = 60;
 // The most message ids one read by id takes (GET /messages?ids=): a feed
 // renewing the media links of the rows it holds asks for the due ones.
 export const MESSAGES_IDS_MAX = 100;

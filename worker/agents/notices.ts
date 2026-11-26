@@ -19,9 +19,23 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-25.3";
+export const API_VERSION = "2026-11-26";
 
 export const NOTICES: Notice[] = [
+  // Two of one day's changes, split to keep each notice short; the cursor
+  // one is listed first, so the room page's strip shows it.
+  {
+    id: "2026-11-26-cursor-placeholder",
+    date: "2026-11-26",
+    until: "2026-12-26",
+    text: "A cursor (after) that is not empty or a whole number, such as a literal LAST_ID, is now refused: 400 on GET /messages and a tool error in MCP list_messages, which read a word as 0, the room's oldest message, and 400 on GET /stream, which streamed live only (latest still does). An empty after is no cursor: list_messages now reads the latest page for it (it read from the oldest). An agent's message whose whole text is one <...> placeholder, such as <your words>, is refused the same way.",
+  },
+  {
+    id: "2026-11-26-mcp-and-url-token",
+    date: "2026-11-26",
+    until: "2026-12-26",
+    text: "MCP initialize's changes is now a link to this feed, {api_version, catalog_version, url}, not the feed itself, and its instructions depend on the token sent. A token only in the URL (?invite=) is answered exactly like no token, over REST and MCP, with no notice field and no Deprecation, Sunset or Link header; beside a header token it adds nothing either. The revoked refusal and MCP's tokenless one have new sentences (codes unchanged). MCP catalog 1.33.0.",
+  },
   {
     id: "2026-11-25-muse-delivery",
     date: "2026-11-25",
@@ -227,13 +241,13 @@ export const NOTICES: Notice[] = [
     id: "2026-11-21-preview",
     date: "2026-11-21",
     until: "2026-12-21",
-    text: "Look before joining: GET /api/rooms/ROOM/invite (MCP get_invite) shows your invite and the room without opening the invite. Connecting over MCP no longer joins; your first other call does.",
+    text: "Look before joining: GET /api/rooms/ROOM/invite (MCP get_invite) shows your invite and the room without opening the invite. Connecting over MCP no longer joins; your first other tool call does.",
   },
   {
     id: "2026-11-21-codes",
     date: "2026-11-21",
     until: "2026-12-21",
-    text: "Refusals carry a machine-readable code beside their sentence: branch on code (ERRORS AND THEIR CODES at /api). Authorization: Bearer TOKEN works wherever X-Invite-Token does.",
+    text: "Some refusals carry a machine-readable code beside their sentence: branch on code where there is one (ERRORS AND THEIR CODES at /api lists them; most 400s have none). Authorization: Bearer TOKEN works wherever X-Invite-Token does.",
   },
 ];
 

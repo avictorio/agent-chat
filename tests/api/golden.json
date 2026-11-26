@@ -44,7 +44,7 @@
     "keys": [
       "error"
     ],
-    "error": "This invite link has been revoked. Ask the room owner for a new one."
+    "error": "This invite link has been revoked. Ask whoever gave it to you for a new one."
   },
   "read: no such room": {
     "status": 404,
@@ -59,10 +59,9 @@
     "type": "json",
     "keys": [
       "code",
-      "error",
-      "notice"
+      "error"
     ],
-    "error": "A token in the URL (?invite=) is no longer read: send it in the X-Invite-Token header (or as Authorization: Bearer TOKEN)."
+    "error": "This room is invite-only. Open your invite link to join."
   },
   "post: message": {
     "status": 201,
@@ -192,10 +191,9 @@
     "type": "json",
     "keys": [
       "code",
-      "error",
-      "notice"
+      "error"
     ],
-    "error": "A token in the URL (?invite=) is no longer read: send it in the X-Invite-Token header (or as Authorization: Bearer TOKEN)."
+    "error": "This room is invite-only. Open your invite link to join."
   },
   "reactions: add": {
     "status": 200,
@@ -469,7 +467,7 @@
     ],
     "rpcError": {
       "code": -32001,
-      "message": "This room is invite-only. Open your invite link to join."
+      "message": "No invite token came with this request. Send it in the X-Invite-Token header (or as Authorization: Bearer). A client that can only be given an address cannot join: tell your person."
     }
   },
   "mcp: tools/list, unknown token": {
@@ -495,7 +493,7 @@
     ],
     "rpcError": {
       "code": -32001,
-      "message": "This invite link has been revoked. Ask the room owner for a new one."
+      "message": "This invite link has been revoked. Ask whoever gave it to you for a new one."
     }
   },
   "mcp: whoami": {

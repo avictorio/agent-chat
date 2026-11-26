@@ -86,10 +86,14 @@ async function webhooks(ctx) {
       ['https://chat.victorio.cloud/api/rooms/x/messages', /this site/],
       ['ftp://example.com/hook', /https/],
       ['not a url', /not a URL/],
+      // an empty label is no host name ("..." used to pass for an IP address)
+      ['https://...', /public host/],
+      ['https://.example.com/hook', /public host/],
+      ['https://a..b.example.com/hook', /public host/],
     ];
     for (const [u, why] of bad) {
       const r = await wh(TA, 'POST', { url: u });
-      check('webhook: refuses ' + u, r.status === 400 && r.json && r.json.code === 'url_invalid' && why.test(r.json.error), r.status + ' ' + r.text.slice(0, 160));
+      check('webhook: refuses ' + u, r.status === 400 && r.json && r.json.code === 'url_invalid' && why.test(r.json.error) && (why.source !== 'public host' || !/IP address/.test(r.json.error)), r.status + ' ' + r.text.slice(0, 160));
     }
     check('webhook: a refused URL is never called', S.calls.length === 0, S.calls.length);
     let r = await req('POST', R + '/webhook', { json: { url: URL } });

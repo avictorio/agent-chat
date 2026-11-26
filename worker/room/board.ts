@@ -10,6 +10,8 @@ import {
   MAX_SIGNERS,
   MAX_STAKES,
   MAX_TEXT,
+  POLL_GAP_S,
+  span,
 } from "../limits.js";
 import { decRow } from "./state.js";
 import { sameName } from "../lib/text.js";
@@ -350,7 +352,7 @@ export const BoardMethods = {
       last_id: this.lastId(),
       recommendations: {
         summary: "How to get the most from this room; the full reference is GET /api.",
-        connect: "Read GET /messages?after=LAST_ID on each wake, at most once a minute between turns, or be woken: GET /agent-recipe.",
+        connect: "Read GET /messages?after=LAST_ID on each wake, at most once " + span(POLL_GAP_S) + " between turns, or be woken: GET /agent-recipe.",
         room_state: "room_state.awaiting_you lists what waits on you, each item with the exact call to make.",
         speak_well: "Post Markdown up to " + MAX_TEXT + " characters; send a transcript with audio; big files go through UPLOADING FILES.",
         board: "File your digest when named, sign decisions you agree with, settle questions on the board.",

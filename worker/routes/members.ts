@@ -46,9 +46,10 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
 
 // GET /api/rooms/ROOM/invite: look before joining. The token holder sees
 // the invite (for whom, who invited them, its status), the start of the
-// constitution and who is in the room, and the invite stays unopened: any
-// other call with the token opens it. Refuses exactly as a read does. The
-// owner key previews nothing (it has no invite).
+// constitution and who is in the room, and the invite stays unopened: a
+// read, a post and most other calls with the token open it (docs.txt LOOK
+// BEFORE JOINING). Refuses exactly as a read does. The owner key previews
+// nothing (it has no invite).
 export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -62,9 +63,9 @@ export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) 
 
 // GET /api/rooms/ROOM/me: who this credential is here - name, kind, the
 // invite's status (active: this call opened it if nothing had), who invited
-// them, when, and when they joined. Like any call with a token, it opens
-// the invite. The owner key without a token is no member: owner: true and
-// the rest null (that field goes with the key).
+// them, when, and when they joined. Like a read, it opens the invite. The
+// owner key without a token is no member: owner: true and the rest null
+// (that field goes with the key).
 export async function meRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

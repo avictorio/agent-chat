@@ -55,8 +55,11 @@ test("the primer is short, starts by linking the full reference, and teaches the
   assert.ok(!/\{\{\w+\}\}/.test(out), "an unfilled placeholder is left");
   assert.ok(out.length < 6500, "the primer is " + out.length + " characters; keep it a primer");
   assert.match(out.split("\n")[0], /https:\/\/example\.test\/api\.txt/);
-  for (const want of ["#invite=", "X-Invite-Token", "Authorization: Bearer", "/api/rooms/ROOM/invite", "/api/rooms/ROOM/me", "/api/changes", "invite_missing", "rate_limited"]) assert.ok(out.includes(want), "the primer should mention " + want);
+  for (const want of ["#invite=", "X-Invite-Token", "Authorization: Bearer", "/api/rooms/ROOM/invite", "/api/rooms/ROOM/me", "/api/changes", "invite_missing", "rate_limited", "LOOK BEFORE JOINING"]) assert.ok(out.includes(want), "the primer should mention " + want);
   for (const l of ETIQUETTE_LINES) assert.ok(out.includes(l), "the primer carries the etiquette line: " + l);
+  // "any other call joins" was false both ways (an invite or an avatar
+  // call does not join; a refused read does): the primer points at the rule
+  assert.ok(!out.includes("Any other call"), "the primer still says any other call joins");
 });
 
 test("the full reference's first example posts with the header, and no request example sends from", () => {
@@ -144,15 +147,32 @@ test("the onboarding block: who invited you, the header, a look first, the etiqu
   for (const want of ["X-Invite-Token: tok_123", "Authorization: Bearer tok_123", "/api/rooms/lima/invite", "/api/rooms/lima/mcp", "/agent-recipe", "rooms.txt", "\n  lima tok_123\n", "post a short hello", "Keep this token private"]) assert.ok(bare.includes(want), "the block should carry " + want);
   for (const l of ETIQUETTE_LINES) assert.ok(bare.includes(l), "the block carries the etiquette line: " + l);
   assert.ok(!/\*\*|^#/m.test(bare), "plain text, no Markdown");
+  // the join rule is LOOK BEFORE JOINING's, and only a refused token is a
+  // JSON-RPC error (a cap or a bad argument is a tool error)
+  assert.ok(!bare.includes("Any other call joins"), "the block still says any other call joins");
+  assert.ok(bare.includes("LOOK BEFORE JOINING"), "the block points at the join rule");
+  assert.ok(bare.includes("A refused token is a JSON-RPC error"), "the block says which refusals are JSON-RPC errors");
 });
 
 // No served text asks an agent for a browser User-Agent (or any particular
 // one): the edge rule in AGENTS.md section 7 turns Browser Integrity Check
 // off on the agent paths, and the token is the only credential.
 import WATCHER from "../../worker/agents/agent-watch.sh";
-import { mcpInstructions } from "../../worker/agents/onboarding.ts";
+import { MCP_NO_TOKEN, mcpInstructions } from "../../worker/agents/onboarding.ts";
 import { mcpCatalog } from "../../worker/agents/mcp.ts";
 import { agentNoteText } from "../../worker/routes/pages.ts";
+import { CURSOR_REFUSAL, STREAM_CURSOR_REFUSAL } from "../../worker/lib/http.ts";
+import { PLACEHOLDER_TEXT } from "../../worker/lib/text.ts";
+import { makeRoom } from "./room-harness.mjs";
+
+const VARIANTS = ["ok", "owner", "none", "invalid", "revoked"];
+
+/** the sentence a revoked token is refused with, as the room gives it */
+function revokedSentence() {
+  const h = makeRoom();
+  h.db.prepare("INSERT INTO inv (token, name, created, revoked) VALUES (?, ?, ?, ?)").run("tok-gone", "Gone", Date.now(), Date.now());
+  return h.room.lookupInvite("tok-gone").error;
+}
 
 /** every text an agent reads as documentation, by where it is served */
 function servedTexts(o) {
@@ -161,13 +181,126 @@ function servedTexts(o) {
     "/api/games (games.txt)": gamesDocs(o),
     "/llms.txt (primer.txt)": primer(o),
     "agent_onboarding": agentOnboarding(o, "lima", "Hank", "tok_123", { invitedBy: "Henry", purpose: "x" }),
-    "MCP initialize instructions": mcpInstructions(o),
+    ...Object.fromEntries(VARIANTS.map((v) => ["MCP instructions, " + v, mcpInstructions(o, v)])),
+    "MCP tokenless refusal": MCP_NO_TOKEN,
     "MCP tool catalog": JSON.stringify(mcpCatalog()),
+    "cursor refusals": CURSOR_REFUSAL + " " + STREAM_CURSOR_REFUSAL,
+    "placeholder refusal": PLACEHOLDER_TEXT,
+    "revoked refusal": revokedSentence(),
     "agent recipe": recipe(),
     "agent watcher": WATCHER,
     "room page note": agentNoteText(o, "lima"),
   };
 }
+
+test("the served texts are all there", () => {
+  for (const [name, text] of Object.entries(servedTexts("https://example.test"))) assert.ok(typeof text === "string" && text.length > 20, name + " is missing");
+  assert.match(revokedSentence(), /revoked/);
+});
+
+// Every text is true of the code as it is: none names what is not built
+// (a start page, its tool, an mcp_call on awaiting items), and none repeats
+// a statement that was false: stopping reads stops no hook or webhook, whoami
+// joins, no room owner revokes, and "any other call joins" was wrong both
+// ways.
+test("no served text names what is not built, or a false rule", () => {
+  for (const [name, text] of Object.entries(servedTexts("https://example.test"))) {
+    assert.ok(!/start page|get_start_page|mcp_call/i.test(text), name + " names something not built: " + (text.match(/.{0,40}(start page|get_start_page|mcp_call).{0,20}/i) || [""])[0]);
+    for (const bad of ["stop polling", "call whoami", "room owner", "Any other call"]) assert.ok(!text.toLowerCase().includes(bad.toLowerCase()), name + " still says " + bad);
+  }
+});
+
+test("the etiquette's fourth line says to remove a wake when leaving", () => {
+  assert.equal(ETIQUETTE_LINES[3], "- Leaving a room: remove any wake you set up and stop reading.");
+  const turns = docs("https://example.test");
+  assert.ok(turns.includes("\n     Leaving a room: remove any wake you set up and stop reading.\n"), "TAKING TURNS step 4 carries it");
+});
+
+test("MCP initialize's instructions, by token: short, and the ok one carries the etiquette and the guide", () => {
+  const o = "https://chat.victorio.cloud";
+  for (const v of VARIANTS) {
+    const t = mcpInstructions(o, v);
+    assert.ok(t.length <= (v === "ok" ? 1100 : 800), v + " is " + t.length + " characters");
+    for (const re of [/call whoami/i, /follow it/, /agent-recipe/, /for now/, /changes block/]) assert.ok(!re.test(t), v + " matches " + re);
+    assert.match(t, /^One Agent Chat room as tools/);
+  }
+  const ok = mcpInstructions(o, "ok");
+  for (const l of ETIQUETTE_LINES) assert.ok(ok.includes(l.replace(/^- /, "")), "the ok instructions carry the etiquette line: " + l);
+  assert.ok(ok.includes(o + "/llms.txt"));
+  assert.ok(ok.includes(o + "/api/changes"), "site changes are a link");
+  assert.match(mcpInstructions(o, "none"), /no invite token/);
+  assert.match(mcpInstructions(o, "invalid"), /invite_invalid/);
+  assert.match(mcpInstructions(o, "revoked"), /invite_revoked/);
+  assert.match(mcpInstructions(o, "owner"), /"as"/);
+});
+
+test("three tool descriptions say what joins and what the invite links are", () => {
+  const by = Object.fromEntries(mcpCatalog().map((t) => [t.name, t.description]));
+  assert.ok(by.whoami.includes("joins the room: it opens your invite"), by.whoami);
+  assert.ok(by.get_invite.includes("(unused until you join)"), by.get_invite);
+  assert.ok(by.get_members.includes("never use or post them"), by.get_members);
+});
+
+test("the poll numbers come from limits.ts", async () => {
+  const { POLL_GAP_S, WAIT_MAX_S, span } = await import("../../worker/limits.ts");
+  for (const [file, raw] of [["docs.txt", TEXT], ["primer.txt", PRIMER]]) {
+    for (const lit of ["wait=25", "max 25", "once a minute"]) assert.ok(!raw.includes(lit), file + " quotes " + lit + " as a literal");
+  }
+  const o = "https://example.test";
+  assert.equal(docsValues(o).WAIT_MAX_S, WAIT_MAX_S);
+  assert.equal(docsValues(o).POLL_GAP, span(POLL_GAP_S));
+  assert.equal(primerValues(o).WAIT_MAX_S, WAIT_MAX_S);
+  assert.equal(primerValues(o).POLL_GAP, span(POLL_GAP_S));
+  assert.ok(docs(o).includes("wait=" + WAIT_MAX_S), "/api quotes the long poll's cap");
+  assert.ok(primer(o).includes("once " + span(POLL_GAP_S)), "/llms.txt quotes the poll gap");
+});
+
+/** a section of /api: from its heading to the next one */
+function sectionOf(text, head) {
+  const at = text.indexOf("\n" + head + "\n");
+  assert.ok(at >= 0, "no section " + head);
+  const next = text.slice(at + head.length + 2).search(/\n[A-Z][A-Z ,&()-]+\n/);
+  return text.slice(at, next < 0 ? undefined : at + head.length + 2 + next);
+}
+
+test("/api says exactly which calls join", () => {
+  const api = docs("https://example.test");
+  for (const gone of ["Any other call", "first other call", "Joining a room is"]) assert.ok(!api.includes(gone), "/api still says " + gone);
+  const look = sectionOf(api, "LOOK BEFORE JOINING");
+  for (const want of ["Only look, never join:", "Act without joining:", "Join only when they succeed:", "Join: every other room call"]) assert.ok(look.includes(want), "LOOK BEFORE JOINING lacks " + want);
+});
+
+test("/api's statements about Muse wakes, muting and the webhook challenge are true", () => {
+  const api = docs("https://example.test").replace(/\s+/g, " ");
+  assert.ok(!api.includes("the same items as the wake recipe's watcher"));
+  assert.ok(!api.includes("(muted keeps what was waiting;"));
+  assert.ok(api.includes("nothing new is queued while muted"));
+  assert.ok(api.includes("Answer the challenge without checking its signature"));
+});
+
+test("/api states the cursor refusals, the placeholder refusal and initialize's link", () => {
+  const raw = docs("https://example.test");
+  const api = raw.replace(/\s+/g, " ");
+  assert.ok(!api.includes("the same feed as changes"));
+  assert.ok(api.includes("a link to this feed"));
+  assert.ok(api.includes("after must be a whole number: anything else answers 400 (an empty after= is the same as none)"));
+  assert.ok(api.includes("anything else answers 400 (a literal placeholder too)"));
+  assert.ok(sectionOf(raw, "SEND A MESSAGE").includes("<...> placeholder"));
+  // the message test leaves out autolinks (isPlaceholderMessage), and says so
+  assert.ok(sectionOf(raw, "SEND A MESSAGE").replace(/\s+/g, " ").includes("a link or an address in angle brackets (<https://...>, <mailto:...>, <name@example.com>) is no placeholder"));
+});
+
+test("the room page's note and the web app's texts drop the false sentences", async () => {
+  const { readFileSync } = await import("node:fs");
+  const root = new URL("../../", import.meta.url);
+  assert.ok(!agentNoteText("https://example.test", "lima").includes("Any other call"));
+  // the web app's fallback note and home page are not importable in Node: read as text
+  const stream = readFileSync(new URL("web/app/src/features/room/useRoomStream.ts", root), "utf8");
+  assert.ok(!stream.includes("Call whoami"), "the fallback note still says to call whoami (it joins)");
+  const home = readFileSync(new URL("web/app/src/features/home/StaticViews.tsx", root), "utf8");
+  assert.ok(!home.includes("room owner"), "the home page says a room owner revokes");
+  assert.ok(!home.includes("gets a 401"), "the home page says a wrong token gets a 401");
+});
 
 test("no served text asks for a browser User-Agent", () => {
   const o = "https://example.test";
@@ -183,9 +316,9 @@ test("no served text asks for a browser User-Agent", () => {
 });
 
 // The token in a request's URL (?invite=) is retired and no route reads
-// it: the texts say only how to send the header. A refusal still explains
-// a URL token, and the changes feed announces the retirement; neither is
-// here. An invite link's #invite= fragment is how every link works.
+// it: the texts say only how to send the header, and a refusal answers it
+// as no token. Only the changes feed announces the retirement, and it is
+// not here. An invite link's #invite= fragment is how every link works.
 test("no served text tells an agent about a token in the URL", () => {
   for (const [name, text] of Object.entries(servedTexts("https://example.test"))) {
     assert.ok(!/[?&]invite=/.test(text), name + " mentions a token in the URL: " + (text.match(/.{0,60}[?&]invite=.{0,20}/) || [""])[0]);

@@ -17,9 +17,10 @@ import {
   ROOM_RE,
   STORE_MSG,
   VIDEO_MAX,
+  WAIT_MAX_S,
 } from "../limits.js";
-import { deny, json, parseBody, readBody, type Body, bodyText, refused } from "../lib/http.js";
-import { MAX_NAME, clamp } from "../lib/text.js";
+import { CURSOR_REFUSAL, deny, json, parseBody, readBody, readCursor, type Body, bodyText, refused } from "../lib/http.js";
+import { MAX_NAME, PLACEHOLDER_TEXT, clamp, isPlaceholderMessage } from "../lib/text.js";
 import { normReaction } from "../lib/reactions.js";
 import { agentOnboarding, forAgents } from "../agents/onboarding.js";
 import {
@@ -64,7 +65,12 @@ export function postId(v: unknown): string | null | undefined {
 }
 
 // Publish a draft message (created with {"draft": true}, e.g. while its video
-// uploaded): only now does it stream and push.
+// uploaded): only now does it stream and push. New text from an agent's
+// invite is refused when it is only a placeholder, as a post's is. A
+// publish without new text is not checked again: every way an agent sets a
+// draft's text is checked (the post that makes it, a publish that replaces
+// it), the auto-publish (maybeAutoPublish) has no caller to answer, and
+// refusing here would strand a draft made before the rule.
 export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -75,7 +81,9 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
   const body = await readBody(request);
-  const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? bodyText(body.text, "text") : undefined);
+  const text = body && body.text !== undefined ? bodyText(body.text, "text") : undefined;
+  if (text !== undefined && acc.kind === "agent" && isPlaceholderMessage(text)) return json({ error: PLACEHOLDER_TEXT }, 400);
+  const r = await stub.publishMessage(id, acc.name || "", owner, room, text);
   if (refused(r)) return json("uploading" in r ? { error: r.error, uploading: r.uploading } : { error: r.error }, r.status);
   return json(Object.assign({ room: room }, r.msg, { room_state: await stateAfterWrite(stub, acc.name || r.msg.from, room) }));
 }
@@ -168,10 +176,14 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (acc.name) { out.you = acc.name; if (acc.kind) out.you_kind = acc.kind; }
       return json(Object.assign({ invite_only: true }, out, { for_agents: forAgents(url.origin, room) }));
     }
-    const after = a === null || a === "" ? null : Math.max(0, parseInt(a, 10) || 0);
+    // A cursor that is not a whole number is refused (after access(), as
+    // every argument of this route, so the refused read has joined):
+    // parseInt read a literal LAST_ID as 0, the room's oldest message.
+    const after = readCursor(a);
+    if (after === undefined) return json({ error: CURSOR_REFUSAL }, 400);
     // a missing limit or wait parses as NaN, so the default applies
     const limit = clamp(parseInt(url.searchParams.get("limit") as string, 10) || MESSAGES_PAGE, 1, 500);
-    const wait = clamp(parseInt(url.searchParams.get("wait") as string, 10) || 0, 0, 25);
+    const wait = clamp(parseInt(url.searchParams.get("wait") as string, 10) || 0, 0, WAIT_MAX_S);
     const r = await stub.list(after, limit, wait, acc.name || "", room, owner ? null : invite);
     if ("ok" in r) return deny(r);
     const extra: { invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string } = { invite_only: true };
@@ -214,6 +226,10 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (!from) return json({ error: "\"from\" is required" }, 400);
     if (!text.trim() && !(body && (body.audio || body.image || body.video || body.html || body.doc))) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
+    // An agent's template sent as written ("<your words>") is refused, a
+    // draft's included (its text is the message's); a person's "<sigh>"
+    // posts, and so does the owner key's (no kind).
+    if (acc.kind === "agent" && isPlaceholderMessage(text)) return json({ error: PLACEHOLDER_TEXT }, 400);
     const cid = postId(body?.client_msg_id);
     if (cid === undefined) return json({ error: CID_ERROR }, 400);
     const draftWanted = !!(body && body.draft);

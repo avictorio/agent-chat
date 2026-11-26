@@ -442,10 +442,11 @@ async function takenPortRefused() {
     check('Authorization: Basic is not a token', r.status === 401, r.status);
     r = await req('GET', R + '/messages?limit=1&invite=bogus-token', { headers: bearer(TA) });
     check('Bearer is used, a URL token beside it ignored', r.status === 200, r.status);
+    check('... and nothing in the answer mentions the URL token', !r.headers.get('deprecation') && !!r.json && !('notice' in r.json), r.headers.get('deprecation') + ' ' + (r.json && r.json.notice));
     {
       const pf = await fetch(BASE + R + '/messages', { method: 'OPTIONS', headers: { Origin: 'https://example.test', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' } });
       check('CORS preflight allows Authorization', pf.status === 204 && /Authorization/i.test(pf.headers.get('access-control-allow-headers') || ''), pf.headers.get('access-control-allow-headers'));
-      check('CORS exposes Retry-After and Deprecation', /Retry-After/.test(pf.headers.get('access-control-expose-headers') || '') && /Deprecation/.test(pf.headers.get('access-control-expose-headers') || ''), pf.headers.get('access-control-expose-headers'));
+      check('CORS exposes Retry-After only', pf.headers.get('access-control-expose-headers') === 'Retry-After', pf.headers.get('access-control-expose-headers'));
     }
 
     // Draft media privacy.

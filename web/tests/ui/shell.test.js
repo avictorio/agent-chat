@@ -572,6 +572,33 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     return out;
   });
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });
+  // A revoked invite: the locked screen shows the room's sentence whole
+  // (only "This room is invite-only." is stripped), and no room owner is
+  // named: only the site's owner revokes, and any member can invite anew.
+  for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
+    await run('denied-revoked-' + vp.tag + '-' + scheme, { state: { deny: 403 }, w: vp.w, h: vp.h, touch: vp.touch, scheme }, async (page) => {
+      await page.waitForSelector('#lockedText', { state: 'visible', timeout: 10000 });
+      const text = await page.$eval('#lockedText', (e) => e.textContent);
+      must(text === 'This invite link has been revoked. Ask whoever gave it to you for a new one.', 'the locked screen shows the revoked sentence: ' + text);
+      await shot(page, 'denied-revoked-' + vp.tag + '-' + scheme + '.png');
+      return { text };
+    });
+  }
+  // An agent's invite where the server sent no hand-off block: the app's
+  // own fallback names the MCP endpoint and the header, and tells the
+  // agent to call nothing that joins (whoami and get_room_state both do).
+  for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
+    await run('agent-gate-fallback-' + vp.tag + '-' + scheme, { state: { agentYou: true, noNote: true }, hash: '#invite=tok_Probe', w: vp.w, h: vp.h, touch: vp.touch, scheme }, async (page) => {
+      await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+      await settle(page);
+      const block = await page.$eval('#agentBlock', (e) => e.textContent);
+      must(/\/api\/rooms\/demo\/mcp/.test(block), 'the fallback names the MCP endpoint: ' + block.slice(0, 120));
+      must(/X-Invite-Token: tok_Probe/.test(block), 'the fallback carries the invite header: ' + block.slice(0, 160));
+      must(!/whoami|get_room_state/.test(block), 'the fallback names a call that joins: ' + block);
+      await shot(page, 'agent-gate-fallback-' + vp.tag + '-' + scheme + '.png');
+      return { chars: block.length };
+    });
+  }
   await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
   await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
   await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
@@ -626,6 +653,25 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     must(out.createHints.length > 2 && out.createHints.slice(0, 3).every(Boolean), 'the create form\'s hints must show on a phone: ' + JSON.stringify(out));
     return out;
   });
+  // The home page's How and For agents views: only the site's owner revokes
+  // an invite (no room has an owner), and a wrong or revoked token is a 403.
+  for (const [view, want] of [['how', /Share them privately; the site's owner can revoke one\s+without disturbing anyone else\./], ['agents', /an agent without a valid invite is refused \(401 with no token, 403 with a wrong or\s+revoked one\) and cannot read or post\./]]) {
+    for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
+      await run('home-' + view + '-' + vp.tag + '-' + scheme, { w: vp.w, h: vp.h, touch: vp.touch, scheme }, async (page) => {
+        await page.goto('https://chat.victorio.cloud/');
+        await settle(page);
+        if (vp.touch) { await page.click('#menu'); await settle(page); }
+        await page.click('.tab[data-view="' + view + '"]');
+        await page.waitForSelector('#view-' + view + ':not([hidden])', { timeout: 10000 });
+        await settle(page);
+        const text = await page.$eval('#view-' + view, (e) => e.textContent);
+        must(want.test(text), 'the ' + view + ' view carries the corrected sentence: ' + text.slice(0, 400));
+        must(!/room owner|gets a 401/.test(text), 'the ' + view + ' view keeps a false sentence');
+        await shot(page, 'home-' + view + '-' + vp.tag + '-' + scheme + '.png');
+        return { ok: true };
+      });
+    }
+  }
   async function runHome() {
     const name = 'home-page';
     const b = await chromium.launch({});

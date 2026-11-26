@@ -497,7 +497,7 @@ or `git checkout <commit> -- <dir>`.
 | The pre-React pages (`src/chat.html`, `src/home.html`) and their root Playwright suite | 2026-11-19 | `85b36cc` | Rolling back past the React front end means reverting to a commit before it (`web/README.md`, History). |
 | The Android app (a Capacitor shell, `app/`) and its server and web sides: FCM push, the `pushdev` table, the device-token routes, `/.well-known/assetlinks.json`, the shell bridges | 2026-11-20 | `9a8457e` (`app/`), `e1902f1` (server and web sides) | The `FCM_SA` secret is deleted. The one-PUT stream upload and `publish_on_complete`, built for it, stay as API features any client may use. Add no native-only features (section 1). |
 | The staging Worker (`victorio-chat-next` at next.chat.victorio.cloud, `web/staging/`) | 2026-11-20 | `63b3fae` | Nothing. |
-| The URL token (`?invite=`) | 2026-11-22; the MCP route 2026-11-25 | `ef59801`; the MCP route `8d35719` | No route reads it. A request that sends only that one is answered as tokenless: where a token is needed, `invite_missing` (a 401 over REST; over MCP, the JSON-RPC error's `data.code`), its sentence saying to use the header, with Deprecation, Sunset and Link headers (`queryTokenNotice` in `worker/lib/tokens.ts`; `docs/agents/rooms-and-api.md`, Access). Workers Logs still show such a token in the request's URL (`docs/agents/testing.md`). |
+| The URL token (`?invite=`) | 2026-11-22; the MCP route 2026-11-25; its answers 2026-11-26 | `ef59801`; the MCP route `8d35719`; its answers `498b59b` | No route reads it and no room answer mentions it: a request that sends only that one is answered exactly as one with no token (where a token is needed, `invite_missing`: a 401 over REST; over MCP, the JSON-RPC error's `data.code`, with the tokenless sentence), and one that also sends a header token exactly as if the URL had none. The changes feed keeps its notices about it until their `until` day (`worker/agents/notices.ts`). Workers Logs still show such a token in the request's URL (`docs/agents/testing.md`). |
 | The separate muse-bridge Worker (the `MUSE_BRIDGE` service binding, `X-Bridge-Key`, the 503 `muse_unavailable` without it) | 2026-11-25 | `bbea453` | The bridge runs in this Worker (`worker/bridge/`); its two Durable Object classes came over with their data (migration `v2`). The `MUSE_BRIDGE_KEY` secret is unused, kept until the owner deletes it with the `muse-bridge` Worker. Never deploy the `muse-bridge` Worker again: its config still declares the classes that moved here, and the standing deploy OK in its repo's `AGENTS.md` no longer holds (`docs/agents/muse-bridge.md`, The move from the separate Worker). |
 
 `check:config` keeps the retired secrets (`NTFY_TOPIC`, `FCM_SA`) listed,
@@ -617,7 +617,9 @@ native-only features. The Android app is retired (section 8).
   writer.
 - **New endpoints:** add them under `/api/rooms/ROOM/...`, put them behind
   `stub.access(invite, owner)`, document them in `docs()`, and link them
-  from `for_agents` if agents should discover them.
+  from `for_agents` if agents should discover them. Say in docs.txt LOOK
+  BEFORE JOINING whether a call joins: a route joins at `access()`, so one
+  that refuses before it joins nothing.
 - **Served numbers:** every number a served text quotes comes from
   `worker/limits.ts` (the `docs.txt` placeholders), not a literal.
 - **Abuse limits:** new features that write data or cost money get a cap

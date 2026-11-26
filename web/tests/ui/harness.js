@@ -104,6 +104,9 @@ function fresh(opts) {
   opts = opts || {};
   return {
     deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind, agentYou: !!opts.agentYou,
+    // noNote: the server sends no hand-off block (GET /invite fails, the
+    // agent's read leaves agent_onboarding out), so the app builds its own
+    noNote: !!opts.noNote,
     artScript: !!opts.artScript,
     previews: opts.previews || null,
     // digestsFail: how many /digests reads fail (a weak connection under the board's boot load)
@@ -568,14 +571,15 @@ async function setup(page, S, calls) {
     // answer (the registration is already gone) until it resolves.
     if (p === '/api/push/key') return J({ key: 'B' + 'A'.repeat(86) });
     if ((am = p.match(/^\/api\/rooms\/[^/]+\/push\/(status|subscribe|unsubscribe)$/))) { S.push = S.push || {}; const act = am[1]; const ep = act === 'status' ? u.searchParams.get('endpoint') : act === 'subscribe' ? body.subscription && body.subscription.endpoint : body.endpoint; (S.pushLog = S.pushLog || []).push(act + ' ' + (req.headers()['x-invite-token'] || '-')); if (act === 'status') { if (S.statusGate) await S.statusGate; return J(S.push[ep] ? { room: 'demo', registered: true, mode: S.push[ep] } : { room: 'demo', registered: false }); } if (S.pushFail) return J({ error: 'upstream connect error' }, S.pushFail); if (act === 'subscribe') { S.push[ep] = body.mode === 'mentions' ? 'mentions' : 'all'; return J({ room: 'demo', subscribed: true, mode: S.push[ep] }); } delete S.push[ep]; if (S.unsubGate) await S.unsubGate; return J({ room: 'demo', subscribed: false }); }
-    if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
+    if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask whoever gave it to you for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
     if (p.endsWith('/invite') && m === 'GET') {
       (S.hits = S.hits || []).push('GET /invite');
+      if (S.noNote) return J({ error: 'upstream connect error' }, 500);
       // S.previews: token -> the name its invite is for, or a refusal status (a number)
       const tk = req.headers()['x-invite-token'] || '-';
       if (S.previews && tk in S.previews) { const v = S.previews[tk]; S.hits.push('GET /invite ' + tk); return typeof v === 'number' ? J({ error: "This invite link isn't valid for this room." }, v) : J({ room: 'demo', invite: { name: v, kind: 'human', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: null, members: [], opened: false }); }
       return J(S.agentYou
-        ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list. Call whoami and get_room_state first.' }
+        ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list.' }
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
     }
     // The stream answers with its frames and ends, as a dropped connection
@@ -689,7 +693,7 @@ async function setup(page, S, calls) {
       return J({ room: 'demo', messages: pageRows, last_id: hasMore ? Math.max(after, delivery(S, pageRows[pageRows.length - 1])) : Math.max(after, ...S.msgs.map((x) => delivery(S, x))), has_more: hasMore, you: S.agentYou ? 'Probe' : (S.noYou ? undefined : 'Anthony'), you_kind: S.agentYou ? 'agent' : 'human' });
     }
     if (p.endsWith('/messages')) return J(S.agentYou
-      ? { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
+      ? { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: 'Probe', you_kind: 'agent', ...(S.noNote ? {} : { agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads).' }), room_state: roomState(S) }
       : { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });
     if (p.endsWith('/constitution') && m === 'PUT') { S.hist.push(S.con); S.con = { version: S.con.version + 1, ts: clockNow(), editor: body.from, text: body.text }; return J({ constitution: S.con }, 201); }
     if (p.endsWith('/constitution')) return J({ constitution: S.con, history: S.hist.concat([S.con]) });

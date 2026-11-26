@@ -16,10 +16,9 @@ import {
 import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { invitePreviewBody } from "./members.js";
-import { mcpInstructions } from "../agents/onboarding.js";
+import { MCP_NO_TOKEN, mcpInstructions, type McpVariant } from "../agents/onboarding.js";
 import { recipe } from "../agents/docs.js";
 import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
-import { hasQueryToken, QUERY_REFUSED } from "../lib/tokens.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
 // by docs.ts), plus the watcher script it installs, with the room, the
@@ -91,9 +90,14 @@ export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
 
 // The public changes feed: the API version, the MCP catalog version and
 // the site notices still showing (agents/notices.ts). No token: a site
-// change has to reach agents in every room.
+// change has to reach agents in every room. MCP initialize carries only the
+// link (changesLink): the whole feed was most of its answer, which some
+// harnesses keep in every turn.
+export function changesLink(origin: string) {
+  return { api_version: API_VERSION, catalog_version: MCP_CATALOG_VERSION, url: origin + "/api/changes" };
+}
 export function changesBody(origin: string) {
-  return { api_version: API_VERSION, catalog_version: MCP_CATALOG_VERSION, url: origin + "/api/changes", notices: activeNotices() };
+  return { ...changesLink(origin), notices: activeNotices() };
 }
 export function changesRoute(rc: RouteContext) {
   const { request, url } = rc;
@@ -126,12 +130,11 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // every method that needs one (the room could only answer
   // invite_missing). Asking made every tokenless ping, initialize and
   // notification (which never touched the Room object before) a Durable
-  // Object call. A token in the URL (?invite=) is not read
-  // (lib/tokens.ts): a request that sent only that one is refused as
-  // tokenless, its sentence saying to send the header - the too-large
-  // refusal included, since its caller thought it had sent a token.
-  const urlTokenOnly = !invite && hasQueryToken(url);
-  const missing = (): Refusal => (urlTokenOnly ? { ...inviteMissing(), error: QUERY_REFUSED } : inviteMissing());
+  // Object call. Its sentence is MCP's own (MCP_NO_TOKEN): the REST one says
+  // to open the invite link, which an MCP client cannot do. A token in the
+  // URL (?invite=) is not read (lib/tokens.ts): a request that sent only
+  // that one is answered exactly as one that sent none.
+  const missing = (): Refusal => ({ ...inviteMissing(), error: MCP_NO_TOKEN });
   const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : !invite ? Promise.resolve(missing()) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: unknown = null;
@@ -141,9 +144,11 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // The body used to be parsed whatever its size, and a batch had no end,
   // so 1 MB of tokenless initialize calls came back as a 75 MB answer.
   const tokenOk = await checkToken();
+  // initialize's instructions follow what the token turned out to be
+  const variant: McpVariant = owner ? "owner" : tokenOk.ok ? "ok" : tokenOk.code === "invite_missing" ? "none" : tokenOk.code === "invite_revoked" ? "revoked" : "invalid";
   let body: Request | null = request;
   if (!tokenOk.ok) body = await settleBody(request, SMALL_BODY_MAX);
-  if (!body) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Request too large: without a valid invite token a request can be up to " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" + (urlTokenOnly ? ". " + QUERY_REFUSED : "") } }, 413);
+  if (!body) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Request too large: without a valid invite token a request can be up to " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" } }, 413);
   try { rpcBody = await body.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
   const handleRpc = async (/** one JSON-RPC request, as sent */ raw: unknown) => {
     const req = isObject(raw) ? raw : null;
@@ -158,7 +163,12 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (method === "ping") return ok({});
     if (method === "initialize") {
       const pv = params && typeof params.protocolVersion === "string" ? params.protocolVersion : MCP_PROTOCOL_VERSION;
-      return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogBuilt().digest }, changes: changesBody(url.origin), instructions: mcpInstructions(url.origin) });
+      return ok({
+        protocolVersion: pv, capabilities: { tools: {} },
+        serverInfo: { name: "agent-chat", title: "Agent Chat", version: MCP_CATALOG_VERSION, websiteUrl: url.origin },
+        catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogBuilt().digest },
+        changes: changesLink(url.origin), instructions: mcpInstructions(url.origin, variant),
+      });
     }
     if (method !== "tools/call") {
       const c = await checkToken();

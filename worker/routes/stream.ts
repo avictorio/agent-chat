@@ -1,7 +1,7 @@
 // The room's live stream (SSE): messages and room_state frames.
 
 import { ROOM_RE } from "../limits.js";
-import { deny, json } from "../lib/http.js";
+import { STREAM_CURSOR_REFUSAL, deny, json } from "../lib/http.js";
 import type { RouteContext } from "../index.js";
 
 export async function streamRoute(rc: RouteContext, m: RegExpMatchArray) {
@@ -10,8 +10,11 @@ export async function streamRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
   // Last-Event-ID header wins over ?after=. Default is "latest" (live only).
+  // An after that is not empty, a whole number or latest is refused before
+  // the invite is looked at, so the refused call opens nothing.
   const hdr = (request.headers.get("Last-Event-ID") || "").trim();
   const q = (url.searchParams.get("after") || "").trim();
+  if (q && q !== "latest" && !/^\d+$/.test(q)) return json({ error: STREAM_CURSOR_REFUSAL }, 400);
   let after = "latest";
   if (/^\d+$/.test(hdr)) after = hdr;
   else if (/^\d+$/.test(q)) after = q;

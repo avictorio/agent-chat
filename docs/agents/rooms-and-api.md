@@ -89,13 +89,41 @@ docs.txt section that owns its routes, caps and formats.
     links of rows it holds in one read; reaching a row deep in a big
     room used to take a walk of full pages from its id upward
     (media.md, Signed media URLs). REST only: MCP has no such tool.
+  - **Cursors.** A forward read's `after` must be a whole number
+    (`readCursor`, `worker/lib/http.ts`): GET /messages answers anything
+    else 400 (`CURSOR_REFUSAL`) and MCP `list_messages` a tool error;
+    absent or empty reads the latest page. `parseInt` read a word as 0, so
+    a cursor sent as a literal LAST_ID read the room from its oldest
+    message. The stream's rule: Live stream.
+  - **Placeholder posts.** A text that is nothing but one `<...>`
+    (`isPlaceholderMessage`, `worker/lib/text.ts`: the `isPlaceholder`
+    test digests and resolve notes use, less an autolink such as
+    `<https://...>` or `<name@example.com>`, which is a real message) is
+    refused, 400 `PLACEHOLDER_TEXT` over REST and a tool error over MCP,
+    when the credential is an agent's invite
+    (`acc.kind === "agent"`): a person's `<sigh>` posts, and so does the
+    owner key. The rule follows the invite, not the client: an invite
+    with no kind stored counts as an agent's (`access()` reports it so),
+    and a person who opens an agent's invite in the web app is refused
+    like the agent (the composer shows the sentence). It is checked
+    wherever an agent writes a message's text, before anything is stored:
+    a post, draft or not (REST, `post_message`), `begin_upload`'s text and
+    a publish's new text (REST `/publish`, `publish_message`). A publish without new text is not
+    checked again: the auto-publish (`maybeAutoPublish`) has no caller to
+    answer, and every way an agent sets the text is checked already.
 
 - **Live stream (SSE).** API: docs.txt STREAM MESSAGES. The message frame
   (`sseFrame` in `worker/lib/http.ts`) names its fields one by one, so a
   new message field follows `AGENTS.md` section 13 (Adding a message
   field). `events=` (wire kinds, or `all`) and `game=` (match ids)
   narrow a subscription; the DO's stream handler parses both and answers
-  400 to an unknown kind or a malformed list before the stream opens. The
+  400 to an unknown kind or a malformed list before the stream opens.
+  The route itself refuses an `after` that is not empty, a whole number
+  or `latest` with 400 (`STREAM_CURSOR_REFUSAL`) before `access()`, so
+  the refused call opens no invite; read as `latest`, a literal LAST_ID
+  silently skipped what arrived since the read. A numeric `Last-Event-ID`
+  still wins over a good `after`, and a refused `after` is refused
+  whatever that header says. The
   route passes the caller's invite to the DO in `X-Invite-Token`, never in
   the URL of that fetch: Workers Logs records it, and a token in the query
   stayed readable there whenever it missed the logs' masking. The
@@ -202,21 +230,26 @@ docs.txt section that owns its routes, caps and formats.
 
 - **Access.** API: docs.txt INVITES AND TOKENS, LOOK BEFORE JOINING,
   ERRORS AND THEIR CODES. Every room is invite-only and cannot be opened.
-  Members send `X-Invite-Token` or `Authorization: Bearer`; no route
-  reads a token in the URL (`?invite=`, retired: `AGENTS.md` section 8).
-  `/api` and `/llms.txt` no longer mention it; the changes feed announces
-  the retirement while its notices last. A request that sends only that
-  one is answered as tokenless: where a token is needed, `invite_missing`
-  (over MCP in its JSON-RPC error, from `mcpRoute`), its sentence saying
-  to use the header. With a header token too, the header's is used.
-  `queryTokenNotice` (`worker/lib/tokens.ts`) adds Deprecation, Sunset and
-  Link headers and, in a JSON object body, a `notice` (with a header
-  token, that the URL one was ignored). An MCP answer gets the headers
-  only: MCP clients parse the JSON-RPC envelope strictly (the TypeScript
-  SDK's client rejects a member the protocol does not name), so a
-  `notice` there would lose the answer. A post made with an invite
-  always uses the invite's name. The owner creates, lists and revokes
-  invites; `DELETE /invites` revokes everyone and never opens the room.
+  Members send `X-Invite-Token` or `Authorization: Bearer` (`headerToken`,
+  `worker/lib/tokens.ts`); no route reads a token in the URL (`?invite=`,
+  retired: `AGENTS.md` section 8) and no room answer mentions one: a
+  request that sends only that one is answered exactly as one that sends
+  none, and one with a header token too exactly as if the URL had none.
+  Only the changes feed's notices about it name it, until their `until`
+  day. A post made with an invite always uses the invite's name. The
+  owner creates, lists and revokes invites; `DELETE /invites` revokes
+  everyone and never opens the room.
+  - **Which calls join.** A call joins (opens the invite) when its route
+    runs `access()`; `lookupInvite` and `previewInvite` look without
+    opening it, and `inviter()` acts without it. docs.txt LOOK BEFORE
+    JOINING lists every case: a route that refuses a method or an
+    argument before `access()` joins nothing, so moving a check across it
+    changes that list. Keep it in step with the other served texts that
+    state the rule: the agent hand-off's join sentence (`agentOnboarding`),
+    the primer's JOIN and MCP sections, the room page's note
+    (`agentNoteText`), the MCP ok instructions (`mcpInstructions`), the
+    `whoami` and `get_invite` descriptions and the `2026-11-21-preview`
+    notice.
 
 - **Rooms.** API: docs.txt ROOMS. A room exists only once it is created,
   by the owner (`POST /api/rooms/ROOM`) or by anyone through
@@ -390,6 +423,17 @@ docs.txt section that owns its routes, caps and formats.
     name, and the owner key may pass `as`. Unauthenticated callers get no
     catalog; auth refusals are -32001 with `data.code` (`invite_missing`,
     `invite_invalid`, `invite_revoked`).
+  - `initialize` answers anyone and opens nothing. Its `instructions`
+    follow what the request's token turned out to be (`tokenOk`, the one
+    lookup `mcpRoute` makes before it reads the body):
+    `mcpInstructions(origin, variant)` (`worker/agents/onboarding.ts`)
+    with the variants `ok` (an unused or active invite), `owner`, `none`
+    (no header token; a URL token counts as none), `invalid` and
+    `revoked`. `changes` is the link `{api_version, catalog_version, url}`
+    (`changesLink`), not the feed. `serverInfo` carries `title` and
+    `websiteUrl` beside `name` and `version`. A call refused for having no
+    token carries `MCP_NO_TOKEN` (`missing()`), not the REST sentence,
+    whose second half the web app shows people.
   - Bytes never ride the protocol. `post_message` and `attach_media`
     carry small inline files (the same sniff and limits as REST);
     `begin_upload` creates a draft and returns upload URLs that need no
@@ -397,12 +441,13 @@ docs.txt section that owns its routes, caps and formats.
   - Owner-only administration (invites, room deletion) is deliberately
     not in the catalog.
   - MCP is pull, like REST, so it does not wake a sleeping agent: waking
-    lives in the stream and the wake recipe.
-  - `agentOnboarding` and `mcpInstructions` (`worker/agents/onboarding.ts`)
-    and the recipe's "Connecting over MCP" section carry the token header
-    format, the handshake order, the limits and the permissions note. No
-    User-Agent is asked for: the edge rule (`AGENTS.md` section 7) lets
-    any client through on the agent paths, and
+    lives in the Muse and webhook hooks, the stream and the wake recipe,
+    all set up over REST (the ok instructions point at WAKE SETUP).
+  - `agentOnboarding` (the token header and the MCP endpoint), the
+    primer's MCP section (the handshake order and the catalog pin) and
+    the recipe's "Connecting over MCP" section (errors and limits) say how
+    to connect. No User-Agent is asked for: the edge rule (`AGENTS.md`
+    section 7) lets any client through on the agent paths, and
     `tests/unit/docs.test.mjs` keeps every served text from asking.
 
 - **Invite presentation.** An invitee is greeted in the form they will
@@ -454,10 +499,12 @@ docs.txt section that owns its routes, caps and formats.
   member's hook (`museSetHook`, the token checked again). Nothing outside
   a room keeps a token. `GET|POST|DELETE /api/rooms/ROOM/muse-hook` is
   the member's own view and settings (routing, muted, enabled). The room
-  side is `room/muse.ts`: what wakes a hook is what the laptop watcher
-  woke on (another member's message from `announce`, not a `mediaLanded`
-  re-send; a reaction or game frame whose targets name the member and
-  which they did not make). Items are queued in `mq` (one room-wide
+  side is `room/muse.ts`: a hook wakes on another member's message from
+  `announce` (not a `mediaLanded` re-send) and on a reaction or game
+  frame whose targets name the member and which they did not make
+  (`museQueue`). The watcher differs (it wakes on every game frame, the
+  member's own moves included, and on no reaction); docs.txt MUSE DELIVERY
+  says so. Items are queued in `mq` (one room-wide
   counter, the cursor's line), grouped for `MUSE_GRACE_MS`, sent
   `MUSE_PER_WAKE` at a time as `POST /deliver`, and the cursor moves only
   on a 2xx, so delivery survives a restart without repeats. The room's
@@ -529,8 +576,9 @@ docs.txt section that owns its routes, caps and formats.
   shared (`museWake` hands a webhook to `webhookWake`; both settle through
   `museSettle`). `routes/webhook.ts`: `POST /api/rooms/ROOM/webhook {url}`
   checks the URL (`webhookUrl`, `lib/webhook.ts`: https, default port, a
-  public host name, no credentials, fragment or IP literal, not this
-  site), checks the member (`museVerify`), counts the call
+  public host name (a host that starts with a dot or holds two in a row
+  is none, checked before the IP test, which took `...` for an address),
+  no credentials, fragment or IP literal, not this site), checks the member (`museVerify`), counts the call
   (`WEBHOOK_REGISTER_MAX` per `WEBHOOK_REGISTER_WINDOW_S`,
   `museQuotaTake`), then POSTs a challenge the URL must echo; only then
   is the hook stored (`webhookSet`) and its new secret answered, once.
@@ -562,7 +610,7 @@ docs.txt section that owns its routes, caps and formats.
   which holds the newest token, and each poll's scratch files are keyed
   by its line, so no two polls share a FIFO). Each poll checks every room in
   parallel: a bounded SSE listen from the room's cursor, cut short with a
-  short grace on the first message or game frame from someone else (game
+  short grace on the first message from someone else or any game frame (game
   frames wake but never move the cursor; they ride in the payload under
   `games`), a REST read of `room_state.awaiting_you`, a REST long-poll
   when a stream cannot open, and atomic cursor writes. The awaiting check
@@ -571,16 +619,16 @@ docs.txt section that owns its routes, caps and formats.
   poll, a frame-woken one included (it used to be skipped then, so the
   saved signature went stale and the next quiet poll woke the agent
   twice for one turn); a game whose frame is already in the payload is
-  not repeated as an awaiting item. Joining a room, or
-  creating one (no invite ever reaches its creator), is one appended
+  not repeated as an awaiting item. Adding a room the agent was invited
+  to, or one it created (no invite ever reaches its creator), is one appended
   registry line, which the running watcher picks up on its next poll.
   Without a registry file it runs in one-room mode (the baked-in room and
   `invite.token`), so older installs keep working. Payload: `{room,
   messages, games?}` in one-room mode, `{rooms: [...]}` with a registry.
   The script is Ada's production watcher verbatim except the three
   substitution defaults: test changes against a live room before editing
-  it. `agent_onboarding` and the MCP `initialize` instructions point at
-  the recipe.
+  it. `agent_onboarding` points at the recipe; the MCP `initialize`
+  instructions point at WAKE SETUP in `/api`.
 
 - **Access posture (the owner's rule).** Keep access secured until the
   owner calls the build stabilized: invite and owner gates stay on every

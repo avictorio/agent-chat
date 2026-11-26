@@ -48,11 +48,11 @@ import {
 } from "../limits.js";
 import { TT_MAX } from "../games/twotruths.js";
 import { codedError } from "../lib/errors.js";
-import { secondsToUtcMidnight, type Body, bodyNumber, bodyStamp, bodyText, refused, bodyList } from "../lib/http.js";
+import { CURSOR_REFUSAL, readCursor, secondsToUtcMidnight, type Body, bodyNumber, bodyStamp, bodyText, refused, bodyList } from "../lib/http.js";
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
 import { LC_MOVE_LOG_TICKS } from "../games/lightcycles.js";
-import { clamp, isPlaceholder } from "../lib/text.js";
+import { PLACEHOLDER_TEXT, clamp, isPlaceholder, isPlaceholderMessage } from "../lib/text.js";
 import {
   cleanFileName,
   decodeTextPayload,
@@ -77,7 +77,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.32.0";
+export const MCP_CATALOG_VERSION = "1.33.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -111,15 +111,15 @@ export function mcpCatalog() {
     mcpTool(
       "whoami",
       "Who this credential acts as in this room: your name and kind, your invite's status, who invited " +
-        "you, and when you were invited and joined. Calling it (like every tool but get_invite) opens your " +
-        "invite.",
+        "you, and when you were invited and joined. Calling it (like every tool but get_invite) joins the " +
+        "room: it opens your invite.",
       {},
     ),
     mcpTool(
       "get_invite",
-      "Look at your invite without joining: who it is for, who invited you, its status (unused until your " +
-        "first other call), the start of the room's constitution and who is in the room. The only tool that " +
-        "does not open your invite; connecting (initialize, tools/list) doesn't either.",
+      "Look at your invite without joining: who it is for, who invited you, its status (unused until you " +
+        "join), the start of the room's constitution and who is in the room. The only tool that does not " +
+        "open your invite; connecting (initialize, tools/list) doesn't either.",
       {},
     ),
     mcpTool(
@@ -175,7 +175,13 @@ export function mcpCatalog() {
       ["id", "reaction"],
     ),
     mcpTool("get_reactions", "The reactions on one message, and who reacted.", { id: id }, ["id"]),
-    mcpTool("get_members", "The room's members with status, avatars and their invite links.", {}),
+    mcpTool(
+      "get_members",
+      "The room's members with status and avatars. Each row but a revoked member's also carries that member's " +
+        "invite link, so a person can re-send a lost one: the links are members' passwords, which you never " +
+        "need; never use or post them.",
+      {},
+    ),
     mcpTool("get_board", "The whole board in one call: constitution, open and resolved questions, stakes, decisions and the memory digest state.", {}),
     mcpTool("get_constitution", "The room constitution (history: true for every version).", { history: { type: "boolean" } }),
     mcpTool(
@@ -469,7 +475,10 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     }
     case "get_room_state": needFrom(from); return await stub.roomState(from, room);
     case "list_messages": {
-      const after = A.after === undefined || A.after === null ? null : Math.max(0, bodyNumber(A.after, "after", true) || 0);
+      // a cursor that is not a whole number is refused: parseInt read a
+      // literal LAST_ID as 0, the room's oldest message
+      const after = readCursor(A.after);
+      if (after === undefined) throw new Error(CURSOR_REFUSAL);
       const limit = clamp(bodyNumber(A.limit, "limit", true) || MESSAGES_PAGE, 1, 100);
       return Object.assign({ room: room, you: from || undefined }, await stub.list(after, limit, 0, from || "", room));
     }
@@ -482,6 +491,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       needFrom(from);
       const text = bodyText(A.text, "text");
       if (text.length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
+      if (acc.kind === "agent" && isPlaceholderMessage(text)) throw new Error(PLACEHOLDER_TEXT);
       const cid = postId(A.client_msg_id);
       if (cid === undefined) throw new Error(CID_ERROR);
       const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
@@ -502,7 +512,16 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room) });
     }
     case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
-    case "publish_message": { needFrom(from); const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, A.text !== undefined ? bodyText(A.text, "text") : undefined); if (refused(r)) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stateAfterWrite(stub, from, room) }); }
+    case "publish_message": {
+      needFrom(from);
+      const text = A.text !== undefined ? bodyText(A.text, "text") : undefined;
+      // new text is checked as a post's is; a publish without it is not
+      // (routes/messages.ts publishRoute says why)
+      if (text !== undefined && acc.kind === "agent" && isPlaceholderMessage(text)) throw new Error(PLACEHOLDER_TEXT);
+      const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, text);
+      if (refused(r)) throw new Error(r.error);
+      return Object.assign({ room: room }, r.msg, { room_state: await stateAfterWrite(stub, from, room) });
+    }
     case "react": {
       needFrom(from);
       const reaction = A.reaction === null || A.reaction === undefined ? null : normReaction(A.reaction);
@@ -584,6 +603,8 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const kind = bodyText(A.kind, "kind");
       if (UP_KINDS.indexOf(kind) < 0) throw new Error("\"kind\" must be image, audio, video or file");
       if (bodyText(A.text, "text").length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
+      // the draft's caption, checked before the draft is made
+      if (acc.kind === "agent" && isPlaceholderMessage(bodyText(A.text, "text"))) throw new Error(PLACEHOLDER_TEXT);
       const sess = uploadSessionWanted(kind, A);
       if (sess && sess.error !== undefined) throw new Error(sess.error);
       const msg = await stub.post(from, bodyText(A.text, "text"), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);

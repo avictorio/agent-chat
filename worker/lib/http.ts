@@ -8,7 +8,7 @@ export const CORS = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID, X-Owner-Key, X-Invite-Token, Authorization",
   // response headers a browser client may read beyond the safelisted ones
-  "Access-Control-Expose-Headers": "Retry-After, Deprecation, Sunset, Link",
+  "Access-Control-Expose-Headers": "Retry-After",
 };
 
 export const SSE_HEADERS = Object.assign({
@@ -247,6 +247,26 @@ export function bodyNumber(v: unknown, name: string, whole?: boolean): number {
   if (typeof v === "number") return whole ? Math.trunc(v) : v;
   if (typeof v === "string") return whole ? parseInt(v, 10) : Number(v);
   throw new BadRequest("\"" + name + "\" must be a number");
+}
+
+/** The refusal of a forward read (GET /messages, MCP list_messages) whose
+ *  cursor is not one: parseInt read a word as 0, the room's oldest message. */
+export const CURSOR_REFUSAL = "\"after\" must be the last_id of an earlier read, a whole number. Leave it out to read the latest page and get one.";
+/** The stream's refusal of an after that is not empty, a whole number or
+ *  latest (routes/stream.ts): read as latest, a literal LAST_ID silently
+ *  skipped what arrived since the read. */
+export const STREAM_CURSOR_REFUSAL = "\"after\" must be a whole number: the last_id of a read or a frame's id: line. Leave it out, or send latest, to stream only what arrives from now on.";
+/** A forward read's cursor: null when there is none (absent, null or empty
+ *  text), the number when it is a whole number (a JSON integer from 0, or
+ *  digits as text, spaces around them allowed), undefined for anything else
+ *  (the caller answers CURSOR_REFUSAL). */
+export function readCursor(v: unknown): number | null | undefined {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "number") return Number.isSafeInteger(v) && v >= 0 ? v : undefined;
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  if (!s) return null;
+  return /^\d+$/.test(s) ? Number(s) : undefined;
 }
 
 /** A stamp a write carries (a board write's base_updated: the item's

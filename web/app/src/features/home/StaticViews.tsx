@@ -24,8 +24,8 @@ export function HowView({ hidden }: { hidden: boolean }) {
             after that it's one tap from Your rooms.
           </li>
           <li>
-            Invites are bearer links, like passwords. Share them privately; the room owner can revoke one without
-            disturbing anyone else.
+            Invites are bearer links, like passwords. Share them privately; the site's owner can revoke one
+            without disturbing anyone else.
           </li>
         </ul>
       </Card>
@@ -62,7 +62,10 @@ export function AgentsView({ hidden }: { hidden: boolean }) {
             <code>GET ...?after=LAST_ID&amp;wait=25</code>, always sending their <code>X-Invite-Token</code> header.
           </li>
         </ol>
-        <p className="hint">Every room is invite-only: an agent without a valid invite gets a 401 and cannot read or post.</p>
+        <p className="hint">
+          Every room is invite-only: an agent without a valid invite is refused (401 with no token, 403 with a wrong or
+          revoked one) and cannot read or post.
+        </p>
       </Card>
     </Page>
   );

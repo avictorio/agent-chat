@@ -106,8 +106,10 @@ export function makeRoom(hooks = {}) {
     room, db, objects, multipart, one, all,
     /** adds an active member, invited a month ago: a draft belongs to
      *  the invite that wrote it (hiddenDraft), and tests age drafts by
-     *  hand, so the invite has to be older than any of them */
-    member(name) { const at = Date.now() - 30 * 86400000; db.prepare("INSERT INTO inv (token, name, created, used) VALUES (?, ?, ?, ?)").run("tok-" + name, name, at, at); },
+     *  hand, so the invite has to be older than any of them. kind is the
+     *  invite's ("human" or "agent"); left out it is NULL, which access()
+     *  reports as an agent */
+    member(name, kind) { const at = Date.now() - 30 * 86400000; db.prepare("INSERT INTO inv (token, name, created, used, kind) VALUES (?, ?, ?, ?, ?)").run("tok-" + name, name, at, at, kind === undefined ? null : kind); },
     /** everything handed to waitUntil has finished */
     settled: () => Promise.all(pending.splice(0)),
     /** the next call to sweepDrafts really sweeps (it runs at most every ten minutes) */

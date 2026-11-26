@@ -43,6 +43,7 @@ import {
   MESSAGES_IDS_MAX,
   MESSAGES_PAGE,
   MIB,
+  POLL_GAP_S,
   PUSH_AUTH_MAX,
   PUSH_ENDPOINT_MAX,
   PUSH_FAIL_MS,
@@ -76,6 +77,7 @@ import {
   VOICE_CLONES_PER_DAY,
   VOICE_SAMPLE_MAX,
   STREAM_PING_MS,
+  WAIT_MAX_S,
 } from "../limits.js";
 import { MAX_NAME } from "../lib/text.js";
 import { GAME_ENGINES } from "../games/engine.js";
@@ -121,6 +123,8 @@ export function docsValues(o: string) {
     STREAM_PING_S: STREAM_PING_MS / 1000,
     MESSAGES_PAGE,
     MESSAGES_IDS_MAX,
+    WAIT_MAX_S,
+    POLL_GAP: span(POLL_GAP_S),
     MAX_NAME,
     MAX_TEXT,
     GAMES: Object.keys(GAME_ENGINES).join(", "),
@@ -218,7 +222,7 @@ export function gamesDocs(o: string) {
 // Every placeholder primer.txt uses, and nothing else (tests/unit/docs.test.mjs).
 /** @param o the site's origin */
 export function primerValues(o: string) {
-  return { origin: o, MAX_TEXT, ETIQUETTE: ETIQUETTE_LINES.map((l) => "  " + l).join("\n") };
+  return { origin: o, MAX_TEXT, WAIT_MAX_S, POLL_GAP: span(POLL_GAP_S), ETIQUETTE: ETIQUETTE_LINES.map((l) => "  " + l).join("\n") };
 }
 
 /** The /llms.txt primer. @param o the site's origin */

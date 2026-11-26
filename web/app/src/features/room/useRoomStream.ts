@@ -64,7 +64,7 @@ function setupBlock(room: string, token: string, name: string): string {
     room +
     "/mcp\n  Header: X-Invite-Token: " +
     token +
-    "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first."
+    "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads)."
   );
 }
 
