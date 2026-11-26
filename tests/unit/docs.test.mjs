@@ -253,8 +253,10 @@ test("the served texts are all there", () => {
   assert.match(revokedSentence(), /revoked/);
 });
 
-// Every text is true of the code as it is: none names what is not built
-// (a leave call, the web app's "What your agent reads first"), a watcher
+// Every text is true of the code as it is: none says there is no leave
+// call (POST .../leave and MCP leave_room take a member out: room/members.ts
+// leave), none names what is not built (the web app's "What your agent
+// reads first"), a watcher
 // version or SHA-256 a text prints is the one the origin serves (docs.ts
 // watcherPin), none points at the note's old registry line, and none
 // repeats a statement that was false: stopping reads stops no hook or
@@ -264,7 +266,9 @@ test("the served texts are all there", () => {
 test("no served text names what is not built, or a false rule", () => {
   let pinned = 0;
   for (const [name, text] of Object.entries(servedTexts("https://example.test"))) {
-    assert.ok(!/leave call/i.test(text.replace(/no leave call/gi, "")), name + " names a leave call");
+    assert.ok(!/no leave call|there is no leave|only the site's owner can (?:remove|revoke) you/i.test(text), name + " says there is no leave call");
+    // the leave call is a POST, named as its route takes it
+    for (const m of text.matchAll(/\b(GET|HEAD|POST|PUT|DELETE) +(\S*)\/leave\b/g)) assert.equal(m[1], "POST", name + " names the leave call as " + m[0]);
     // the watcher's own sentence (start.ts way c): the version and hash it prints are the origin's
     for (const m of text.matchAll(/the same for every agent on this site: version (\S+), SHA-256 (\S+)\. /g)) {
       assert.deepEqual([m[1], m[2]], [WATCHER_VERSION, PIN.sha256], name + " names another watcher version or SHA-256");
@@ -275,6 +279,29 @@ test("no served text names what is not built, or a false rule", () => {
     for (const bad of ["stop polling", "call whoami", "room owner", "Any other call", "every tool but get_invite)", "The only tool that does not", "Watcher registry line", "implement the wake recipe"]) assert.ok(!text.toLowerCase().includes(bad.toLowerCase()), name + " still says " + bad);
   }
   assert.equal(pinned, 4, "the four start pages print the watcher's version and SHA-256");
+});
+
+// The texts that tell an agent how to leave name the call as it is: POST
+// /api/rooms/ROOM/leave with confirm (routes/members.ts leaveRoute), the MCP
+// tool leave_room, and the last member's delete_room; the house rules and
+// the start pages say to ask the person first.
+test("the texts that say how to leave name the call, its confirm and its tool correctly", () => {
+  const t = servedTexts("https://example.test");
+  const flat = (k) => t[k].replace(/\s+/g, " ");
+  // the recipe's origin is filled in where it is served (recipeRoute)
+  for (const k of ["/api (docs.txt)", "/llms.txt (primer.txt)", "agent recipe"]) assert.match(flat(k), /POST (?:https:\/\/example\.test|__ORIGIN__)?\/api\/rooms\/ROOM\/leave/, k + " names POST .../leave");
+  const api = sectionOf(docs("https://example.test"), "LEAVING THE ROOM").replace(/\s+/g, " ");
+  for (const want of ["POST /api/rooms/ROOM/leave {\"confirm\": \"ROOM\"}", "-> {\"room\", \"name\", \"left\", \"room_deleted\"}", "\"delete_room\": true", "409 last_member", "409 not_joined", "400 confirm_mismatch", "400 owner_not_member", "leave_room", "Ask your person first", "No call removes another member", "A protected room is never deleted"]) assert.ok(api.includes(want), "LEAVING THE ROOM lacks " + want);
+  for (const k of ["start page, joined", "start page, with the owner key"]) {
+    assert.ok(t[k].includes("\nTo leave for good, only once your person agrees: POST https://example.test/api/rooms/" + START_ROOM + "/leave {\"confirm\": \"" + START_ROOM + "\"}   (MCP: leave_room)\n"), k + ": step 7 names the call");
+    assert.ok(t[k].includes("\"delete_room\": true beside confirm"), k + ": step 7 names the last member's yes");
+  }
+  for (const k of ["start page", "start page, a person's invite"]) assert.ok(t[k].includes("/leave {\"confirm\": \"" + START_ROOM + "\"} (MCP: leave_room)"), k + ": step 7 names the call");
+  const tool = mcpCatalog().find((x) => x.name === "leave_room");
+  assert.ok(tool && tool.annotations.destructiveHint === true && tool.annotations.readOnlyHint === false, "leave_room is annotated as destructive");
+  assert.deepEqual(Object.keys(tool.inputSchema.properties), ["confirm", "delete_room"]);
+  assert.deepEqual(tool.inputSchema.required, ["confirm"]);
+  assert.ok(tool.description.includes("Ask your person first"), tool.description);
 });
 
 // The script route answers one file for every caller of the site, with
@@ -323,10 +350,10 @@ test("the wake recipe says what the watcher is, how to fetch, check and stop it,
   assert.ok(!WATCHER.includes("$P_ROOM.jsonl"), "the script names no per-room spool");
 });
 
-test("the etiquette's fourth line says to remove a wake when leaving", () => {
-  assert.equal(ETIQUETTE_LINES[3], "- Leaving a room: remove any wake you set up and stop reading.");
+test("the etiquette's fourth line says to remove a wake when done, and to leave only with the person's yes", () => {
+  assert.equal(ETIQUETTE_LINES[3], "- Done with a room: remove any wake you set up and stop reading. Leave it for good (POST /api/rooms/ROOM/leave) only once your person agrees.");
   const turns = docs("https://example.test");
-  assert.ok(turns.includes("\n     Leaving a room: remove any wake you set up and stop reading.\n"), "TAKING TURNS step 4 carries it");
+  assert.ok(turns.includes("\n     Done with a room: remove any wake you set up and stop reading. Leaving it for good is a\n     call of its own, made only once your person agrees (LEAVING THE ROOM).\n"), "TAKING TURNS step 4 carries it");
 });
 
 test("MCP initialize's instructions, by token: short, and the ok one starts from get_start_page", () => {
@@ -362,7 +389,7 @@ test("three tool descriptions say what joins and what the invite links are", () 
   const by = Object.fromEntries(mcpCatalog().map((t) => [t.name, t.description]));
   assert.ok(by.whoami.includes("joins the room: it opens your invite"), by.whoami);
   assert.ok(by.get_invite.includes("(unused until you join)"), by.get_invite);
-  assert.ok(by.whoami.includes("every tool but get_invite and get_start_page"), by.whoami);
+  assert.ok(by.whoami.includes("every tool but get_invite, get_start_page and leave_room"), by.whoami);
   assert.ok(by.get_invite.includes("call get_start_page"), by.get_invite);
   assert.ok(by.get_start_page.includes("It changes nothing in the room"), by.get_start_page);
   // get_invite never carries the note (an agent already holds it)
@@ -372,11 +399,11 @@ test("three tool descriptions say what joins and what the invite links are", () 
   assert.ok(by.get_members.includes("never post them"), by.get_members);
 });
 
-// get_start_page and get_invite read the token's invite only: the owner
-// key's "as" would be ignored there, so their schemas do not offer it;
-// every other tool does.
-test("every tool offers the owner key's as, except get_start_page and get_invite", () => {
-  for (const t of mcpCatalog()) assert.equal("as" in t.inputSchema.properties, t.name !== "get_start_page" && t.name !== "get_invite", t.name);
+// get_start_page and get_invite read the token's invite only, and the owner
+// key cannot leave (leave_room): the owner key's "as" would be ignored or
+// refused there, so their schemas do not offer it; every other tool does.
+test("every tool offers the owner key's as, except get_start_page, get_invite and leave_room", () => {
+  for (const t of mcpCatalog()) assert.equal("as" in t.inputSchema.properties, !["get_start_page", "get_invite", "leave_room"].includes(t.name), t.name);
 });
 
 test("the poll numbers come from limits.ts", async () => {

@@ -72,6 +72,13 @@ const TOK = require('path').join(process.argv[3] || __dirname, 'tokens.json');
       const d = await req('POST', R + '/messages', { token: A, json: { text: 'a file follows', draft: true } });
       const up = await req('POST', R + '/messages/' + (d.json && d.json.id) + '/upload-ticket', { token: A, json: { kind: 'file', size: 10, name: 'x.txt' } });
       check(room + ': a draft and its upload session open (the newest m, md, ut columns)', d.status === 201 && up.status === 200, d.status + ' ' + up.status + ' ' + up.text.slice(0, 160));
+      // inv.left_ts (schema step 9): the old agent leaves, and the list carries when
+      const lv = await req('POST', R + '/leave', { token: A, json: { confirm: room } });
+      check(room + ': a member leaves (inv.left_ts)', lv.status === 200 && lv.json && lv.json.name === 'OldAgent' && lv.json.room_deleted === false && lv.json.left > 0, lv.status + ' ' + lv.text.slice(0, 160));
+      const after = await req('GET', R + '/members', { token: H });
+      const gone = ((after.json && after.json.members) || []).find((x) => x.name === 'OldAgent') || {};
+      const stays = ((after.json && after.json.members) || []).find((x) => x.name === 'OldHuman') || {};
+      check(room + ': ... the list shows it revoked with left, the others with left null', gone.status === 'revoked' && gone.left === lv.json.left && stays.left === null, JSON.stringify([gone, stays]).slice(0, 200));
     }
   }
   console.log(fails ? 'UPGRADE: ' + fails + ' failure(s)' : 'UPGRADE: all checks passed');

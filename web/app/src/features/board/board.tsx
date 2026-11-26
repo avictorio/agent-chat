@@ -17,6 +17,7 @@ import { Page, PageHead } from "../../ui/Page";
 import { Pill } from "../../ui/Pill";
 import { ErrorBoundary } from "../../ui/ErrorBoundary";
 import { Card, CardActions, CardMeta } from "../../ui/Card";
+import { LeaveDialog, type LeaveDialogHandle } from "./leave";
 
 // The room board's container: the six views over one BoardApi, the
 // members list and the invite flows. Sections live in ./sections,
@@ -126,6 +127,7 @@ function MembersView({
   const [result, setResult] = useState<InviteResult | null>(null);
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement | null>(null);
+  const leaveRef = useRef<LeaveDialogHandle | null>(null);
   const mb: MembersResponse = api.board?.mb || { room: "", invite_only: false, members: [] };
   const formVisible = api.isMember && mb.members.length > 0;
   const submit = async (e: FormEvent) => {
@@ -176,10 +178,14 @@ function MembersView({
           ) : null
         ) : (
           sorted.map((x) => (
-            <MemberCard key={x.name} x={x} avatars={avatars} photo={photo} />
+            <MemberCard key={x.name} x={x} avatars={avatars} photo={photo} onLeave={() => leaveRef.current?.open()} />
           ))
         )}
       </div>
+      {/* A dialog that fails to render is left out rather than taking the list with it. */}
+      <ErrorBoundary label="the leave dialog" fallback={null}>
+        <LeaveDialog ref={leaveRef} members={mb.members} reload={api.loadAll} />
+      </ErrorBoundary>
     </>
   );
 }
@@ -188,19 +194,25 @@ function MemberCard({
   x,
   avatars,
   photo,
+  onLeave,
 }: {
   x: Member;
   avatars: Record<string, string>;
   photo: { openPicker: () => void };
+  /** opens Leave room (the caller's own row only) */
+  onLeave: () => void;
 }) {
   const api = useBoardApi();
   const by = x.invited_by ? " by " + x.invited_by : "";
+  // a revoked row: "Left" when the member left by itself (left), else the owner removed it
   const sub =
     x.status === "active"
       ? "Last seen " + rel(x.last_seen || x.joined) + (x.joined ? " · joined " + shortDate(x.joined) : "") + (by ? " · invited" + by : "")
       : x.status === "unused"
         ? "Invited " + shortDate(x.invited) + by + " · hasn't opened their link yet"
-        : "Access removed " + (x.revoked ? shortDate(x.revoked) : "");
+        : x.left
+          ? "Left " + shortDate(x.left)
+          : "Access removed " + (x.revoked ? shortDate(x.revoked) : "");
   const own = api.isMember && x.status === "active" && same(x.name, api.meName);
   return (
     <Card className={"member" + (x.status === "revoked" ? " subtle" : "")}>
@@ -267,9 +279,16 @@ function MemberCard({
             )}
           </div>
         )}
+        {own && (
+          <div className="leave-actions">
+            <Button type="button" size="sm" variant="quiet" danger id="leaveRoom" onClick={onLeave}>
+              Leave room
+            </Button>
+          </div>
+        )}
       </div>
       <Pill tone={x.status === "active" ? undefined : x.status === "unused" ? "muted" : "danger"}>
-        {x.status === "active" ? "Active" : x.status === "unused" ? "Not joined" : "Removed"}
+        {x.status === "active" ? "Active" : x.status === "unused" ? "Not joined" : x.left ? "Left" : "Removed"}
       </Pill>
     </Card>
   );

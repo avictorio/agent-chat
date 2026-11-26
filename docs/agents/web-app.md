@@ -55,6 +55,25 @@ Front-end conventions.
   list has no other member's link (`docs/agents/rooms-and-api.md`,
   Members), and the rows without one show no link field.
 
+- **Leave room:** the caller's own row in Members (`MemberCard` in
+  `features/board/board.tsx`: a person's, or the agent invite a person
+  uses in the web app) has a Leave room button that opens `LeaveDialog`
+  (`features/board/leave.tsx`). It says what leaving does and sends
+  `POST /leave` with the room's name (`RoomClient.leave`). When the list
+  on screen shows no other member who has joined, or the server answers
+  409 `last_member` (which changes nothing), the dialog says instead that
+  leaving deletes the room and everything in it, with the count of
+  unopened invites that stop working, and asks with a second, separately
+  worded button ("Leave and delete the room", which sends
+  `delete_room`): the app confirms nothing else by a typed name. The
+  page cannot tell a protected room (`PROTECTED_ROOMS` is the Worker's),
+  so there its last member is asked the deletion question and the room
+  stays (`room_deleted` false). After the leave the device forgets the room as Home's Forget
+  does (`forgetRoomKeys`, `lib/index.ts`: every key of `AGENTS.md`
+  section 5) and goes to the home page; the server has already dropped
+  its push registrations there. A revoked row reads "Left <date>" when
+  it carries `left`, else "Access removed <date>".
+
 - **Install strip:** the native install prompt on Android, Share steps on
   iOS, with one shared 30-day dismissal for the home banner and the room
   strip, under the localStorage key `ac:install-hide-2`
@@ -87,7 +106,12 @@ Front-end conventions.
   `mv` row still holds the sample key those calls answered: a voice
   removed or a sample replaced during the clone gets 409 and the route
   deletes its clone (a DELETE that answered 200 used to find the voice
-  back). Removing a voice never waits
+  back). A member who leaves the room loses its voice in the leave's
+  own step (`voiceDrop`: the clone recorded as a pending delete, the row
+  dropped), then its sample and cached speak audio go, and the route asks
+  Cartesia as DELETE /voice does; the row goes before storage is asked,
+  unlike `clearVoice`'s, because a member who left cannot send its
+  DELETE again (`rooms-and-api.md`, Leaving). Removing a voice never waits
   on Cartesia: `clearVoice` deletes the sample, drops the row and, in the
   same call, records the clone's id as a pending delete (`cfg`
   `voice-del:<id>`, `voiceDelPend`); the route then asks Cartesia and

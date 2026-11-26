@@ -63,6 +63,17 @@
 .note-box { font-size: 14px; color: var(--muted); background: var(--accent-soft); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
 .member { display: flex; align-items: center; gap: 12px; }
 .member .grow { flex: 1; min-width: 0; }
+/* Leave room (features/board/leave.tsx): the member's own row, then its dialog */
+.member .leave-actions { display: flex; margin-top: 10px; }
+.leave-dlg { text-align: left; padding: 20px 22px 18px; width: min(440px, calc(100vw - 32px)); }
+.leave-dlg h3 { margin: 0 0 8px; font-size: 18px; overflow-wrap: anywhere; }
+.leave-dlg p { margin: 0 0 10px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.leave-dlg ul { margin: 0 0 6px; padding-left: 20px; font-size: 14px; line-height: 1.45; color: var(--muted); }
+.leave-dlg li { margin-bottom: 4px; }
+.leave-dlg .leave-err { color: var(--danger); font-size: 13px; }
+.leave-dlg .dlg-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.leave-dlg .btn.danger-solid { background: var(--danger); border-color: var(--danger); color: var(--panel); font-weight: 600; }
+.leave-dlg .btn.danger-solid:hover { filter: brightness(1.06); background: var(--danger); }
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg);
   padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);

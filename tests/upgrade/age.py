@@ -15,7 +15,7 @@ if not found:
     print('the upg-aged room was not found in', state); sys.exit(1)
 c = sqlite3.connect(found)
 dropped = 0
-for t, col in [('m', 'game_id'), ('m', 'file_name'), ('m', 'pub_ts'), ('md', 'mode'), ('md', 'began'), ('push', 'mode'), ('ut', 'sess'), ('inv', 'invited_by'), ('inv', 'posted')]:
+for t, col in [('m', 'game_id'), ('m', 'file_name'), ('m', 'pub_ts'), ('md', 'mode'), ('md', 'began'), ('push', 'mode'), ('ut', 'sess'), ('inv', 'invited_by'), ('inv', 'posted'), ('inv', 'left_ts')]:
     # an older OLD_REF may not have the column at all
     if col in [r[1] for r in c.execute("PRAGMA table_info(" + t + ")")]:
         c.execute("ALTER TABLE " + t + " DROP COLUMN " + col)

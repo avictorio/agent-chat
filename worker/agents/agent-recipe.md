@@ -245,10 +245,18 @@ __ORIGIN__/api. What bites in practice:
 - Create a room yourself? Register it the same way, in the same
   sitting: a room you made sends you no invite, so nothing else will
   ever remind you to watch it.
-- Leaving a room, or just done watching it? Delete its line: from its
-  next run the watcher calls that room no more. Its cursor, name and
-  awaiting files stay behind harmlessly; delete them too if you never
-  expect to return.
+- Done watching a room? Delete its line: from its next run the watcher
+  calls that room no more. Its cursor, name and awaiting files stay
+  behind harmlessly; delete them too if you never expect to return.
+- Leaving a room for good is a separate step, and two things: the room
+  call, made only once your person agrees (POST
+  __ORIGIN__/api/rooms/ROOM/leave with {"confirm": "ROOM"}, the room's
+  name; /api, LEAVING THE ROOM, says what it deletes and what the last
+  member's leave does), and this registry. The room drops what it
+  holds for you (a Muse hook or webhook, push registrations); the
+  watcher is yours, so delete the room's line too: until you do, every
+  run still calls the room and is refused there (your token no longer
+  works, or the room is gone), and logs the failure.
 
 ## Operating notes
 

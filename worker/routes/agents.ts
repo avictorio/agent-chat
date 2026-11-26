@@ -14,11 +14,13 @@ import {
 } from "../agents/mcp.js";
 import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
-import { invitePreviewBody } from "./members.js";
+import { LEAVE_OWNER, invitePreviewBody, leaveAfter, leaveAsk, leaveBody, leaveConfirmRefusal } from "./members.js";
 import { MCP_NO_TOKEN, mcpInstructions, type McpVariant } from "../agents/onboarding.js";
 import { recipe, watcher, watcherPin } from "../agents/docs.js";
 import { OWNER_NO_START_PAGE, START_INVALID, START_LIMITS, START_NO_TOKEN, startPage } from "../agents/start.js";
 import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
+import type { LeaveResult } from "../room/members.js";
+import { GONE_MSG, isGoneError } from "../lib/errors.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
 // by docs.ts) with the room, the caller's name, this origin and the
@@ -153,7 +155,8 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // it, once per HTTP request before the body is read (it decides how big a body and
   // whether a batch is taken), and tools/list, an unknown method,
   // get_invite and get_start_page (the two looks: previewInvite,
-  // startView) are refused when it fails; any other
+  // startView) are refused when it fails; so is leave_room, which the
+  // room looks up itself and which never opens an invite; any other
   // tools/call runs access(), which opens it - before every call, a
   // batch's included. A batch can take a while (a call may fetch a page or
   // wait on storage), and one checked only at its start went on reading
@@ -227,6 +230,21 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
         if (!v.ok) { const no = startRefusal(v); return fail(-32001, no.error, { code: no.code }); }
         return ok({ content: [{ type: "text", text: startPage(v, url.origin, room, await watcherPin(url.origin), START_LIMITS, owner) }] });
       }
+      // a leave, as POST .../leave takes it: the room looks the token up
+      // (room/members.ts leave) and refuses an invite never opened without
+      // opening it, so this runs no access(); the owner key is no member
+      if (tname === "leave_room") {
+        if (owner) return ok(mcpErr(LEAVE_OWNER, { code: "owner_not_member" }));
+        if (!invite) { const none = missing(); return fail(-32001, none.error, { code: none.code }); }
+        const ask = leaveAsk(targs, room);
+        if (!ask.confirmed) return ok(mcpErr(leaveConfirmRefusal(room), { code: "confirm_mismatch" }));
+        let r: LeaveResult | Refusal;
+        // a room deleted meanwhile (goneError), as any other tool's call answers it
+        try { r = await stub.leave(invite, room, ask.deleteRoom); } catch (e) { return ok(mcpErr(isGoneError(e) ? GONE_MSG : String((e && (e as Error).message) || e), isGoneError(e) ? { code: "room_deleted" } : undefined)); }
+        if (!r.ok) return r.code.indexOf("invite_") === 0 ? fail(-32001, r.error, { code: r.code }) : ok(mcpErr(r.error, { code: r.code }));
+        leaveAfter(rc, stub, room, r);
+        return ok(mcpOk(leaveBody(room, r)));
+      }
       const acc = owner || invite ? await getAcc() : missing();
       if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });
       try { return ok(await (async () => { const from = acc.name || (owner ? bodyText(targs.as, "as").trim().slice(0, MAX_NAME) : ""); const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs, invite); return r && r.isError ? r : mcpOk(r); })()); }
@@ -240,8 +258,15 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (Array.isArray(rpcBody)) {
     const out: unknown[] = [];
     for (const item of rpcBody) { const r = await handleRpc(item); if (r) out.push(r); }
-    return out.length ? json(out) : new Response(null, { status: 202 });
+    return out.length ? json(out) : accepted();
   }
   const single = await handleRpc(rpcBody);
-  return single ? json(single) : new Response(null, { status: 202 });
+  return single ? json(single) : accepted();
+}
+
+/** The answer to notifications alone: 202, no body, and the CORS headers
+ *  json() gives every other answer. Without them a browser refused it, and
+ *  an MCP client in a browser failed at its notifications/initialized. */
+function accepted(): Response {
+  return new Response(null, { status: 202, headers: CORS });
 }

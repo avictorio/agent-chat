@@ -194,6 +194,26 @@ export const VoiceMethods = {
     return "cleared";
   },
 
+  // A member's voice goes in one step with no await, for a member who is
+  // leaving (MemberMethods.leave): the clone is recorded as a pending
+  // delete (voiceDelPend) and the row is dropped, so the room stops using
+  // the voice at once and nothing a later holder of the name stores can be
+  // caught by a delete still on its way. clearVoice keeps its order
+  // (storage first, the row kept when storage refuses) because a member who
+  // stays can send its DELETE again; a member who left cannot, and the room
+  // must not keep its voice. The sample's object and the cached speak audio
+  // go after, and the route asks Cartesia, as after DELETE /voice.
+  /** @returns the sample's R2 key and the clone to delete at Cartesia, or null when the member had no voice */
+  voiceDrop(name: string): { sample_key: string | null, clone: string | null } | null {
+    const r = this.voiceRow(name);
+    if (!r) return null;
+    const clone = (r.provider || "cartesia") === "cartesia" ? r.voice_id || null : null;
+    if (clone) this.voiceDelPend([clone]);
+    this.sql.exec("DELETE FROM mv WHERE name = ?", nameKey(name));
+    this.notifyMembers(name);
+    return { sample_key: r.sample_key || null, clone };
+  },
+
   // What a speak request needs: the message's sender and text. Drafts never speak.
   speakSource(id: number) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "text" | "draft">>("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray()[0];

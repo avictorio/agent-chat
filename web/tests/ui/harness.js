@@ -86,7 +86,7 @@ function noteOf(name, by) {
 // The agent Probe's start page in demo before joining (GET /api/rooms/demo):
 // the real page of the fixture (tests/fixtures/start-page/start.txt, the
 // agent Scout in example-room, also invited by Anthony) with the names
-// swapped, about 8,700 characters.
+// swapped, about 9,100 characters.
 const START_PAGE = fs.readFileSync(FIXTURES + 'start-page/start.txt', 'utf8').replace(/\r\n/g, '\n').replace(/example-room/g, 'demo').replace(/Scout/g, 'Probe').replace(/scout-hello/g, 'probe-hello');
 function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 // A two-captain Battleship fixture's record, as the server sends it:
@@ -134,6 +134,10 @@ function fresh(opts) {
     // digestsFail: how many /digests reads fail (a weak connection under the board's boot load)
     digestsFail: opts.digestsFail || 0,
     notices: opts.notices || [],
+    // othersLeave: the other active members leave just before this
+    // device's first POST /leave, so the server finds it the last member
+    // who has joined (409 last_member) though the list on screen had them
+    othersLeave: !!opts.othersLeave,
     msgs: [
       { id: 1, ts: now - D - 2 * H, from: 'Henry', text: 'Morning all. Draft plan for Lima is in the board.' },
       { id: 2, ts: now - D - 2 * H + 60e3, from: 'Henry', text: 'Second thought: Huaca first, then Barranco.' },
@@ -774,6 +778,19 @@ async function setup(page, S, calls) {
       return J({ ...S.mb, members: [...rows, { name: 'Probe', kind: 'agent', invited_by: 'Anthony', status: 'active', invited: now - D, joined: now - H, last_seen: now - 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Probe' }] });
     }
     if (p.endsWith('/members')) return J(S.mb);
+    // POST /leave (S.leaves: each body), as the Worker answers it: confirm
+    // is the room's name, and the last member who has joined (no other
+    // active row) is refused without delete_room and changes nothing
+    if (p.endsWith('/leave') && m === 'POST') {
+      (S.leaves = S.leaves || []).push(body);
+      if (body.confirm !== 'demo') return J({ error: 'To leave this room for good, send {"confirm": "demo"}: the room\'s own name, so a call meant for another room cannot leave this one. Nothing was changed.', code: 'confirm_mismatch' }, 400);
+      const me = S.agentYou ? 'Probe' : 'Anthony';
+      if (S.othersLeave) { S.othersLeave = false; for (const x of S.mb.members) if (x.name !== me && x.status === 'active') Object.assign(x, { status: 'revoked', revoked: clockNow() - 60e3, left: clockNow() - 60e3, invite_link: undefined }); }
+      const last = !S.mb.members.some((x) => x.name !== me && x.status === 'active');
+      const unopened = S.mb.members.filter((x) => x.name !== me && x.status === 'unused').length;
+      if (last && body.delete_room !== true) return J({ error: 'You are the last member of this room who has joined: leaving deletes the room and everything in it, for good' + (unopened ? ', and the ' + unopened + ' invites not yet opened stop working too' : '') + '. To leave and delete it, send "delete_room": true beside "confirm". Nothing was changed.', code: 'last_member' }, 409);
+      return J({ room: 'demo', name: me, left: clockNow(), room_deleted: last });
+    }
     if (p.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
     // Anything else is a request the stub doesn't know: record it, so a
     // scenario can tell a missing route (or a broken path) from a real 404.

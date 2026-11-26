@@ -43,7 +43,13 @@ The set that began later (`avatar_ver`) wins; one that finds a later
 picture already recorded deletes its own object and answers that
 picture's version. Revoking everyone
 deletes the avatar objects too, because the `inv` rows are their only
-pointers and a later `destroy()` could not find them.
+pointers and a later `destroy()` could not find them. A clear is two
+parts: `avatarDrop` takes the pointers off the rows in one step with no
+await, and `mediaDelete` deletes the objects after (`clearAvatar` runs
+both). A member who leaves the room runs the first inside its leave's
+own step and the second once that is done (`rooms-and-api.md`,
+Leaving), so its picture goes with it; a failed object delete is
+logged and undoes nothing.
 
 ## Signed media URLs
 

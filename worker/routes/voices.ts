@@ -1,7 +1,7 @@
 // Voices: a member's voice sample and clone, and speaking a message.
 
 import { CLONE_DELETE_RETRY, inlineBodyCap, mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
-import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
+import { CORS, deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT } from "../room/voices.js";
 import { inlineBytes, sniffAudio } from "../lib/sniff.js";
@@ -188,6 +188,7 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
   const meta3 = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
   if (meta3) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });
   // Uncached on purpose (the voice changed mid-synthesis): serve this
-  // play straight from the buffer; the next play re-synthesizes fresh.
-  return new Response(buf, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
+  // play straight from the buffer; the next play re-synthesizes fresh. It
+  // carries the CORS headers a cached play's answer has (serveMedia).
+  return new Response(buf, { headers: Object.assign({ "Content-Type": "audio/mpeg", "Cache-Control": "no-store" }, CORS) });
 }

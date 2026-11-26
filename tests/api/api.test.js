@@ -2,9 +2,9 @@
 // Covers the server behaviors the UI suite cannot: access rules, the
 // invite-only invariants, public room creation (validation, name race
 // surface, rollback on email failure), publish-on-complete, draft-media
-// privacy, room destruction, the upload engine (direct-upload signing
-// included), MCP, stream frames, the game engines, the wake recipe's
-// watcher script (one file for every caller, and one real run of it with
+// privacy, room destruction, a member leaving (tests/api/leave-api.js),
+// the upload engine (direct-upload signing included), MCP, stream frames,
+// the game engines, the wake recipe's watcher script (one file for every caller, and one real run of it with
 // bash, curl and jq against this server: watcherScript) and Muse delivery hooks
 // (tests/api/muse-hooks.js: the real bridge, against a fake Muse,
 // tests/api/fake-muse.mjs), and the official MCP client libraries against
@@ -34,6 +34,7 @@ const SUF = Date.now().toString(36);
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const { golden } = require('./golden.js');
 const { inviteApi } = require('./invite-api.js');
+const { leaveApi } = require('./leave-api.js');
 const { museHooks } = require('./muse-hooks.js');
 const { webhooks } = require('./webhooks.js');
 const { mcpClients } = require('./mcp-clients.js');
@@ -253,6 +254,8 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     await golden({ req, BASE, OWNER, SUF, IPO }, check);
     // The agent invite link API (tests/api/invite-api.js).
     await inviteApi({ req, check, BASE, OWNER, SUF, IPO });
+    // A member leaving the room (tests/api/leave-api.js).
+    await leaveApi({ req, check, SUF });
     // Muse delivery hooks (tests/api/muse-hooks.js).
     const museCtx = { req, check, SUF, muse, OWNER, sealPublicKey: server.sealPublicKey };
     await museHooks(museCtx);
@@ -298,7 +301,7 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     const listedA = (r.json.invites || []).find(i => i.name === 'ApiA');
     const listedM = (r.json.invites || []).find(i => i.name === 'ApiM');
     check('owner invite list: agent carries onboarding, human does not', !!(listedB && listedB.agent_onboarding) && !!(listedA && !('agent_onboarding' in listedA)));
-    check('owner invite list: a member-made agent invite\'s note names its inviter, its row keeps its fields', invM.status === 201 && !!listedM && String(listedM.agent_onboarding).startsWith('"ApiA" invited you') && JSON.stringify(Object.keys(listedM)) === JSON.stringify(['link', 'token', 'name', 'created', 'revoked', 'used', 'kind', 'agent_onboarding']), JSON.stringify(listedM && Object.keys(listedM)) + ' ' + String(listedM && listedM.agent_onboarding).slice(0, 40));
+    check('owner invite list: a member-made agent invite\'s note names its inviter, its row keeps its fields', invM.status === 201 && !!listedM && String(listedM.agent_onboarding).startsWith('"ApiA" invited you') && JSON.stringify(Object.keys(listedM)) === JSON.stringify(['link', 'token', 'name', 'created', 'revoked', 'used', 'kind', 'left', 'agent_onboarding']), JSON.stringify(listedM && Object.keys(listedM)) + ' ' + String(listedM && listedM.agent_onboarding).slice(0, 40));
     r = await req('GET', R + '/members', { owner: true });
     const memB = (r.json.members || []).find(m => m.name === 'ApiB');
     const memA = (r.json.members || []).find(m => m.name === 'ApiA');
@@ -2774,7 +2777,9 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     }
     check('mcp instructions point agents at games and how_to_play', /awaiting_you/.test((r.json.result || {}).instructions || '') && /how_to_play/.test((r.json.result || {}).instructions || ''), String((r.json.result || {}).instructions || '').slice(0, 120));
     r = await req('POST', R2 + '/mcp', { token: TP, json: { jsonrpc: '2.0', method: 'notifications/initialized' } });
-    check('mcp notification -> bare 202', r.status === 202 && r.text === '', r.status + ' ' + r.text.slice(0, 40));
+    check('mcp notification -> 202 with an empty body and the CORS headers', r.status === 202 && r.text === '' && r.headers.get('access-control-allow-origin') === '*', r.status + ' ' + r.text.slice(0, 40) + ' ' + r.headers.get('access-control-allow-origin'));
+    r = await req('POST', R2 + '/mcp', { token: TP, json: [{ jsonrpc: '2.0', method: 'notifications/initialized' }] });
+    check('mcp batch of notifications -> the same 202, with the CORS headers', r.status === 202 && r.text === '' && r.headers.get('access-control-allow-origin') === '*', r.status + ' ' + r.text.slice(0, 40) + ' ' + r.headers.get('access-control-allow-origin'));
     r = await mcp(R2, 'tools/list', {}, { token: TP });
     const toolNames = ((r.json && r.json.result && r.json.result.tools) || []).map(t => t.name);
     check('mcp catalog lists the surface', toolNames.includes('post_message') && toolNames.includes('begin_upload') && toolNames.includes('submit_move') && toolNames.includes('react') && toolNames.includes('list_attachments') && toolNames.length >= 25, toolNames.join(',').slice(0, 200));

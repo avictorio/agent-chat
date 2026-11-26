@@ -63,9 +63,10 @@ export type MdelRow = { dn: number, id: number, ts: number, who: string | null }
 export type PcidRow = { sender: string, cid: string, msg: number, ts: number, draft: number | null };
 /** rx: one member's reaction to a message. */
 export type RxRow = { msg: number, emoji: string, who: string, ts: number };
-/** inv: an invite, and the member it names. */
+/** inv: an invite, and the member it names. left_ts: when the member left
+ *  by itself with this invite (schema step 9; null for any other revoke). */
 export type InvRow = { token: string, name: string, created: number, revoked: number | null, used: number | null, seen: number | null, kind: string | null,
-  invited_by: string | null, posted: number | null, avatar_type: string | null, avatar_ver: number | null, avatar_key: string | null };
+  invited_by: string | null, posted: number | null, avatar_type: string | null, avatar_ver: number | null, avatar_key: string | null, left_ts: number | null };
 /** cfg: a room setting (every write stores a string). */
 /** What the invite lookup reads from an inv row. */
 export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "created" | "posted">;
@@ -384,8 +385,17 @@ function schemaWebhookHooks(sql: SqlStorage) {
   addColumn(sql, "mh", "last_error", "TEXT");
 }
 
+// Step 9. inv.left_ts: when a member left the room by itself (POST
+// .../leave, MemberMethods.leave), set on the invite it left with in the
+// call that revokes it; the members list and the owner's invite list carry
+// it as left. Null on every other row, a revoke through the owner's API
+// included, so older rows need no backfill.
+function schemaLeft(sql: SqlStorage) {
+  addColumn(sql, "inv", "left_ts", "INTEGER");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults, schemaMuseHooks, schemaWebhookHooks];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults, schemaMuseHooks, schemaWebhookHooks, schemaLeft];
 
 /** Every table a member or the owner writes, inv aside: one row in any of
  *  them and a pending room is not untouched (Room.genesisUntouched). A new
@@ -648,7 +658,8 @@ export class Room extends DurableObject {
   }
 
   // Removes the room and all its storage for good. A room with active invites has members, so those must go first.
-  async destroy(room: string): Promise<{ deleted?: boolean, error?: string, status?: number }> {
+  /** @param why the activity log's line: who deleted the room */
+  async destroy(room: string, why = "room deleted with the owner key"): Promise<{ deleted?: boolean, error?: string, status?: number }> {
     if (!this.ready) return { error: "No room with that name", status: 404 };
     if (this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one().n) return { error: "This room has active invites. Remove them first with DELETE /api/rooms/" + room + "/invites.", status: 409 };
     if (this.destroying) return { error: "This room is being deleted", status: 409 };
@@ -661,14 +672,14 @@ export class Room extends DurableObject {
     this.ready = false;
     this.gen++;
     try {
-      return await this.destroyNow(room);
+      return await this.destroyNow(room, why);
     } finally {
       this.destroying = false;
     }
   }
 
-  private async destroyNow(room: string) {
-    await this.activityLog(room, "room deleted with the owner key");
+  private async destroyNow(room: string, why: string) {
+    await this.activityLog(room, why);
     for (const c of Array.from(this.clients)) c.close();
     if (this.pinger) { clearInterval(this.pinger); this.pinger = null; }
     const ws = this.waiters;
@@ -762,6 +773,14 @@ export class Room extends DurableObject {
   // refusal carries its code beside the sentence (lib/http.ts deny).
   lookupInvite(token: string | null | undefined): InviteLookup {
     if (!token) return inviteMissing();
+    // A room with no storage (never created, or deleted: by the owner, or
+    // by its last member's leave) has no invite table. The room routes
+    // answer such a name 404 before they ask (roomRoute), but index.ts's
+    // settleRoomBody looks first, for any request with a body, and the
+    // query threw ("no such table: inv"): a 500 for the holder of an
+    // invite to a deleted room. Asked after a route's check, the room
+    // was deleted meanwhile.
+    if (!this.ready && !this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inv'").toArray().length) return { ok: false, status: 410, code: "room_deleted", error: GONE_MSG };
     const row = this.sql.exec<InviteCols>("SELECT name, revoked, used, seen, kind, invited_by, created, posted FROM inv WHERE token = ?", token).toArray()[0];
     if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
     if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask whoever gave it to you for a new one." };

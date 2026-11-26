@@ -50,6 +50,20 @@ test("a tokenless initialize, ping or notification asks the room nothing", async
   }
 });
 
+// A notification is answered 202 with no body, and with the CORS headers
+// every other answer of the route has (json()): a bare 202 was refused by
+// a browser, so an MCP client in one failed at notifications/initialized.
+test("a notification's 202, alone or as a whole batch, carries the CORS headers and no body", async () => {
+  const note = { jsonrpc: "2.0", method: "notifications/initialized" };
+  for (const [label, body, invite, lookup] of [["alone, no token", note, ""], ["alone, with a token", note, "tok", GOOD], ["a batch of notifications", [note, { jsonrpc: "2.0", method: "notifications/cancelled", params: {} }], "tok", GOOD]]) {
+    const r = await call(body, invite, "", lookup).res;
+    assert.equal(r.status, 202, label);
+    assert.equal(r.headers.get("Access-Control-Allow-Origin"), "*", label);
+    assert.ok(r.headers.get("Access-Control-Allow-Headers").split(", ").includes("Mcp-Method"), label);
+    assert.equal(await r.text(), "", label);
+  }
+});
+
 test("a tokenless tools/list or batch is refused invite_missing without asking the room", async () => {
   let { asked, res } = call({ jsonrpc: "2.0", id: 1, method: "tools/list" }, "");
   let j = await (await res).json();

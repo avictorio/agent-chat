@@ -1,15 +1,18 @@
 // Members and invites.
 
-import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
-import { deny, json, limitReached, rateLimited, readBody, bodyText } from "../lib/http.js";
+import { CLONE_DELETE_ON_ROOM_DELETE, MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
+import { deny, json, limitReached, rateLimited, readBody, bodyText, type Body } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { cleanName, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
-import type { InvRow, InvitePreview } from "../room/Room.js";
+import { inviteMissing, type InvRow, type InvitePreview, type Refusal } from "../room/Room.js";
 /** a row of the room's invite list (room/members.ts invites()) */
-type InviteListRow = Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind" | "invited_by">;
-import type { RoomMember } from "../room/members.js";
+type InviteListRow = Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind" | "invited_by"> & { left: number | null };
+import type { LeaveResult, RoomMember } from "../room/members.js";
 import type { Member } from "@chat/contract";
+import { cartesiaDelete } from "../platform/cartesia.js";
+import { retryCloneDeletes } from "./voices.js";
+import { warn } from "../lib/log.js";
 
 /** A member as a listing answers it (GET members, MCP get_members): the
  *  avatar's signed URL instead of its version, and for an unrevoked invite
@@ -105,7 +108,8 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const link = (t: string) => url.origin + "/r/" + room + "#invite=" + t;
-  // Members of an invite-only room may create invites; listing them, revoking one and revoking every invite need the owner key.
+  // Members of an invite-only room may create invites; listing them, revoking one and revoking every invite need the owner key
+  // (a member removes itself with POST .../leave: leaveRoute).
   const inviter = owner ? null : await stub.inviter(invite);
   const memberCreate = !owner && !m[2] && request.method === "POST" && !!inviter;
   if (!owner && !memberCreate) {
@@ -153,4 +157,60 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, invite_only: true });
   }
   return json({ error: "Method not allowed" }, 405);
+}
+
+/* ---------- a member leaving: POST /api/rooms/ROOM/leave, MCP leave_room ----------
+   The member takes itself out (room/members.ts leave). Nothing here opens
+   an invite: the room looks it up (lookupInvite) and refuses one never
+   opened as it is, so neither the route nor the tool runs access(). */
+
+/** The owner key, alone or beside a token: a call that carries it acts as
+ *  the owner (Room.access), and the owner is no member. */
+export const LEAVE_OWNER = "The owner key is no member, so it cannot leave. A call that carries the key acts as the owner even beside a token: to leave as a member, send that member's token alone.";
+/** confirm missing, or not this room's name */
+export function leaveConfirmRefusal(room: string): string {
+  return "To leave this room for good, send {\"confirm\": \"" + room + "\"}: the room's own name, so a call meant for another room cannot leave this one. Nothing was changed.";
+}
+
+/** What a leave reads from its body (REST) or arguments (MCP): whether
+ *  confirm names the room, and the yes to the room's deletion. */
+export function leaveAsk(b: Body | null | undefined, room: string): { confirmed: boolean, deleteRoom: boolean } {
+  return { confirmed: bodyText(b?.confirm, "confirm") === room, deleteRoom: b?.delete_room === true || b?.delete_room === "true" };
+}
+
+/** What storage outside the room still owes once a leave is done, beside
+ *  the answer: the member's clone at Cartesia, as after DELETE /voice (its
+ *  pending-delete record comes off on a 2xx or 404, and stays for a later
+ *  try otherwise), and, when the room went with it, the room's other
+ *  pending clone deletes, as the owner's room deletion tries them. */
+export function leaveAfter(rc: RouteContext, stub: DurableObjectStub, room: string, r: LeaveResult) {
+  const { env, ctx } = rc;
+  ctx.waitUntil((async () => {
+    if (r.clone && (await cartesiaDelete(env, r.clone, { room }))) await stub.voiceDelDone([r.clone]);
+    if (r.room_deleted && env.CARTESIA_API_KEY) await retryCloneDeletes(env, stub, room, CLONE_DELETE_ON_ROOM_DELETE);
+  })().catch((e) => warn("leave.clone", e, { room })));
+}
+
+/** A leave's answer, shared by REST and MCP leave_room. */
+export function leaveBody(room: string, r: LeaveResult) {
+  return { room, name: r.name, left: r.left, room_deleted: r.room_deleted };
+}
+
+// POST /api/rooms/ROOM/leave {"confirm": "ROOM", "delete_room"?: true}
+// with the member's token. Refused before the room is asked: another
+// method, the owner key, no token, a confirm that is not the room's name.
+export async function leaveRoute(rc: RouteContext, m: RegExpMatchArray) {
+  const { request, env, owner, invite } = rc;
+  const room = decodeURIComponent(m[1]).toLowerCase();
+  if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  if (owner) return json({ error: LEAVE_OWNER, code: "owner_not_member" }, 400);
+  if (!invite) return deny(inviteMissing());
+  const ask = leaveAsk(await readBody(request), room);
+  if (!ask.confirmed) return json({ error: leaveConfirmRefusal(room), code: "confirm_mismatch" }, 400);
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const r: LeaveResult | Refusal = await stub.leave(invite, room, ask.deleteRoom);
+  if (!r.ok) return deny(r);
+  leaveAfter(rc, stub, room, r);
+  return json(leaveBody(room, r));
 }

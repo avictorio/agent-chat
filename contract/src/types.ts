@@ -76,6 +76,10 @@ export interface Member {
   /** null: invited with the owner key (the Room sends it on every member). */
   invited_by?: string | null;
   revoked?: number | null;
+  /** When the member left the room by itself with this invite (POST
+   *  /leave); null for an invite revoked any other way, or not revoked.
+   *  status stays "revoked" for a member who left. */
+  left?: number | null;
   /** null: no avatar uploaded (the members listing sends one for every member). */
   avatar?: string | null;
   /** null: no voice cloned (the Room sends voice on every member). */

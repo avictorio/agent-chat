@@ -30,6 +30,99 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     return { btns: await page.$$eval('#invResult button', b => b.map(x => x.textContent)) };
   });
   await run('invites-dark-mobile', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => { await shot(page, 'members-mobile-dark.png'); });
+  /* Leave room: the caller's own row in Members has the control, and its
+     dialog says what leaving does. Here the other members leave just
+     before (othersLeave), so the server answers the first Leave room with
+     409 last_member, which changes nothing: the dialog asks the deletion
+     question instead, on a list read again that shows their rows as
+     "Left <date>". The second button sends delete_room; then the device
+     forgets the room as Home's Forget does (every per-room key, another
+     room's kept) and goes home. Each viewport and scheme looks at the
+     control, both confirmations and the Left rows. */
+  const DEMO_KEYS = ['chat-invite:demo', 'chat-you:demo', 'chat-push-mode:/api/rooms/demo', 'ac-members:demo', 'ac:agent-app:demo', 'chat-upl:demo', 'chat-draft:demo:Anthony'];
+  // once per tab (sessionStorage), not again on the home page it ends on
+  const seedRoomKeys = () => {
+    try {
+      if (sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1');
+      for (const [k, v] of [['chat-invite:demo', 'tok_Anthony'], ['chat-you:demo', 'Anthony'], ['chat-push-mode:/api/rooms/demo', 'all'], ['ac:agent-app:demo', '1'], ['chat-upl:demo', '{}'], ['chat-draft:demo:Anthony', 'unsent'], ['chat-invite:lima', 'tok_lima'], ['chat-you:lima', 'Ann']]) localStorage.setItem(k, v);
+    } catch { /* the scenario fails visibly */ }
+  };
+  const leaveText = (page) => page.$eval('#leaveDlg', (d) => d.innerText.replace(/\s+/g, ' ').trim());
+  for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
+    const tag = vp.tag + '-' + scheme;
+    await run('leave-room-' + tag, { scheme, w: vp.w, h: vp.h, touch: vp.touch, hash: '#members', init: seedRoomKeys, state: { othersLeave: true } }, async (page, S, calls) => {
+      await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+      await settle(page);
+      const rows = await page.$$eval('#mList .card.member', (cs) => cs.map((c) => c.querySelector('.card-title').textContent + '|' + !!c.querySelector('#leaveRoom')));
+      must(rows.filter((r) => r.endsWith('|true')).length === 1 && rows.includes('Anthony (you)|true'), 'Leave room is on the caller\'s own row only: ' + JSON.stringify(rows));
+      await page.$eval('#leaveRoom', (b) => b.scrollIntoView({ block: 'center' }));
+      await shot(page, 'leave-control-' + tag + '.png');
+      await page.click('#leaveRoom');
+      await page.waitForSelector('#leaveDlg[open] #leaveYes', { timeout: 4000 });
+      const ask = await leaveText(page);
+      for (const want of ['Leave demo?', 'You leave the room for good, as Anthony.', 'Your invite link stops working, on every device.', 'Your notifications, wake setups and pending uploads for this room stop.', 'Your picture and your voice are deleted.', 'Your messages and what you wrote on the board stay.', 'Questions you claimed go back to open, and matches waiting for you to accept are called off.', 'Games in progress play out on the clock.', 'Your name can be invited again.']) must(ask.includes(want), 'the dialog says: ' + want + ' / ' + ask);
+      const fit = await page.$eval('#leaveDlg', (d) => { const r = d.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), vw: window.innerWidth, doc: document.documentElement.scrollWidth }; });
+      must(fit.l >= 0 && fit.r <= fit.vw && fit.doc <= fit.vw + 1, 'the dialog fits the window: ' + JSON.stringify(fit));
+      await shot(page, 'leave-ask-' + tag + '.png');
+      await page.click('#leaveNo');
+      must(await page.$eval('#leaveDlg', (d) => !d.open), 'Cancel closes it');
+      must(!(S.leaves || []).length, 'Cancel sends nothing');
+      await page.click('#leaveRoom');
+      await page.waitForSelector('#leaveDlg[open] #leaveYes', { timeout: 4000 });
+      await page.click('#leaveYes');
+      await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 6000 });
+      await settle(page);
+      const last = await leaveText(page);
+      must(last.includes('Delete demo?') && last.includes('You are the last member of demo who has joined. Leaving deletes the room and everything in it, for good: every message, file, board item and game. The 1 invite not yet opened stops working too.') && last.includes('This can\'t be undone.'), 'the deletion question: ' + last);
+      must(JSON.stringify(S.leaves) === '[{"confirm":"demo"}]', 'the first press sent no delete_room: ' + JSON.stringify(S.leaves));
+      await shot(page, 'leave-last-' + tag + '.png');
+      // behind the dialog the list was read again: the members who left show "Left <date>", the owner's removal "Access removed <date>"
+      const subs = await page.$$eval('#mList .card.member', (cs) => cs.map((c) => c.querySelector('.card-title').textContent + ': ' + c.querySelector('.card-meta').textContent + ' [' + c.querySelector(':scope > .pill').textContent + ']'));
+      must(subs.some((x) => /^Henry: Left \S/.test(x) && x.endsWith('[Left]')) && subs.some((x) => /^Ada: Left \S/.test(x)) && subs.some((x) => /^Old bot: Access removed \S/.test(x) && x.endsWith('[Removed]')), 'the Left rows: ' + JSON.stringify(subs));
+      await page.click('#leaveNo');
+      await page.$eval('#mList', (l) => [...l.querySelectorAll('.card.member')].find((c) => c.textContent.startsWith('Henry')).scrollIntoView({ block: 'center' }));
+      await settle(page);
+      await shot(page, 'leave-left-rows-' + tag + '.png');
+      await page.click('#leaveRoom');
+      await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 4000 });
+      await Promise.all([page.waitForURL('https://chat.victorio.cloud/', { timeout: 10000 }), page.click('#leaveDelete')]);
+      await page.waitForSelector('#view-rooms:not([hidden]) #roomlist', { timeout: 10000 });
+      await settle(page);
+      must(JSON.stringify(S.leaves.slice(-1)) === '[{"confirm":"demo","delete_room":true}]', 'the second button sends delete_room: ' + JSON.stringify(S.leaves));
+      const kept = await page.evaluate((keys) => ({ demo: keys.filter((k) => localStorage.getItem(k) !== null), lima: [localStorage.getItem('chat-invite:lima'), localStorage.getItem('chat-you:lima')], rows: [...document.querySelectorAll('#roomlist .rn')].map((e) => e.textContent) }), DEMO_KEYS);
+      must(!kept.demo.length, 'every key of the room is gone: ' + JSON.stringify(kept.demo));
+      must(kept.lima[0] === 'tok_lima' && kept.lima[1] === 'Ann' && JSON.stringify(kept.rows) === '["lima"]', 'another room stays: ' + JSON.stringify(kept));
+      must(!calls.some((c) => c.includes('/push/unsubscribe')), 'nothing asks the room to unsubscribe: the leave dropped the registrations');
+      if (vp.tag === 'desktop' && scheme === 'light') await shot(page, 'leave-home.png');
+      return { rows: rows.length, leaves: S.leaves.length };
+    });
+  }
+  /* The list on screen shows nobody else who has joined: Leave room asks
+     the deletion question at once, and its button sends delete_room. A
+     person using an agent's invite in the web app finds the control on
+     that invite's row. */
+  await run('leave-room-alone', { hash: '#members', init: seedRoomKeys }, async (page, S) => {
+    for (const x of S.mb.members) if (x.name !== 'Anthony' && x.status === 'active') Object.assign(x, { status: 'unused', joined: null, last_seen: null });
+    await page.reload();
+    await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+    await settle(page);
+    await page.click('#leaveRoom');
+    await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 4000 });
+    const t = await leaveText(page);
+    must(t.includes('The 3 invites not yet opened stop working too.') && !(await page.$('#leaveYes')), 'asked the deletion question at once: ' + t);
+    await shot(page, 'leave-alone.png');
+    await Promise.all([page.waitForURL('https://chat.victorio.cloud/', { timeout: 10000 }), page.click('#leaveDelete')]);
+    must(JSON.stringify(S.leaves) === '[{"confirm":"demo","delete_room":true}]', 'one call, with delete_room: ' + JSON.stringify(S.leaves));
+    return { leaves: S.leaves };
+  });
+  await run('leave-room-agent-invite', { hash: '#members', state: { agentYou: true }, init: () => { try { localStorage.setItem('chat-invite:demo', 'tok_Probe'); localStorage.setItem('ac:agent-app:demo', '1'); } catch { /* the scenario fails visibly */ } } }, async (page) => {
+    await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+    await settle(page);
+    const rows = await page.$$eval('#mList .card.member', (cs) => cs.filter((c) => c.querySelector('#leaveRoom')).map((c) => c.querySelector('.card-title').textContent));
+    must(JSON.stringify(rows) === '["Probe (you)"]', 'the control is on the agent invite\'s own row: ' + JSON.stringify(rows));
+    return { rows };
+  });
   // An agent's invite card says under Copy w/ Instructions what it copies
   // and what the agent needs; a person's card and the members rows' own
   // Copy w/ Instructions have no such line. Both copies toast "Invite note

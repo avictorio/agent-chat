@@ -3,7 +3,7 @@ import { Icon as I } from "../../ui/Icon";
 import { CreateView } from "./CreateRoom";
 import { AgentsView, HowView } from "./StaticViews";
 import { HomeInstallStrip, HomeUpdateStrip, useHomeInstall } from "./install";
-import { store, storeInvite } from "../../lib/index";
+import { forgetRoomKeys, store, storeInvite } from "../../lib/index";
 import { registerServiceWorker } from "../shell/shell";
 import { forgetRoomPush } from "../shell/push";
 import { usePullToRefresh } from "../shell/strips";
@@ -215,30 +215,8 @@ export default function HomeApp() {
         setForgetBusy(false);
       }
     }
-    try {
-      // everything the device kept for the room: the invite and name, the
-      // bell's mode, the cached roster (names and avatar links), the agent
-      // app flag, and the pointers to interrupted uploads (they need the
-      // invite to resume)
-      const doomed: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (
-          k &&
-          (k === "chat-invite:" + r.room ||
-            k === "chat-you:" + r.room ||
-            k === "chat-push-mode:/api/rooms/" + r.room ||
-            k === "ac-members:" + r.room ||
-            k === "ac:agent-app:" + r.room ||
-            k === "chat-upl:" + r.room ||
-            k.indexOf("chat-draft:" + r.room + ":") === 0)
-        )
-          doomed.push(k);
-      }
-      doomed.forEach((k) => localStorage.removeItem(k));
-    } catch {
-      // storage unavailable
-    }
+    // everything the device kept for the room
+    forgetRoomKeys(r.room);
     closeForget();
     setRooms(savedRooms());
     return "";

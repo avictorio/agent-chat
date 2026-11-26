@@ -7,9 +7,10 @@
 // methods, the same invite-token access), so the two surfaces cannot drift
 // apart in behavior, only in shape. Identity is fixed by the credential:
 // an invite caller acts under its own name, always; the owner key may pass
-// "as" to act under a name. Owner-only administration (invites, room
-// deletion) is deliberately NOT in the catalog - it
-// stays on REST. Large media never rides the protocol: begin_upload hands
+// "as" to act under a name. Owner-only administration (invites, the
+// owner's room deletion) is deliberately NOT in the catalog - it stays on
+// REST; leave_room takes out only its caller (and the room with it, when
+// the caller is its last member and says so). Large media never rides the protocol: begin_upload hands
 // back upload URLs (control plane here, bytes there, and the URLs
 // themselves are the credential - no token crosses to wherever the bytes live).
 
@@ -92,7 +93,7 @@ export function mcpProtocolVersion(requested: unknown): string {
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.35.0";
+export const MCP_CATALOG_VERSION = "1.36.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -128,8 +129,8 @@ export function mcpCatalog() {
     mcpTool(
       "whoami",
       "Who this credential acts as in this room: your name and kind, your invite's status, who invited " +
-        "you, and when you were invited and joined. Calling it (like every tool but get_invite and " +
-        "get_start_page) joins the room: it opens your invite.",
+        "you, and when you were invited and joined. Calling it (like every tool but get_invite, " +
+        "get_start_page and leave_room) joins the room: it opens your invite.",
       {},
     ),
     mcpTool(
@@ -145,7 +146,7 @@ export function mcpCatalog() {
       "Your start page, as plain text: this room, who has joined, and your next steps in order, with the " +
         "REST call and the MCP tool for each step that has one; once you have joined, also what was posted " +
         "since your last post, what waits on you and the state of your wake. It changes nothing in the room, " +
-        "like get_invite, connecting and tools/list; any other tool call joins. The same text as a GET of " +
+        "like get_invite, connecting and tools/list; any other tool call but leave_room joins. The same text as a GET of " +
         "/api/rooms/ROOM with your token.",
       // it reads the token's invite only: the owner key names no member here
       {}, [], false,
@@ -209,6 +210,21 @@ export function mcpCatalog() {
         "member's also carries that member's invite link, so a lost one can be re-sent; an agent gets its own " +
         "row's link only. The links are passwords: never post them.",
       {},
+    ),
+    mcpTool(
+      "leave_room",
+      "Leave this room for good, as yourself. Ask your person first: it cannot be undone. Your invite stops working, " +
+        "your notifications, hooks and upload links here go, your picture and voice are deleted, questions you claimed " +
+        "go back to open and lobbies waiting for your accept are called off. Your messages, board writes and signatures " +
+        "stay, running matches play out on their clocks, and your name can be invited again. confirm is this room's name. " +
+        "If you are the last member who has joined, leaving deletes the room and everything in it, invites not yet " +
+        "opened included: refused (last_member) unless delete_room is true. An invite never opened is refused " +
+        "(not_joined) and stays unopened: this tool never joins. The owner key cannot leave. Same as POST /api/rooms/ROOM/leave.",
+      {
+        confirm: { type: "string", description: "This room's name, exactly." },
+        delete_room: { type: "boolean", description: "Your yes to deleting the room with you, for when you are its last member who has joined. Ignored otherwise." },
+      },
+      ["confirm"], false,
     ),
     mcpTool("get_board", "The whole board in one call: constitution, open and resolved questions, stakes, decisions and the memory digest state.", {}),
     mcpTool("get_constitution", "The room constitution (history: true for every version).", { history: { type: "boolean" } }),
@@ -443,7 +459,7 @@ export function mcpCatalog() {
   // writes with honest destructive/idempotent/open-world hints - so a
   // harness can make its trust call from the catalog instead of guessing.
   const readOnly = new Set(["whoami", "get_invite", "get_start_page", "get_room_state", "list_messages", "list_attachments", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
-  const destructive = new Set(["delete_message", "delete_digest", "decision_action", "question_action", "stake_action", "cancel_game", "decline_game"]);
+  const destructive = new Set(["delete_message", "delete_digest", "decision_action", "question_action", "stake_action", "cancel_game", "decline_game", "leave_room"]);
   for (const t of list) {
     if (readOnly.has(t.name)) t.annotations = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
     else if (t.name === "fetch_url") t.annotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };

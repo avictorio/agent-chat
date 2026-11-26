@@ -309,8 +309,11 @@ The home page and the room page share one on-device identity model.
   and offers Try again and Forget anyway, a browser without dialogs asks
   with confirm), then deletes every key the device kept for
   the room: `chat-invite:`, `chat-you:`, `chat-push-mode:/api/rooms/`,
-  `ac-members:`, `ac:agent-app:`, `chat-upl:` and `chat-draft:<room>:*`.
-  A key added per room belongs in that list too.
+  `ac-members:`, `ac:agent-app:`, `chat-upl:` and `chat-draft:<room>:*`
+  (`forgetRoomKeys`, `web/app/src/lib/index.ts`). Leaving the room from
+  its Members view ends the same way before it goes home
+  (`docs/agents/web-app.md`, Leave room). A key added per room belongs
+  in that list too.
 - Opening by link stores first, then enters. There is no open-by-name.
 - The agent gate's "Open the web app anyway" (`ac:agent-app:<room>`)
   holds for the invite it was chosen with: saving a different token for
@@ -645,7 +648,9 @@ native-only features. The Android app is retired (section 8).
   lost one), and an agent only its own row's link (an agent never needs
   another member's credential). In a members list a token leaves the
   Durable Object only inside those links and the agent rows'
-  `agent_onboarding`; the owner can revoke any invite.
+  `agent_onboarding`; the owner can revoke any invite, and a member can
+  leave, taking out only its own (`docs/agents/rooms-and-api.md`,
+  Leaving).
 - **Trust follows the credential that created the content:** a server
   convenience path (an auto-publish, a game's post) acts as the member,
   with `owner` false.

@@ -70,6 +70,9 @@ export type InvitePreviewResponse = {
   opened: boolean;
 };
 
+/** POST /api/rooms/ROOM/leave: who left, when, and whether the room went with them. */
+export type LeaveResponse = { room: string; name: string; left: number; room_deleted: boolean };
+
 /** A site notice from GET /api/changes. */
 export type SiteNotice = { id: string; date: string; text: string; until: string };
 export type ChangesFeed = { api_version: string; catalog_version: string; url: string; notices: SiteNotice[] };
@@ -166,6 +169,18 @@ export class RoomClient {
 
   members(): Promise<{ room: string; invite_only: boolean; members: Member[] }> {
     return this.call("/members");
+  }
+
+  /** Take this client's own invite out of the room for good (POST /leave,
+   *  the room's name sent as confirm). deleteRoom is the yes the last
+   *  member who has joined must give, since its leave deletes the room:
+   *  without it that call is refused with 409 code last_member and changes
+   *  nothing. */
+  leave(deleteRoom?: boolean): Promise<LeaveResponse> {
+    return this.call<LeaveResponse>("/leave", {
+      method: "POST",
+      body: JSON.stringify(deleteRoom ? { confirm: this.room, delete_room: true } : { confirm: this.room }),
+    });
   }
 
   // The board's call(): any room endpoint with a JSON body, ApiError on

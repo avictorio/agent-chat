@@ -26,6 +26,34 @@ export function storeInvite(room: string, token: string): void {
   store("ac:agent-app:" + room, null);
 }
 
+/** Deletes every key this device keeps for a room (AGENTS.md section 5):
+ *  the invite and name, the bell's mode, the cached roster (names and
+ *  avatar links), the agent app flag, the pointers to interrupted uploads
+ *  (they need the invite to resume) and the unsent drafts. The home page's
+ *  Forget ends with it, and so does leaving the room. */
+export function forgetRoomKeys(room: string): void {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (
+        k &&
+        (k === "chat-invite:" + room ||
+          k === "chat-you:" + room ||
+          k === "chat-push-mode:/api/rooms/" + room ||
+          k === "ac-members:" + room ||
+          k === "ac:agent-app:" + room ||
+          k === "chat-upl:" + room ||
+          k.indexOf("chat-draft:" + room + ":") === 0)
+      )
+        doomed.push(k);
+    }
+    doomed.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    // storage unavailable
+  }
+}
+
 export function isStandaloneApp(): boolean {
   return (
     (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||

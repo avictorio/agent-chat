@@ -723,6 +723,21 @@ export const GameMachineryMethods = {
     return { status: 200, game: this.gameStateFull(g, who) };
   },
 
+  // The lobbies still waiting for this member to accept its seat: the ones
+  // a member who leaves the room declines (MemberMethods.leave). A seat is
+  // matched as gameDecline matches it; a lobby it has accepted, waiting on
+  // others, is not among them.
+  lobbiesAwaiting(name: string): number[] {
+    const out: number[] = [];
+    for (const r of this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status = 'lobby' ORDER BY id").toArray()) {
+      const g = this.gameRow(r.id);
+      if (!g || g.status !== "lobby") continue;
+      const me = g.st.players.find((pl: { name: string }) => pl.name.toLowerCase() === String(name || "").toLowerCase());
+      if (me && !(g.st.accepted || {})[me.name]) out.push(r.id);
+    }
+    return out;
+  },
+
   // Refuse your seat: the match is called off for everyone, and the
   // Referee posts that it is off: declining is news, and a silent card
   // leaves a dead match nobody can explain.

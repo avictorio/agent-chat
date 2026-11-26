@@ -1,16 +1,21 @@
-// Room methods: members and invites (kinds, reserved names, revocation), avatars.
+// Room methods: members and invites (kinds, reserved names, revocation, a
+// member leaving), avatars.
 
 import { nameFold, nameKey, sameName, sqlLowerSame } from "../lib/text.js";
 import { goneError } from "../lib/errors.js";
 import type { Member, MemberKind } from "@chat/contract";
-import type { CountRow, InvRow, MvRow, Refusal, Room } from "./Room.js";
+import type { CountRow, InvRow, MvRow, OqRow, Refusal, Room } from "./Room.js";
 import { warn } from "../lib/log.js";
-import { FETCH_URL_MAX } from "../limits.js";
+import { FETCH_URL_MAX, PROTECTED_ROOMS } from "../limits.js";
 
 /** A member as the Room returns it; the members route turns avatar_version
  *  into the signed avatar URL and invite_token into invite_link (or drops it). */
 export type RoomMember = Omit<Member, "avatar" | "invite_link" | "agent_onboarding"> & { avatar_version: number | null, invite_token: string };
 export type VoiceCols = Pick<MvRow, "name" | "provider" | "voice_id" | "sample_key">;
+/** A leave that went through (MemberMethods.leave): who left, when, whether
+ *  the room went with it, and the clone the route deletes at Cartesia (null
+ *  for none; it is a pending delete in the room until Cartesia confirms). */
+export type LeaveResult = { ok: true, name: string, left: number, room_deleted: boolean, clone: string | null };
 
 export const MemberMethods = {
   // The spellings this member's name is stored under in inv, one per
@@ -51,15 +56,18 @@ export const MemberMethods = {
     return r.t ? Math.max(1, Math.ceil((r.t + 86400e3 - Date.now()) / 1000)) : 1;
   },
 
+  // The owner's invite list: each row as stored, with left (when the
+  // member left by itself with that invite, else null).
   invites() {
-    return this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind" | "invited_by">>("SELECT token, name, created, revoked, used, kind, invited_by FROM inv ORDER BY created").toArray();
+    return this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind" | "invited_by" | "left_ts">>("SELECT token, name, created, revoked, used, kind, invited_by, left_ts FROM inv ORDER BY created").toArray()
+      .map(({ left_ts: left, ...r }) => ({ ...r, left: left || null }));
   },
 
   // Invite status for anyone in the room: active, unused or revoked. The token rides
   // along as invite_token; the members route turns it into invite_link for the owner
   // key and people, and for an agent only on its own row (routes/members.ts memberReply).
   members(): { invite_only: true, members: RoomMember[] } {
-    const rows = this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "avatar_ver">>("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray();
+    const rows = this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "avatar_ver" | "left_ts">>("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver, left_ts FROM inv ORDER BY created").toArray();
     /** voices by name (nameKey) */
     const vmap: Record<string, VoiceCols> = {};
     for (const v of this.sql.exec<VoiceCols>("SELECT name, provider, voice_id, sample_key FROM mv").toArray()) vmap[v.name] = v;
@@ -67,7 +75,7 @@ export const MemberMethods = {
     const muse = this.museOnKinds();
     return {
       invite_only: true,
-      members: rows.map((r) => { const v = vmap[nameKey(r.name)] || null; return { name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, muse_delivery: !r.revoked && muse.get(nameFold(r.name)) === "muse", webhook_delivery: !r.revoked && muse.get(nameFold(r.name)) === "webhook", invite_token: r.token } satisfies RoomMember; }),
+      members: rows.map((r) => { const v = vmap[nameKey(r.name)] || null; return { name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, left: r.left_ts || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, muse_delivery: !r.revoked && muse.get(nameFold(r.name)) === "muse", webhook_delivery: !r.revoked && muse.get(nameFold(r.name)) === "webhook", invite_token: r.token } satisfies RoomMember; }),
     };
   },
 
@@ -115,15 +123,32 @@ export const MemberMethods = {
     return ver;
   },
 
-  async clearAvatar(name: string) {
+  // A clear in two parts: the pointers leave the rows the picture is on
+  // (avatarMatch) in one step with no await, so nothing reads or sets the
+  // picture between the check and the write; the objects go after
+  // (mediaDelete). A leave (leave) runs the first part inside its own
+  // atomic step and the second once that step is done.
+  /** @returns the R2 keys of the pictures cleared, or null when the member had none */
+  avatarDrop(name: string): string[] | null {
     const [who, ...names] = this.avatarMatch(name);
     const rows = this.sql.exec<Pick<InvRow, "avatar_key">>("SELECT avatar_key FROM inv WHERE " + who + " AND avatar_ver IS NOT NULL", ...names).toArray();
-    if (!rows.length) return false;
+    if (!rows.length) return null;
     this.sql.exec("UPDATE inv SET avatar_type = NULL, avatar_ver = NULL, avatar_key = NULL WHERE " + who, ...names);
-    if (this.env && this.env.MEDIA) {
-      for (const r of rows) if (r.avatar_key) { try { await this.env.MEDIA.delete(r.avatar_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
-    }
     this.notifyMembers(name);
+    return rows.map((r) => r.avatar_key).filter((k): k is string => !!k);
+  },
+
+  // Deletes these objects from R2, one call each; a failure is logged and
+  // the rest still go. For objects whose rows are already gone.
+  async mediaDelete(keys: string[]) {
+    if (!this.env || !this.env.MEDIA) return;
+    for (const k of keys) { try { await this.env.MEDIA.delete(k); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+  },
+
+  async clearAvatar(name: string) {
+    const keys = this.avatarDrop(name);
+    if (!keys) return false;
+    await this.mediaDelete(keys);
     return true;
   },
 
@@ -271,6 +296,85 @@ export const MemberMethods = {
     this.notifyMembers(row.name);
     if (direct.length) this.ctx.waitUntil(this.abortUploads(direct).catch((e) => warn("upload.abort", e, { room: this.roomName })));
     return true;
+  },
+
+  // A member takes itself out (POST .../leave, MCP leave_room): what a
+  // revoke of its own invite does (revoke), and also the time it left on
+  // that invite (left_ts), its claimed questions released (the unclaim
+  // action), the lobbies waiting for its accept declined (gameDecline: the
+  // match is called off and the Referee says so) and, when this was the
+  // name's last active invite, its picture and its voice: the rows here,
+  // the objects just after, the clone at Cartesia by the route. Its
+  // messages, board writes and signatures stay, and running matches are
+  // left to their clocks. The checks and every row change are one step with
+  // no await, so no other call sees half a leave; storage's deletes come
+  // after it, and a failure there is logged and undoes nothing.
+  // An invite never opened has nothing to leave and is refused as it is:
+  // the lookup marks nothing (no access()). The last member who has joined
+  // (no other unrevoked invite has been opened) takes the room with it,
+  // only when it asks for that (deleteRoom): the room goes as the owner's
+  // deletion takes it, everyone revoked (revokeAll, unopened invites
+  // included) and then destroy(), in the same step. A protected room is
+  // never deleted: its last member leaves like any other.
+  /** @param room the room's name (lower case)
+   *  @param deleteRoom the caller's yes to the room's deletion, when it is the last member */
+  async leave(token: string | null | undefined, room: string, deleteRoom: boolean): Promise<LeaveResult | Refusal> {
+    if (!this.ready) throw goneError();
+    this.roomName = room;
+    const l = this.lookupInvite(token);
+    if (!l.ok) return l;
+    if (!l.row.used) return { ok: false, status: 409, code: "not_joined", error: "This invite was never opened, so there is nothing to leave: not using it is all it takes. This call did not open it." };
+    const name = l.row.name;
+    const others = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL AND used IS NOT NULL AND token != ?", token).one().n;
+    if (!others && PROTECTED_ROOMS.indexOf(room) < 0) {
+      if (!deleteRoom) {
+        const n = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL AND used IS NULL").one().n;
+        return { ok: false, status: 409, code: "last_member", error: "You are the last member of this room who has joined: leaving deletes the room and everything in it, for good" + (n ? ", and " + (n === 1 ? "the invite not yet opened stops" : "the " + n + " invites not yet opened stop") + " working too" : "") + ". To leave and delete it, send \"delete_room\": true beside \"confirm\". Nothing was changed." };
+      }
+      return this.leaveWithRoom(name, room);
+    }
+    // ---- one step, no await: the leave itself ----
+    const lobbies = this.lobbiesAwaiting(name);
+    this.revoke(token as string);
+    this.sql.exec("UPDATE inv SET left_ts = revoked WHERE token = ?", token);
+    const left = this.sql.exec<Pick<InvRow, "revoked">>("SELECT revoked FROM inv WHERE token = ?", token).one().revoked || Date.now();
+    for (const q of this.sql.exec<Pick<OqRow, "id" | "claimed_by">>("SELECT id, claimed_by FROM oq WHERE status = 'claimed'").toArray()) {
+      if (sameName(q.claimed_by, name)) this.updateQuestion(q.id, "unclaim", name, null);
+    }
+    // gameDecline's own step runs as it is called; its alarm re-arm waits below
+    const declined = lobbies.map((id) => this.gameDecline(id, name, room).catch((e) => warn("leave.decline", e, { room, id })));
+    // the picture and the voice go with the name's last active invite, as a revoke's push rows and hook do
+    const last = !this.invNames(name, true).length;
+    const objects: string[] = [];
+    let clone: string | null = null, voiced = false;
+    if (last) {
+      objects.push(...(this.avatarDrop(name) || []));
+      const v = this.voiceDrop(name);
+      if (v) { voiced = true; clone = v.clone; if (v.sample_key) objects.push(v.sample_key); }
+    }
+    // ---- after it: storage, which lets other calls run ----
+    await Promise.all(declined);
+    await this.mediaDelete(objects);
+    if (voiced) { try { await this.invalidateSpeakCache(name); } catch (e) { warn("leave.speak", e, { room }); } }
+    return { ok: true, name, left, room_deleted: false, clone };
+  },
+
+  // The last member's leave with its yes to the room's deletion: its clone
+  // is recorded as a pending delete (kept through destroy, as every
+  // voice-del row is) for the route to delete at Cartesia, then the owner's
+  // deletion path: revokeAll, whose rows go in its first step, and destroy,
+  // started before anything is awaited, so no call lands in a room with no
+  // invites that is not yet being deleted.
+  async leaveWithRoom(name: string, room: string): Promise<LeaveResult> {
+    const v = this.voiceRow(name);
+    const clone = v && (v.provider || "cartesia") === "cartesia" ? v.voice_id || null : null;
+    if (clone) this.voiceDelPend([clone]);
+    const left = Date.now();
+    const everyone = this.revokeAll();
+    const gone = await this.destroy(room, "room deleted as its last member left");
+    await everyone;
+    if (!gone.deleted) warn("leave.destroy", gone.error || "not deleted", { room });
+    return { ok: true, name, left, room_deleted: !!gone.deleted, clone };
   },
 
   // Revoke everyone: every invite, every push registration, every open

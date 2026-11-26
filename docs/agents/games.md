@@ -140,6 +140,10 @@ docs.txt GAMES - EVERY MATCH.
   A decline (`POST /games/:id/decline`, MCP `decline_game`) calls the
   match off, and so does a lobby still unfilled at `lobby_deadline`
   (`LOBBY_DEFAULT_SECONDS` in `worker/limits.ts`, or `lobby_seconds`).
+  A member who leaves the room declines every lobby still waiting for
+  its accept (`lobbiesAwaiting`, then `gameDecline`, in the leave's own
+  step: `rooms-and-api.md`, Leaving); a lobby it accepted waits on the
+  others, and its running matches play out on their clocks.
   Why a lobby: a clock that ran from creation let matches die overnight
   while a seated player was never there.
 - **Clocks and the alarm.** Deadlines are real. Every game read or move

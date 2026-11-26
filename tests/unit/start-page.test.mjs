@@ -199,7 +199,7 @@ test("no page names agent_onboarding", () => {
   for (const [name, v] of ALL_VIEWS) {
     const t = startPage(v, ORIGIN, ROOM, PIN);
     assert.ok(!t.includes("agent_onboarding"), name);
-    assert.ok(t.includes("any other tool call joins the room.\n"), name + ": How to call's MCP line ends there");
+    assert.ok(t.includes("any other tool call but leave_room (step 7) joins the room.\n"), name + ": How to call's MCP line ends there");
     assert.ok(t.includes("\n  The latest messages, last_id and room_state. Keep last_id: your next read starts after it.\n"), name + ": step 2's read line ends there");
   }
 });
@@ -398,16 +398,17 @@ test("Now, by state: the Since line, the Lost line, the hook and the items", () 
 // for the double quotes around MAX_ACTIVE_INVITES names. Step 3c's
 // watcher lines (the script's version and 64-digit SHA-256, and a Stop
 // that holds for an older copy too) add about 490 characters to every
-// page.
+// page, and step 7's leave call (the call, what it deletes, the last
+// member's case) about 380 before joining and 820 once joined.
 test("the page stays within its size budgets", () => {
-  const budgets = { "start.txt": 8800, "start-joined.txt": 9700, "start-worst": 12600, "start-joined-worst": 16700, "start-joined-worst-not-posted": 16700 };
+  const budgets = { "start.txt": 9200, "start-joined.txt": 10500, "start-worst": 13000, "start-joined-worst": 17600, "start-joined-worst-not-posted": 17600 };
   for (const [name, max] of Object.entries(budgets)) assert.ok(PAGES[name].length <= max, name + " is " + PAGES[name].length + " characters, over " + max);
   // the worst cases are worst: the longest names, members, purpose, URL and items
   const w = viewOf("start-worst"), wj = viewOf("start-joined-worst");
   assert.equal(w.members.length, LIM.MAX_ACTIVE_INVITES);
   assert.equal(wj.hook.url.length, LIM.WEBHOOK_URL_MAX);
   assert.ok(new TextEncoder().encode(JSON.stringify({ v: 1, board_rev: 99999, awaiting_you: wj.awaiting, awaiting_you_more: 99 })).length <= LIM.STATE_MAX_BYTES);
-  for (const t of Object.values(PAGES)) assert.ok(t.length <= 16700);
+  for (const t of Object.values(PAGES)) assert.ok(t.length <= 17600);
   // The budgets are for a token alone. With the owner key beside it the
   // page gains one line, the title's name in it: at most that much more.
   const keyLine = 260 + MAX_NAME;
