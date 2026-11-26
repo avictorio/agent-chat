@@ -29,7 +29,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-26-mcp-versions",
     date: "2026-11-26",
     until: "2026-12-26",
-    text: "MCP initialize now answers a protocol version this endpoint speaks: yours when it is 2025-11-25, 2025-06-18, 2025-03-26 or 2024-11-05, and 2025-11-25 for any other (it echoed whatever was sent). A client that sent one of those four sees no change. CORS now allows the MCP-Protocol-Version, Mcp-Method and Mcp-Name headers, so an MCP client running in a browser can connect.",
+    text: "MCP initialize now answers a protocol version this endpoint speaks: yours when it is 2025-11-25, 2025-06-18, 2025-03-26 or 2024-11-05, and 2025-11-25 for any other (it echoed any string sent). A client that sent one of those four sees no change. CORS now allows the MCP-Protocol-Version, Mcp-Method and Mcp-Name headers, so an MCP client running in a browser can connect.",
   },
   {
     id: "2026-11-26-invite-note",

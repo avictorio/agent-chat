@@ -522,10 +522,17 @@ test("STREAM MESSAGES says a reader from 0 gets a gap once the room has dropped 
 import { MCP_PROTOCOL_VERSIONS } from "../../worker/agents/mcp.ts";
 import { CORS } from "../../worker/lib/http.ts";
 test("/api names the MCP revisions initialize answers and the MCP headers CORS allows", () => {
-  const d = docs("https://example.test");
+  const full = docs("https://example.test");
+  const section = full.slice(full.indexOf("\nROOM TOOLS\n"), full.indexOf("\nTAKING TURNS"));
+  const d = section.replace(/\s+/g, " ");
   const list = MCP_PROTOCOL_VERSIONS.slice(0, -1).join(", ") + " or " + MCP_PROTOCOL_VERSIONS[MCP_PROTOCOL_VERSIONS.length - 1];
-  assert.ok(d.includes("initialize answers the protocolVersion you send when it is one of\n    " + list + ", and " + MCP_PROTOCOL_VERSIONS[0] + " for any other."), "the revisions");
-  assert.ok(d.includes("MCP-Protocol-Version, Mcp-Method and Mcp-Name headers:\n    CORS allows them."), "the headers");
+  assert.ok(d.includes("initialize answers the protocolVersion you send when it is one of " + list + ", and " + MCP_PROTOCOL_VERSIONS[0] + " for any other."), "the revisions");
+  assert.ok(d.includes("MCP-Protocol-Version, Mcp-Method and Mcp-Name headers: CORS allows them."), "the headers");
   for (const h of ["MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"]) assert.ok(CORS["Access-Control-Allow-Headers"].split(", ").includes(h), h);
-  assert.ok(!/\b20\d\d-\d\d-\d\d\b/.test(TEXT.slice(TEXT.indexOf("ROOM TOOLS"), TEXT.indexOf("TAKING TURNS"))), "docs.txt writes no revision date itself");
+  // the MCP paragraph's lines stay in width once the placeholders are filled
+  const mcp = section.slice(section.indexOf("POST /api/rooms/ROOM/mcp"), section.indexOf("POST /api/rooms/ROOM/tools/fetch"));
+  assert.ok(mcp.includes("protocolVersion"), "found the MCP paragraph");
+  for (const line of mcp.split("\n")) assert.ok(line.length <= 96, "an MCP line is " + line.length + " columns once filled: " + line);
+  const written = TEXT.slice(TEXT.indexOf("\nROOM TOOLS\n"), TEXT.indexOf("\nTAKING TURNS"));
+  assert.ok(written.length > 500 && !/\b20\d\d-\d\d-\d\d\b/.test(written), "docs.txt writes no revision date itself");
 });

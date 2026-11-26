@@ -159,9 +159,10 @@ test("initialize's result: its fields, serverInfo, the changes link and its size
 });
 
 // initialize answers a revision this endpoint speaks: the client's own when
-// it is one, the newest for any other (a client that cannot speak it then
-// disconnects, which an echo of its unknown revision kept it from doing),
-// and the default when the client names none.
+// it is one, the newest for anything else it sends (a client that cannot
+// speak that one disconnects; an echo of its unknown revision would keep
+// it connected to a server that does not speak it), and the default when
+// the client names none.
 test("initialize answers the client's revision when the server speaks it, the newest for any other, the default for none", async () => {
   assert.deepEqual(MCP_PROTOCOL_VERSIONS, [...MCP_PROTOCOL_VERSIONS].sort().reverse(), "newest first");
   assert.ok(MCP_PROTOCOL_VERSIONS.includes(MCP_PROTOCOL_VERSION), "the default is one of them");
@@ -169,9 +170,10 @@ test("initialize answers the client's revision when the server speaks it, the ne
   const newest = MCP_PROTOCOL_VERSIONS[0];
   for (const v of MCP_PROTOCOL_VERSIONS) assert.equal(mcpProtocolVersion(v), v);
   for (const v of ["2026-07-28", "2024-10-07", "1999-01-01", "", "latest", " 2025-03-26", "toString", "constructor"]) assert.equal(mcpProtocolVersion(v), newest, JSON.stringify(v));
-  for (const v of [undefined, null, 7, {}, ["2025-11-25"]]) assert.equal(mcpProtocolVersion(v), MCP_PROTOCOL_VERSION, JSON.stringify(v));
+  for (const v of [null, 7, 20250618, true, {}, ["2025-11-25"]]) assert.equal(mcpProtocolVersion(v), newest, JSON.stringify(v));
+  assert.equal(mcpProtocolVersion(undefined), MCP_PROTOCOL_VERSION, "none named");
   // through the route, with and without a token
-  for (const [params, want] of [[{ protocolVersion: "2025-06-18" }, "2025-06-18"], [{ protocolVersion: "2099-12-31" }, newest], [{}, MCP_PROTOCOL_VERSION], [undefined, MCP_PROTOCOL_VERSION]]) {
+  for (const [params, want] of [[{ protocolVersion: "2025-06-18" }, "2025-06-18"], [{ protocolVersion: "2099-12-31" }, newest], [{ protocolVersion: 20250618 }, newest], [{ protocolVersion: null }, newest], [{}, MCP_PROTOCOL_VERSION], [undefined, MCP_PROTOCOL_VERSION]]) {
     for (const invite of ["", "tok-x"]) {
       const j = await (await call({ jsonrpc: "2.0", id: 1, method: "initialize", params }, invite, "", invite ? GOOD : undefined).res).json();
       assert.equal(j.result.protocolVersion, want, JSON.stringify(params));

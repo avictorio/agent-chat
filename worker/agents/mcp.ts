@@ -79,13 +79,13 @@ export const MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", 
 /** The revision answered when a client names none. */
 export const MCP_PROTOCOL_VERSION = "2025-03-26";
 /** The protocolVersion of an initialize result: the client's own when this
- *  server speaks it, else the newest it speaks (the client then decides
- *  whether it can go on). Echoing a revision the server does not know told
- *  the client it would be spoken.
+ *  endpoint speaks it, else the newest it speaks, so the client can decide
+ *  whether to go on (an echo of an unknown revision would tell it that
+ *  revision will be spoken); the default when the client names none.
  *  @param requested params.protocolVersion as sent */
 export function mcpProtocolVersion(requested: unknown): string {
-  if (typeof requested !== "string") return MCP_PROTOCOL_VERSION;
-  return MCP_PROTOCOL_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSIONS[0];
+  if (requested === undefined) return MCP_PROTOCOL_VERSION;
+  return typeof requested === "string" && MCP_PROTOCOL_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSIONS[0];
 }
 // The catalog carries a version and a content digest so a client can pin
 // the definitions it approved and notice a change before trusting them
