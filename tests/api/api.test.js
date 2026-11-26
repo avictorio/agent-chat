@@ -7,8 +7,9 @@
 // the game engines, the wake recipe's watcher script (one file for every caller, and one real run of it with
 // bash, curl and jq against this server: watcherScript) and Muse delivery hooks
 // (tests/api/muse-hooks.js: the real bridge, against a fake Muse,
-// tests/api/fake-muse.mjs), and the official MCP client libraries against
-// the MCP endpoint (tests/api/mcp-clients.js). Exits non-zero on any failure.
+// tests/api/fake-muse.mjs), the official MCP client libraries against
+// the MCP endpoint (tests/api/mcp-clients.js) and its revision 2026-07-28 by
+// hand (tests/api/mcp-modern.js). Exits non-zero on any failure.
 //
 //   npm run build     (once, and after web/ changes: the page shell and
 //                      its assets come from web/app/dist)
@@ -38,6 +39,7 @@ const { leaveApi } = require('./leave-api.js');
 const { museHooks } = require('./muse-hooks.js');
 const { webhooks } = require('./webhooks.js');
 const { mcpClients } = require('./mcp-clients.js');
+const { mcpModern } = require('./mcp-modern.js');
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -263,6 +265,8 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     await webhooks(museCtx);
     // The official MCP client libraries (tests/api/mcp-clients.js).
     await mcpClients({ req, check, BASE, SUF });
+    // MCP revision 2026-07-28 by hand (tests/api/mcp-modern.js).
+    await mcpModern({ req, check, SUF });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);

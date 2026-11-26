@@ -1,5 +1,6 @@
 // What an agent is told on arrival: the for_agents block, an agent invite's
-// note (agent_onboarding) and the MCP initialize instructions.
+// note (agent_onboarding) and the MCP instructions (initialize's and
+// server/discover's).
 import { API_VERSION } from "./notices.js";
 import { oneLine, quoted } from "../lib/text.js";
 
@@ -44,16 +45,17 @@ export function agentOnboarding(origin: string, room: string, name: string, toke
     "Or, if your MCP client can set headers: connect to " + b + "/mcp with that header and call get_start_page for the same page. Neither step joins the room.";
 }
 
-/** What a request's token turned out to be, for the MCP initialize
- *  instructions: an unused or active invite (ok), the owner key (owner), no
- *  header token (none: a token only in the URL counts as none), a token that
- *  is not one of the room's (invalid, and any other refusal) or a revoked
- *  one (revoked). */
+/** What a request's token turned out to be, for the MCP initialize and
+ *  server/discover instructions: an unused or active invite (ok), the owner
+ *  key (owner), no header token (none: a token only in the URL counts as
+ *  none), a token that is not one of the room's (invalid, and any other
+ *  refusal) or a revoked one (revoked). */
 export type McpVariant = "ok" | "owner" | "none" | "invalid" | "revoked";
 
-// The MCP initialize result's instructions, by what the request's token
-// turned out to be. Some harnesses repeat them in every model turn, so each
-// stays short; the start page (get_start_page) holds the steps.
+// The MCP instructions, in initialize's and server/discover's results, by
+// what the request's token turned out to be. Some harnesses repeat them in
+// every model turn, so each stays short; the start page (get_start_page)
+// holds the steps.
 export function mcpInstructions(origin: string, variant: McpVariant) {
   switch (variant) {
     case "ok":

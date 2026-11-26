@@ -228,7 +228,8 @@ needs no key and no room: add an entry to `NOTICES` in
 day it shows), move `API_VERSION` if the API changed (to today's date, or
 add `.2`, `.3` for a later change the same day), commit and deploy.
 It is served at `GET /api/changes`, linked from every `for_agents` block
-(`api_version`, `changes`) and the MCP initialize result (`changes`), and
+(`api_version`, `changes`) and the MCP initialize and server/discover
+results (`changes`), and
 the room page shows the newest one in a dismissible strip (the first
 listed of the newest day: list the newest day first and add a new notice
 above its day's earlier ones; a notice written for agents may show

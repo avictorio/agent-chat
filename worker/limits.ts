@@ -157,6 +157,14 @@ export const SMALL_BODY_MAX = MIB;
 export const SETTLED_BODY_MAX = 48 * MIB;
 /** How far past its cap settleBody (lib/http.ts) reads a refused body away before the 413, so the client gets the answer and not a reset; a body further over is cut off there. */
 export const REFUSED_DRAIN_MAX = 8 * MIB;
+/** How long a client may keep MCP tools/list's answer (its ttlMs, over the
+ *  revisions that carry one): the catalog changes only with a deploy, and a
+ *  client that meets a tool it does not know may list again sooner. A cache
+ *  hint, not a limit on anyone. */
+export const MCP_TOOLS_TTL_MS = 3600000;
+/** The most characters an MCP refusal repeats of a value the request sent
+ *  (a header, a method, a tool name), "..." added past it. */
+export const MCP_ECHO_MAX = 128;
 /** The largest body a one-request file route takes for a file of up to
  *  max bytes: the file as base64 JSON (4/3 of it, with room for line
  *  breaks) plus a little for the JSON around it. The routes' documented

@@ -2,11 +2,12 @@
 // TypeScript SDK's two lines, as agents' harnesses ship them. v1
 // (@modelcontextprotocol/sdk) opens with initialize; v2
 // (@modelcontextprotocol/client) does the same by default, probes
-// server/discover first in "auto" mode and speaks only 2026-07-28 when
-// pinned to it. What the suite's own JSON-RPC calls cannot show is here:
-// that a real client connects, negotiates a revision, lists and calls the
-// tools, and is told a wrong token's reason; and which headers it sends,
-// the ones CORS must allow a browser client.
+// server/discover first in "auto" mode, is answered and stays on revision
+// 2026-07-28, and speaks only that revision when pinned to it. What the
+// suite's own JSON-RPC calls cannot show is here: that a real client
+// connects, negotiates a revision, lists and calls the tools, and is told a
+// wrong token's reason; and which headers it sends, the ones CORS must
+// allow a browser client.
 // The libraries live in tests/mcp-clients (its own package, so the deploy
 // build installs none of them): npm ci --prefix tests/mcp-clients.
 // Called from api.test.js; its room is its own.
@@ -26,9 +27,9 @@ function recorder() {
   const fetchFn = async (input, init) => {
     const res = await fetch(input, init);
     const h = new Headers((init && init.headers) || {});
-    let rpc = null;
-    try { rpc = typeof init.body === 'string' ? JSON.parse(init.body).method : null; } catch {}
-    calls.push({ http: (init && init.method) || 'GET', status: res.status, rpc, version: h.get('mcp-protocol-version'), method: h.get('mcp-method'), name: h.get('mcp-name') });
+    let rpc = null, tool = null;
+    try { const b = typeof init.body === 'string' ? JSON.parse(init.body) : null; rpc = b ? b.method : null; tool = b && b.params ? b.params.name : null; } catch {}
+    calls.push({ http: (init && init.method) || 'GET', status: res.status, rpc, tool, version: h.get('mcp-protocol-version'), method: h.get('mcp-method'), name: h.get('mcp-name') });
     return res;
   };
   return { calls, fetchFn };
@@ -146,31 +147,76 @@ async function mcpClients(ctx) {
     check('mcp v2 client (offering 2024-10-07 only): told ' + NEWEST_LEGACY + ', it disconnects', !got.ok && /protocol version is not supported/i.test(String(got.error && got.error.message)), said(got));
   }
 
-  // v2 in auto mode: the server/discover probe is answered Method not found,
-  // and the client falls back to initialize. When this endpoint speaks
-  // 2026-07-28 the era here becomes "modern": change this check with it.
+  // v2 in auto mode: the server/discover probe is answered, and the client
+  // stays on revision 2026-07-28: no initialize, no GET, and every request
+  // names the revision and its method (and, on tools/call, its tool) in the
+  // headers a browser client's preflight must be allowed
   {
     const rec = recorder();
     const client = new v2.Client({ name: 'apitest-v2-auto', version: '0.0.0' }, { versionNegotiation: { mode: 'auto' } });
     const transport = new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer ' + T3 } }, fetch: rec.fetchFn });
     const got = await withClient(client, transport, async () => ({
       era: client.getProtocolEra(), version: transport.protocolVersion,
-      tools: (await client.listTools()).tools.length,
+      tools: (await client.listTools()).tools.map((t) => t.name),
       who: (await client.callTool({ name: 'whoami', arguments: {} })).structuredContent,
     }));
     const o = got.out || {};
     const probe = rec.calls.find((c) => c.rpc === 'server/discover');
     check('mcp v2 client (auto): its probe carries MCP-Protocol-Version ' + MODERN + ' and Mcp-Method', !!probe && probe.version === MODERN && probe.method === 'server/discover', JSON.stringify(probe));
-    check('mcp v2 client (auto): falls back to initialize and works', got.ok && o.era === 'legacy' && o.version === NEWEST_LEGACY && o.tools === listed.length && !!o.who && o.who.name === 'McpThree', said(got));
+    check('mcp v2 client (auto): stays on ' + MODERN + ' and works', got.ok && o.era === 'modern' && o.version === MODERN && Array.isArray(o.tools) && o.tools.join() === listed.join() && !!o.who && o.who.name === 'McpThree', said(got));
+    check('mcp v2 client (auto): sends no initialize and no GET', rec.calls.length >= 3 && !rec.calls.some((c) => c.rpc === 'initialize' || c.http === 'GET'), JSON.stringify(rec.calls).slice(0, 300));
+    check('mcp v2 client (auto): every request names ' + MODERN + ' and its method, every tools/call its tool', rec.calls.every((c) => c.version === MODERN && c.method === c.rpc) && rec.calls.filter((c) => c.rpc === 'tools/call').every((c) => !!c.tool && c.name === c.tool), JSON.stringify(rec.calls).slice(0, 300));
   }
 
-  // v2 pinned to 2026-07-28: no fallback, so the connection fails in
-  // negotiation, with the library's own error (nothing was half-opened)
+  // v2 pinned to 2026-07-28, a fresh agent invite: it connects, reads the
+  // server from server/discover, lists the catalog with its titles, looks
+  // without joining (get_start_page, get_invite, an unknown tool), then
+  // joins with whoami; a tool's refusal is still a tool error
   {
+    const T4 = await invite('McpFour');
+    const ORIGIN = String(((await req('GET', '/api/changes')).json || {}).url || '').replace(/\/api\/changes$/, '');
+    const raw = ((await req('POST', R + '/mcp', { token: T1, json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } })).json || {}).result || {};
     const client = new v2.Client({ name: 'apitest-v2-pin', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } });
-    const transport = new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer ' + T3 } } });
-    const got = await withClient(client, transport, async () => ({ era: client.getProtocolEra() }));
-    check('mcp v2 client (pinned to ' + MODERN + '): refused in negotiation, the endpoint not offering it', !got.ok && got.error && got.error.code === 'ERA_NEGOTIATION_FAILED' && /did not offer pinned protocol version/.test(String(got.error.message)), said(got));
+    const transport = new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer ' + T4 } } });
+    const got = await withClient(client, transport, async () => {
+      const out = { era: client.getProtocolEra(), server: client.getServerVersion(), instructions: client.getInstructions() };
+      out.tools = (await client.listTools()).tools;
+      out.page = (await client.callTool({ name: 'get_start_page', arguments: {} })).content[0].text;
+      out.look = (await client.callTool({ name: 'get_invite', arguments: {} })).structuredContent;
+      try { await client.callTool({ name: 'no_such_tool', arguments: {} }); out.unknown = 'returned'; } catch (e) { out.unknown = e.code; }
+      out.unused = ((await row('McpFour')) || {}).used === null;
+      out.who = (await client.callTool({ name: 'whoami', arguments: {} })).structuredContent;
+      out.bad = await client.callTool({ name: 'post_message', arguments: {} });
+      return out;
+    });
+    const o = got.out || {};
+    check('mcp v2 client (pinned to ' + MODERN + '): connects', got.ok && o.era === 'modern', said(got));
+    check('mcp v2 client (pinned): the server, from server/discover\'s _meta', JSON.stringify(o.server) === JSON.stringify({ name: 'agent-chat', title: 'Agent Chat', version: raw.catalog && raw.catalog.version, websiteUrl: ORIGIN }), JSON.stringify(o.server));
+    check('mcp v2 client (pinned): the instructions, from server/discover', /^One Agent Chat room as tools\. Call get_start_page first/.test(o.instructions || ''), String(o.instructions).slice(0, 80));
+    check('mcp v2 client (pinned): listTools gives the catalog in the server\'s order, each tool with a title', Array.isArray(o.tools) && o.tools.map((t) => t.name).join() === (raw.tools || []).map((t) => t.name).join() && o.tools.every((t) => typeof t.title === 'string' && t.title.length > 0), (o.tools || []).length + ' of ' + (raw.tools || []).length);
+    check('mcp v2 client (pinned): get_start_page is the page\'s text', String(o.page).startsWith('Agent Chat start page: "McpFour"'), String(o.page).slice(0, 80));
+    check('mcp v2 client (pinned): an unknown tool rejects with -32602, and with get_invite it left the invite unused', o.unknown === -32602 && o.unused === true && !!o.look && o.look.invite.status === 'unused', JSON.stringify({ unknown: o.unknown, unused: o.unused }));
+    check('mcp v2 client (pinned): whoami joins', !!o.who && o.who.name === 'McpFour' && o.who.status === 'active', JSON.stringify(o.who).slice(0, 160));
+    check('mcp v2 client (pinned): a tool\'s refusal is a tool error (isError)', !!o.bad && o.bad.isError === true, JSON.stringify(o.bad).slice(0, 160));
+  }
+
+  // v2 pinned with a wrong token and with none: it still connects (server/discover
+  // answers anyone, saying why no tool will work), and tools/list is refused
+  // -32001 with data.code and the endpoint's sentence
+  {
+    const startInvalid = ((await req('GET', R, { token: 'not-one-of-this-rooms-invites' })).json || {}).error;
+    for (const [what, headers, code] of [['a wrong token', { Authorization: 'Bearer not-one-of-this-rooms-invites' }, 'invite_invalid'], ['no token', {}, 'invite_missing']]) {
+      const client = new v2.Client({ name: 'apitest-v2-pin-bad', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } });
+      const transport = new v2.StreamableHTTPClientTransport(url, { requestInit: { headers } });
+      const got = await withClient(client, transport, async () => {
+        const out = { era: client.getProtocolEra(), instructions: client.getInstructions() };
+        try { await client.listTools(); out.listed = true; } catch (e) { out.code = e.code; out.data = e.data; out.message = e.message; }
+        return out;
+      });
+      const o = got.out || {};
+      check('mcp v2 client (pinned, ' + what + '): connects over ' + MODERN, got.ok && o.era === 'modern' && (code !== 'invite_invalid' || /\(invite_invalid\)/.test(o.instructions || '')), said(got));
+      check('mcp v2 client (pinned, ' + what + '): listTools rejects with -32001 and data.code ' + code, o.listed !== true && o.code === -32001 && !!o.data && o.data.code === code && (code !== 'invite_invalid' || (!!startInvalid && String(o.message).includes(startInvalid))), JSON.stringify(o).slice(0, 240));
+    }
   }
 
   await req('DELETE', R + '/invites', { owner: true });

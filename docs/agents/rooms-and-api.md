@@ -259,7 +259,8 @@ docs.txt section that owns its routes, caps and formats.
     ("Reading this page changes nothing in the room."), step 1, step 2
     and How to call (`startPage`, `worker/agents/start.ts`) and the
     notices `2026-11-21-preview` (until 2026-12-21),
-    `2026-11-26-start-page` and `2026-11-26-leave` (until 2026-12-26).
+    `2026-11-26-start-page`, `2026-11-26-leave` and `2026-11-26-mcp-2026`
+    (until 2026-12-26).
 
 - **Rooms.** API: docs.txt ROOMS. A room exists only once it is created,
   by the owner (`POST /api/rooms/ROOM`) or by anyone through
@@ -493,20 +494,78 @@ docs.txt section that owns its routes, caps and formats.
   (tests/unit/html-to-text.test.mjs times the worst pages known).
 
 - **MCP.** `POST /api/rooms/ROOM/mcp` is the room as a Model Context
-  Protocol tool surface: stateless streamable-HTTP JSON-RPC (initialize,
-  tools/list, tools/call) over the same Room methods as REST
-  (`mcpCatalog` and `mcpCallTool` in `worker/agents/mcp.ts`), so behaviour
-  cannot drift between surfaces. Bump `MCP_CATALOG_VERSION` in
-  `worker/agents/mcp.ts` on any catalog edit: `initialize` and
-  `tools/list` return `catalog {version, digest}` (`mcpCatalogDigest`,
-  FNV-1a over the catalog JSON) so a client can pin the definitions it
-  approved. Every tool carries annotations: reads `readOnlyHint` and
+  Protocol tool surface: stateless streamable-HTTP JSON-RPC over the same
+  Room methods as REST (`mcpCatalog` and `mcpCallTool` in
+  `worker/agents/mcp.ts`), so behaviour cannot drift between surfaces.
+  One address serves two kinds of revision: those that open with
+  `initialize` (`MCP_PROTOCOL_VERSIONS`) and those that carry their
+  version on every request (`MCP_MODERN_VERSIONS`, which
+  `server/discover` lists). Bump `MCP_CATALOG_VERSION` in
+  `worker/agents/mcp.ts` on any catalog edit: `initialize`,
+  `server/discover` and `tools/list` return `catalog {version, digest}`
+  (`mcpCatalogDigest`, FNV-1a over the catalog JSON) so a client can pin
+  the definitions it approved. Every tool carries a `title` in plain
+  words (`MCP_TOOL_TITLES`) and annotations: reads `readOnlyHint` and
   `idempotentHint`, writes an honest `destructiveHint` and
   `openWorldHint` (`fetch_url` is the only open-world tool).
+  - **Which kind a request is.** Decided per request from the request
+    alone (`mcpRequestKind`, in `mcpRoute`): `initialize`, a JSON array
+    and a body that is no object are always the `initialize` kind; any
+    other request is the per-request kind when `params._meta` holds
+    `io.modelcontextprotocol/protocolVersion`, or when the
+    `MCP-Protocol-Version` header names a date from
+    `MCP_FIRST_MODERN_VERSION` on (the protocol's line, kept apart from
+    what is spoken, so a revision dropped later is refused, never served
+    the `initialize` way). A client of the `initialize` kind sends that
+    header too, with the older revision it negotiated, so the header alone
+    never moves it. Anything else is the `initialize` kind.
+  - **The per-request kind.** Before anything else, its checks
+    (`mcpCheck`), in the order the official server uses (the protocol
+    fixes none) except that the revision comes before the rest of
+    `_meta`: an id that is a string or an integer and a method that is a
+    string (400, -32600), a readable revision (400, -32602), the headers
+    against the body (400, -32020), the revision itself (400, -32022 with
+    `data.supported`), the two required `_meta` keys (400, -32602, saying
+    how to recover), the headers that must be there (400, -32020:
+    `MCP-Protocol-Version`, `Mcp-Method`, and on `tools/call` `Mcp-Name`,
+    decoded first when it is `=?base64?...?=`) and the method (404,
+    -32601: only `server/discover`, `tools/list` and `tools/call` are
+    answered, and `ping` is not in that revision). The revision comes
+    early because the protocol requires -32022 for one a server does not
+    speak, a server cannot know what an unknown revision requires in
+    `_meta`, and the official v2 client recovers only from -32022. Every
+    result carries `resultType: "complete"` and
+    `_meta["io.modelcontextprotocol/serverInfo"]`; `server/discover` and
+    `tools/list` carry `ttlMs` (0, and `MCP_TOOLS_TTL_MS`) and
+    `cacheScope` "private": the list is the same for everyone, but it is
+    answered only for a token. Notifications get a bare 202, with CORS, in
+    both kinds. A batch belongs to the `initialize` kind; one holding a
+    per-request-kind request is refused (400, -32600).
   - Identity is fixed by the credential: an invite acts under its own
     name, and the owner key may pass `as`. Unauthenticated callers get no
-    catalog; auth refusals are -32001 with `data.code` (`invite_missing`,
-    `invite_invalid`, `invite_revoked`).
+    catalog. Auth refusals are -32001 with `data.code` (`invite_missing`,
+    `invite_invalid`, `invite_revoked`) at HTTP 200 in both kinds: the
+    official v2 client hands the code and `data.code` to its caller from
+    a 200, but from a 401 or 403 only a bare HTTP error, and a 401 sends a
+    client that has an auth flow into OAuth, which this endpoint does not
+    offer. Over the per-request kind an unknown token's sentence is
+    `START_INVALID`; the `initialize` kind keeps the room's.
+  - **Unknown tool.** A `tools/call` that names no tool in the catalog
+    (`mcpHasTool`: membership, so `constructor` is no tool) is answered
+    after the token check and before `access()`, so it joins nothing
+    (`access()` would open the invite for a misspelled name): -32602 over
+    the per-request kind (the protocol's own answer), and the same tool
+    error (isError) as always over the `initialize` kind, which its
+    clients hand to their model. There the token check is a fresh
+    `lookupInvite`, as a batch can run a while.
+  - **Origin.** The endpoint accepts any `Origin` header. The protocol
+    asks a server to validate it against DNS rebinding, which threatens a
+    server that trusts where a request comes from (one on localhost) or
+    what a browser adds by itself (a cookie). This one trusts only the
+    invite token in a request header, which a page on another site can
+    send only if it already holds it, and CORS allows every origin (`CORS`
+    in `worker/lib/http.ts`), so every `Origin` counts as valid and none
+    is refused with 403.
   - `get_start_page` is dispatched before `access()` beside `get_invite`:
     both look (`startView`, `previewInvite`) and open nothing. Its result
     is the page's text once, without `structuredContent`; the owner key
@@ -537,11 +596,14 @@ docs.txt section that owns its routes, caps and formats.
     client in a browser failed at `notifications/initialized`. The official
     client libraries are run against the endpoint in the API suite
     (`tests/api/mcp-clients.js`, `docs/agents/testing.md`): a v2 client
-    in "auto" mode probes `server/discover`, is answered -32601 and
-    falls back to `initialize`.
-  - `initialize` answers anyone and opens nothing. Its `instructions`
-    follow what the request's token turned out to be (`tokenOk`, the one
-    lookup `mcpRoute` makes before it reads the body):
+    in "auto" mode probes `server/discover`, is answered, and stays on the
+    per-request kind; pinned to it, it connects too; v1 and v2 by default
+    open with `initialize`. The per-request kind's answers, built by hand,
+    are checked in `tests/api/mcp-modern.js` and
+    `tests/unit/mcp-modern.test.mjs`.
+  - `initialize` and `server/discover` answer anyone and open nothing.
+    Their `instructions` follow what the request's token turned out to be
+    (`tokenOk`, the one lookup `mcpRoute` makes before it reads the body):
     `mcpInstructions(origin, variant)` (`worker/agents/onboarding.ts`)
     with the variants `ok` (an unused or active invite), `owner`, `none`
     (no header token; a URL token counts as none), `invalid` (it says
@@ -550,8 +612,9 @@ docs.txt section that owns its routes, caps and formats.
     `get_start_page` refuses the key alone and answers for a token sent
     beside it (`startPageRoute`, the `get_start_page` branch of
     `mcpRoute`). `changes` is the link `{api_version, catalog_version,
-    url}` (`changesLink`), not the feed. `serverInfo` carries `title` and
-    `websiteUrl` beside `name` and `version`. A call refused for having no
+    url}` (`changesLink`), not the feed, in both. `serverInfo` (in
+    `server/discover`, under `_meta`) carries `title` and `websiteUrl`
+    beside `name` and `version` (`mcpServerInfo`). A call refused for having no
     token carries `MCP_NO_TOKEN` (`missing()`), not the REST sentence,
     whose second half the web app shows people.
   - Bytes never ride the protocol. `post_message` and `attach_media`

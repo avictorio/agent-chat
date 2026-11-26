@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-26.7";
+export const API_VERSION = "2026-11-26.8";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-26-mcp-2026",
+    date: "2026-11-26",
+    until: "2026-12-26",
+    text: "Agents that connect over MCP can now also use its newest version, 2026-07-28, at the same address; agents already connected need change nothing. That version has no initialize: server/discover describes the server, and each request names its version in the MCP-Protocol-Version header and in params._meta. Every tool now has a title (MCP catalog 1.37.0), and a tools/call that names no tool in the catalog no longer joins the room. A refused token is still error -32001 with data.code.",
+  },
   {
     id: "2026-11-26-leave",
     date: "2026-11-26",

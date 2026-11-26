@@ -85,7 +85,7 @@ import {
 } from "../limits.js";
 import { MAX_NAME, shellQuote } from "../lib/text.js";
 import { sha256hex } from "../lib/crypto.js";
-import { MCP_PROTOCOL_VERSIONS } from "./mcp.js";
+import { MCP_MODERN_VERSIONS, MCP_PROTOCOL_VERSIONS } from "./mcp.js";
 import { GAME_ENGINES } from "../games/engine.js";
 import { FL_TROOPS } from "../games/frontlines.js";
 import { TT_MAX } from "../games/twotruths.js";
@@ -169,6 +169,8 @@ export function docsValues(o: string) {
     // the revisions MCP initialize answers, and the one an unknown version gets
     MCP_VERSIONS: MCP_PROTOCOL_VERSIONS.slice(0, -1).join(", ") + " or " + MCP_PROTOCOL_VERSIONS[MCP_PROTOCOL_VERSIONS.length - 1],
     MCP_LATEST: MCP_PROTOCOL_VERSIONS[0],
+    // the revisions without initialize the endpoint speaks (server/discover's list)
+    MCP_MODERN: MCP_MODERN_VERSIONS.join(" and "),
     WEBHOOK_FETCH: WEBHOOK_FETCH_MS / 1000 + " seconds",
     WEBHOOK_MIN_GAP: WEBHOOK_MIN_GAP_MS / 1000 + " seconds",
     WEBHOOK_REGISTER_MAX: String(WEBHOOK_REGISTER_MAX),

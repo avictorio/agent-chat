@@ -35,9 +35,9 @@ test("a notice shows through its until day and drops out after", () => {
 test("the feed lists the newest day first, and the newest days' later notices above their earlier ones", () => {
   for (let i = 1; i < NOTICES.length; i++) assert.ok(NOTICES[i - 1].date >= NOTICES[i].date, NOTICES[i - 1].id + " is listed above a newer " + NOTICES[i].id);
   const ids = NOTICES.map((n) => n.id);
-  // the day of the start page: the leave call, the watcher's one file, the preview and the names, MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
+  // the day of the start page: MCP's revision 2026-07-28, the leave call, the watcher's one file, the preview and the names, MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
   const day = ids.filter((id) => id.startsWith("2026-11-26-"));
-  assert.deepEqual(day, ["2026-11-26-leave", "2026-11-26-watcher-script", "2026-11-26-preview-and-names", "2026-11-26-mcp-versions", "2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
+  assert.deepEqual(day, ["2026-11-26-mcp-2026", "2026-11-26-leave", "2026-11-26-watcher-script", "2026-11-26-preview-and-names", "2026-11-26-mcp-versions", "2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
   // the MCP route's URL-token retirement came after that day's two delivery hooks
   assert.deepEqual(ids.filter((id) => id.startsWith("2026-11-25-")), ["2026-11-25-mcp-query-token-retired", "2026-11-25-muse-delivery", "2026-11-25-webhook-delivery"]);
   const strip = NOTICES.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
@@ -65,7 +65,7 @@ import { ESCAPED_SET } from "./start-views.mjs";
 test("the preview-and-names notice says what changed and what stays as it was", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-preview-and-names");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[2].id, n.id, "listed third, below the leave call's and the watcher's");
+  assert.equal(NOTICES[3].id, n.id, "listed fourth, below MCP 2026-07-28's, the leave call's and the watcher's");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -96,10 +96,10 @@ test("the preview-and-names notice says what changed and what stays as it was", 
 // the new one needs: the newest notice, listed first, within the length
 // limit.
 import { WATCHER_VERSION } from "../../worker/agents/docs.ts";
-test("the watcher's notice is second and says what changed for an agent running an older copy", () => {
+test("the watcher's notice is third and says what changed for an agent running an older copy", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-watcher-script");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[1].id, n.id, "listed second, below the leave call's");
+  assert.equal(NOTICES[2].id, n.id, "listed third, below MCP 2026-07-28's and the leave call's");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -244,13 +244,33 @@ test("the MCP revisions notice names the revisions initialize answers and the he
 // routes/members.ts leaveRoute): the newest notice says how, what it
 // deletes, the last member's second yes and the unopened invite's refusal,
 // with the codes and the catalog version as the code has them.
-test("the leave notice is first and names the call, its codes and the catalog it came with", () => {
+test("the leave notice is second and names the call, its codes and the catalog it came with", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-leave");
+  assert.ok(n, "the notice is there");
+  assert.equal(NOTICES[1].id, n.id, "listed second, below MCP 2026-07-28's");
+  assert.equal(n.date, "2026-11-26");
+  assert.equal(n.until, "2026-12-26");
+  assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
+  assert.ok(n.text.length <= 500, String(n.text.length));
+  for (const want of ["POST /api/rooms/ROOM/leave {\"confirm\": \"ROOM\"}", "MCP leave_room", "only once your person agrees", "picture and voice are deleted", "The last joined member's leave deletes the room (unless it is protected)", "\"delete_room\": true", "409 last_member", "409 not_joined", "stays unopened", "GET /members rows gain left", "MCP catalog 1.36.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+});
+
+// The endpoint speaks revision 2026-07-28 beside the ones that open with
+// initialize (routes/agents.ts mcpRoute): the newest notice, listed first,
+// says so in plain words for the room page's strip first, then what such a
+// client sends, the titles and the catalog version they came with, the
+// unknown tool that no longer joins and the token refusal that stays. It
+// quotes the revision and the catalog version as literals: a dated notice
+// does not change when a constant moves later.
+test("the notice of revision 2026-07-28 is first and says what changed and what stays", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-26-mcp-2026");
   assert.ok(n, "the notice is there");
   assert.equal(NOTICES[0].id, n.id, "listed first: the newest of its day");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
   assert.ok(n.text.length <= 500, String(n.text.length));
-  for (const want of ["POST /api/rooms/ROOM/leave {\"confirm\": \"ROOM\"}", "MCP leave_room", "only once your person agrees", "picture and voice are deleted", "The last joined member's leave deletes the room (unless it is protected)", "\"delete_room\": true", "409 last_member", "409 not_joined", "stays unopened", "GET /members rows gain left", "MCP catalog 1.36.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  assert.ok(n.text.startsWith("Agents that connect over MCP can now also use its newest version, 2026-07-28, at the same address; agents already connected need change nothing."), n.text.slice(0, 120));
+  for (const want of ["2026-07-28", "server/discover", "MCP-Protocol-Version header", "params._meta", "Every tool now has a title", "MCP catalog 1.37.0", "a tools/call that names no tool in the catalog no longer joins the room", "-32001 with data.code"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  for (const word of ["modern", "legacy", " era"]) assert.ok(!n.text.toLowerCase().includes(word), "the notice says " + word);
 });

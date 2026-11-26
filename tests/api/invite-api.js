@@ -205,15 +205,18 @@ async function preview(ctx) {
   const tools = (r.json && r.json.result && r.json.result.tools) || [];
   const gi = tools.find((t) => t.name === 'get_invite');
   const gs = tools.find((t) => t.name === 'get_start_page');
-  check('mcp: catalog 1.36.0 lists get_invite and get_start_page, read-only', r.json.result.catalog.version === '1.36.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true && !!gs && gs.annotations && gs.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
+  check('mcp: catalog 1.37.0 lists get_invite and get_start_page, read-only', r.json.result.catalog.version === '1.37.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true && !!gs && gs.annotations && gs.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
   r = await rpc(Q, [{ jsonrpc: '2.0', id: 3, method: 'initialize', params: {} }, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { jsonrpc: '2.0', id: 5, method: 'ping' }]);
   r = await rpc(Q, { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
   const gr = r.json && r.json.result && r.json.result.structuredContent;
   check('mcp: get_invite returns the preview', !!gr && gr.invite && gr.invite.name === 'PrevQ' && gr.invite.status === 'unused', JSON.stringify(r.json).slice(0, 200));
   check('mcp: get_invite carries no agent_onboarding, and next.start', !!gr && !('agent_onboarding' in gr) && !!gr.next && gr.next.start === START && !r.text.includes(Q), JSON.stringify(Object.keys(gr || {})));
   check('mcp: get_invite offers no "as"', !!gi && !('as' in gi.inputSchema.properties), JSON.stringify(gi && gi.inputSchema));
+  // a name that is no tool: the same tool error as ever, answered before access()
+  r = await rpc(Q, { jsonrpc: '2.0', id: 61, method: 'tools/call', params: { name: 'no_such_tool', arguments: {} } });
+  check('mcp: an unknown tool is the same tool error as ever', isDeepStrictEqual(r.json, { jsonrpc: '2.0', id: 61, result: { content: [{ type: 'text', text: 'Unknown tool: no_such_tool. Call tools/list for the catalog.' }], isError: true } }), r.text.slice(0, 200));
   st = await statusOf('PrevQ');
-  check('mcp: initialize, notifications, tools/list, a batch and get_invite leave the invite unused', st && st.status === 'unused' && st.last_seen === null, JSON.stringify(st));
+  check('mcp: initialize, notifications, tools/list, a batch, get_invite and an unknown tool leave the invite unused', st && st.status === 'unused' && st.last_seen === null, JSON.stringify(st));
   r = await rpc(Q, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'whoami', arguments: {} } });
   st = await statusOf('PrevQ');
   check('mcp: the first other tool call opens it', st && st.status === 'active', JSON.stringify(st));
@@ -729,7 +732,7 @@ async function startPage(ctx) {
   check('start: ... with no structuredContent copy', !('structuredContent' in res) && !res.isError, Object.keys(res).join(','));
   r = await req('POST', R + '/mcp', { token: A, json: { jsonrpc: '2.0', id: 2, method: 'tools/list' } });
   const gs = ((result(r).tools) || []).find((t) => t.name === 'get_start_page');
-  check('start: tools/list has get_start_page, read-only, in catalog 1.36.0', !!gs && gs.annotations.readOnlyHint === true && result(r).catalog.version === '1.36.0', JSON.stringify(result(r).catalog));
+  check('start: tools/list has get_start_page, read-only, in catalog 1.37.0', !!gs && gs.annotations.readOnlyHint === true && result(r).catalog.version === '1.37.0', JSON.stringify(result(r).catalog));
   check('start: ... offering no "as", which it would ignore', !!gs && !('as' in gs.inputSchema.properties), JSON.stringify(gs && gs.inputSchema));
   st = await statusOf('StartA');
   check('start: ... and the invite is still unused', !!st && st.status === 'unused' && st.last_seen === null, JSON.stringify(st));

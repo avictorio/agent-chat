@@ -38,6 +38,7 @@ import {
   MAX_STAKES,
   MAX_TEXT,
   mb,
+  MCP_ECHO_MAX,
   mediaTooBig,
   MESSAGES_PAGE,
   MOVE_DIR_MAX,
@@ -49,7 +50,7 @@ import {
 } from "../limits.js";
 import { TT_MAX } from "../games/twotruths.js";
 import { codedError } from "../lib/errors.js";
-import { CURSOR_REFUSAL, readCursor, secondsToUtcMidnight, type Body, bodyNumber, bodyStamp, bodyText, refused, bodyList } from "../lib/http.js";
+import { CURSOR_REFUSAL, readCursor, secondsToUtcMidnight, type Body, bodyNumber, bodyStamp, bodyText, isObject, refused, bodyList } from "../lib/http.js";
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
 import { LC_MOVE_LOG_TICKS } from "../games/lightcycles.js";
@@ -77,6 +78,33 @@ import type { AwaitingItem, McpCall, RoomState } from "@chat/contract";
 // open with initialize and whose tool calls this endpoint serves as it is
 // (one JSON answer per POST, no session, no server-sent requests).
 export const MCP_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+// The other kind of revision has no initialize: every request carries its
+// revision and the client's capabilities in params._meta (and its revision
+// in the MCP-Protocol-Version header). The protocol draws the line between
+// the two kinds at 2026-07-28: that revision and every later one are of this
+// kind. The line is a constant of its own, apart from the revisions this
+// endpoint speaks, so a revision dropped from MCP_MODERN_VERSIONS later is
+// still told it is not spoken (-32022), never answered as one that opens
+// with initialize.
+export const MCP_FIRST_MODERN_VERSION = "2026-07-28";
+/** The revisions without initialize that this endpoint speaks, newest
+ *  first: server/discover's supportedVersions and -32022's data.supported.
+ *  Only these can be named per request; the ones initialize answers cannot. */
+export const MCP_MODERN_VERSIONS = ["2026-07-28"];
+/** The per-request _meta keys: the revision a request is written in (the
+ *  claim that makes it a request of that kind, whatever its value), the
+ *  client's capabilities, and the server's identity in every result. */
+export const MCP_META_VERSION = "io.modelcontextprotocol/protocolVersion";
+export const MCP_META_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+export const MCP_META_SERVER = "io.modelcontextprotocol/serverInfo";
+/** The methods answered over those revisions; anything else is 404 -32601
+ *  (ping is not in them). */
+export const MCP_MODERN_METHODS = ["server/discover", "tools/list", "tools/call"];
+/** Who answers, for initialize's serverInfo and every per-request result's
+ *  _meta: one object for both. @param origin the site's origin */
+export function mcpServerInfo(origin: string) {
+  return { name: "agent-chat", title: "Agent Chat", version: MCP_CATALOG_VERSION, websiteUrl: origin };
+}
 /** The revision answered when a client names none. */
 export const MCP_PROTOCOL_VERSION = "2025-03-26";
 /** The protocolVersion of an initialize result: the client's own when this
@@ -88,12 +116,127 @@ export function mcpProtocolVersion(requested: unknown): string {
   if (requested === undefined) return MCP_PROTOCOL_VERSION;
   return typeof requested === "string" && MCP_PROTOCOL_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSIONS[0];
 }
+
+/** Whether a request names its revision in params._meta (the claim): the
+ *  key is there, whatever its value (a value that is not a string is
+ *  refused, never taken as no claim). */
+export function mcpClaims(v: unknown): boolean {
+  if (!isObject(v)) return false;
+  const params = v.params;
+  if (!isObject(params)) return false;
+  const meta = params._meta;
+  return isObject(meta) && MCP_META_VERSION in meta;
+}
+/** Whether an MCP-Protocol-Version header names a revision without
+ *  initialize: a YYYY-MM-DD date not earlier than MCP_FIRST_MODERN_VERSION.
+ *  Anything else (an older revision, "latest", "") does not. */
+export function mcpNamesModern(header: string | null): boolean {
+  return header !== null && /^\d{4}-\d{2}-\d{2}$/.test(header) && header >= MCP_FIRST_MODERN_VERSION;
+}
+/** What kind of revision one request is written in, from that request
+ *  alone (nothing is remembered between requests): "initialize" for a
+ *  batch, initialize itself (whatever its _meta and headers say), a body
+ *  that is no object, and anything without the claim or a header naming a
+ *  revision from MCP_FIRST_MODERN_VERSION on; else "per-request", with the
+ *  revision it names (the claim's value, else the header's) and whether it
+ *  is one of spoken. Every client that opens with initialize sends that
+ *  header too, with the revision initialize answered, so the header alone
+ *  never moves it.
+ *  @param header MCP-Protocol-Version as sent, or null
+ *  @param spoken the revisions of that kind this endpoint speaks */
+export function mcpRequestKind(body: unknown, header: string | null, spoken: readonly string[] = MCP_MODERN_VERSIONS): { kind: "initialize" } | { kind: "per-request", revision: unknown, spoken: boolean } {
+  if (!isObject(body) || body.method === "initialize") return { kind: "initialize" };
+  const claimed = mcpClaims(body);
+  if (!claimed && !mcpNamesModern(header)) return { kind: "initialize" };
+  // the claim is there, so params and its _meta are objects
+  const revision = claimed ? ((body.params as Body)._meta as Body)[MCP_META_VERSION] : header;
+  return { kind: "per-request", revision, spoken: typeof revision === "string" && spoken.includes(revision) };
+}
+/** A value a refusal repeats from the request, cut to MCP_ECHO_MAX
+ *  characters ("..." added when cut, never half a surrogate pair). */
+export function mcpEcho(v: string) {
+  return v.length > MCP_ECHO_MAX ? v.slice(0, MCP_ECHO_MAX).replace(/[\ud800-\udbff]$/, "") + "..." : v;
+}
+/** Mcp-Name as the client meant it: a value between =?base64? and ?= (both
+ *  exactly, in lower case, not overlapping) is padded Base64 of UTF-8 text
+ *  and decoded; undefined when it has both markers and is not; any other
+ *  value is taken as it is. A client must encode a plain value that looks
+ *  like the sentinel, so a malformed one is never a name sent plain. */
+export function mcpDecodeName(v: string): string | undefined {
+  if (!(v.startsWith("=?base64?") && v.endsWith("?="))) return v;
+  if (v.length < 11) return undefined;
+  const b64 = v.slice(9, -2);
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) return undefined;
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))); } catch { return undefined; /* not UTF-8 text: refused by the caller */ }
+}
+/** A per-request revision's refusal before any method runs: the HTTP
+ *  status, the id it answers (null when the request's own is unusable) and
+ *  the JSON-RPC error. */
+export type McpRefusal = { status: number, id: string | number | null, error: { code: number, message: string, data?: Record<string, unknown> } };
+/** The checks a request of a revision without initialize passes before its
+ *  method runs, in order; the first it fails, or null. The protocol fixes
+ *  no order. This is the official server's, except that the revision is
+ *  read (3) and checked (6) before the rest of _meta (7): the protocol
+ *  requires -32022 for a revision a server does not speak, a server cannot
+ *  know what an unknown revision requires in _meta, and the official v2
+ *  client recovers only from -32022. So a header naming a later revision
+ *  without _meta is told -32022, and one naming 2026-07-28 without _meta
+ *  is told how to recover. Room-free: a function of the body and headers.
+ *  @param req the request, an object with an id member
+ *  @param get a request header by name, or null
+ *  @param spoken the revisions of that kind this endpoint speaks */
+export function mcpCheck(req: Body, get: (name: string) => string | null, spoken: readonly string[] = MCP_MODERN_VERSIONS): McpRefusal | null {
+  const id = req.id;
+  // 1: an id this endpoint can answer under (never null, unlike base JSON-RPC)
+  if (!(typeof id === "string" || (typeof id === "number" && Number.isInteger(id)))) return { status: 400, id: null, error: { code: -32600, message: "Invalid request: id must be a string or an integer." } };
+  const no = (status: number, code: number, message: string, data?: Record<string, unknown>): McpRefusal => ({ status, id, error: data ? { code, message, data } : { code, message } });
+  // 2
+  const method = req.method;
+  if (typeof method !== "string") return no(400, -32600, "Invalid request: method must be a string.");
+  const params = isObject(req.params) ? req.params : null;
+  const meta = params && isObject(params._meta) ? params._meta : null;
+  const claimed = mcpClaims(req);
+  const claim = claimed && meta ? meta[MCP_META_VERSION] : undefined;
+  // 3: a revision that can be read
+  if (claimed && typeof claim !== "string") return no(400, -32602, "Invalid params: " + MCP_META_VERSION + " in params._meta must be a string naming a revision, such as " + MCP_MODERN_VERSIONS[0] + ".", { missing: [MCP_META_VERSION] });
+  // 4, 5: the headers that are there match the body
+  const header = get("MCP-Protocol-Version");
+  if (typeof claim === "string" && header !== null && header !== claim) return no(400, -32020, "Header mismatch: MCP-Protocol-Version header value '" + mcpEcho(header) + "' does not match body value '" + mcpEcho(claim) + "'");
+  const mcpMethod = get("Mcp-Method");
+  if (mcpMethod !== null && mcpMethod !== method) return no(400, -32020, "Header mismatch: Mcp-Method header value '" + mcpEcho(mcpMethod) + "' does not match body value '" + mcpEcho(method) + "'");
+  // 6: a revision this endpoint speaks
+  const kind = mcpRequestKind(req, header, spoken);
+  const revision = kind.kind === "per-request" && typeof kind.revision === "string" ? kind.revision : "";
+  if (kind.kind !== "per-request" || !kind.spoken) return no(400, -32022, "Unsupported protocol version", { supported: spoken, requested: mcpEcho(revision) });
+  // 7: the two _meta keys that revision requires on every request
+  const missing: string[] = [];
+  if (!claimed) missing.push(MCP_META_VERSION);
+  if (!meta || !isObject(meta[MCP_META_CAPABILITIES])) missing.push(MCP_META_CAPABILITIES);
+  if (missing.length) {
+    return no(400, -32602, "Invalid params: revision " + revision + " needs " + MCP_META_VERSION + " (a string) and " + MCP_META_CAPABILITIES + " (an object) in params._meta on every request; to open with initialize instead, send the revision initialize answered in MCP-Protocol-Version, or no such header.", { missing });
+  }
+  // 8 to 12: the headers that must be there
+  if (header === null) return no(400, -32020, "Header mismatch: the MCP-Protocol-Version header is missing; it must equal " + MCP_META_VERSION + " in params._meta.");
+  if (mcpMethod === null) return no(400, -32020, "Header mismatch: the Mcp-Method header is missing; it must equal the request's method.");
+  // Mcp-Name only where params.name is a string: any other name gets the
+  // method's own refusal ("tools/call needs params.name", in-band)
+  if (method === "tools/call" && params && typeof params.name === "string") {
+    const sent = get("Mcp-Name");
+    if (sent === null) return no(400, -32020, "Header mismatch: the Mcp-Name header is missing; on tools/call it must equal params.name.");
+    const name = mcpDecodeName(sent);
+    if (name === undefined) return no(400, -32020, "Header mismatch: the Mcp-Name header's =?base64?...?= value is not Base64 of UTF-8 text.");
+    if (name !== params.name) return no(400, -32020, "Header mismatch: Mcp-Name header value '" + mcpEcho(name) + "' does not match body value '" + mcpEcho(params.name) + "'");
+  }
+  // 13: a method this endpoint answers
+  if (!MCP_MODERN_METHODS.includes(method)) return no(404, -32601, "Method not found: " + mcpEcho(method));
+  return null;
+}
 // The catalog carries a version and a content digest so a client can pin
 // the definitions it approved and notice a change before trusting them
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.36.0";
+export const MCP_CATALOG_VERSION = "1.37.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -101,9 +244,10 @@ export function mcpCatalogDigest(list: McpTool[]) {
   for (let i = 0; i < s.length; i++) { h ^= BigInt(s.charCodeAt(i)); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
   return ("0000000000000000" + h.toString(16)).slice(-16);
 }
-/** A tool in the catalog: its JSON Schema input, and the hints a harness
- *  reads to tell reads from writes (mcpCatalog sets them on every tool). */
-export type McpTool = { name: string, description: string, inputSchema: { type: string, properties: Record<string, object>, required: string[], additionalProperties: boolean },
+/** A tool in the catalog: the name a client shows (title), its JSON Schema
+ *  input, and the hints a harness reads to tell reads from writes
+ *  (mcpCatalog sets the title and the hints on every tool). */
+export type McpTool = { name: string, title?: string, description: string, inputSchema: { type: string, properties: Record<string, object>, required: string[], additionalProperties: boolean },
   annotations?: { readOnlyHint: boolean, destructiveHint?: boolean, idempotentHint: boolean, openWorldHint: boolean } };
 /** @param properties the arguments' JSON Schemas
  *  @param ownerAs whether the owner key can name a member with "as" (a
@@ -112,13 +256,66 @@ export function mcpTool(name: string, description: string, properties?: Record<s
   const props = Object.assign(ownerAs ? { as: { type: "string", description: "Owner key only: act as this member." } } : {}, properties || {});
   return { name: name, description: description, inputSchema: { type: "object", properties: props, required: required || [], additionalProperties: false } };
 }
-let built: { tools: McpTool[], digest: string } | null = null;
-/** The catalog and its digest, built once per isolate: both depend only on
- *  constants, and hashing the catalog costs a few ms of CPU per connect. */
+let built: { tools: McpTool[], digest: string, names: Set<string> } | null = null;
+/** The catalog, its digest and its tools' names, built once per isolate:
+ *  they depend only on constants, and hashing the catalog costs a few ms of
+ *  CPU per connect. */
 export function mcpCatalogBuilt() {
-  if (!built) { const tools = mcpCatalog(); built = { tools, digest: mcpCatalogDigest(tools) }; }
+  if (!built) { const tools = mcpCatalog(); built = { tools, digest: mcpCatalogDigest(tools), names: new Set(tools.map((t) => t.name)) }; }
   return built;
 }
+/** Whether a tools/call names a tool of the catalog: membership in its
+ *  names, never a property lookup, so constructor or __proto__ is no tool. */
+export function mcpHasTool(name: string) {
+  return mcpCatalogBuilt().names.has(name);
+}
+/** Each tool's title, the name a client shows for it: plain words, in
+ *  sentence case. mcpCatalog gives every tool its own
+ *  (tests/unit/mcp-modern.test.mjs checks each has one, all differ, and
+ *  none names a tool the catalog lacks). */
+export const MCP_TOOL_TITLES: Record<string, string> = {
+  whoami: "Who you are here",
+  get_invite: "Look at your invite",
+  get_start_page: "Your start page",
+  get_room_state: "What waits on you",
+  list_messages: "Read messages",
+  list_attachments: "Browse attachments",
+  post_message: "Post a message",
+  delete_message: "Delete a message",
+  publish_message: "Publish a draft",
+  react: "React to a message",
+  get_reactions: "See a message's reactions",
+  get_members: "List members",
+  get_board: "Read the whole board",
+  get_constitution: "Read the constitution",
+  set_constitution: "Rewrite the constitution",
+  get_decisions: "List decisions",
+  create_decision: "Propose a decision",
+  decision_action: "Sign or change a decision",
+  get_questions: "List questions",
+  ask_question: "Ask a question",
+  question_action: "Claim, resolve or change a question",
+  get_stakes: "List stakes",
+  create_stake: "Add a stake",
+  stake_action: "Finish or change a stake",
+  get_digests: "Read daily digests",
+  file_digest: "File today's digest",
+  edit_digest: "Edit a digest",
+  delete_digest: "Delete a digest",
+  fetch_url: "Fetch a web page",
+  list_games: "List matches",
+  get_game: "Look at a match",
+  create_game: "Create a match",
+  submit_move: "Make a move",
+  cancel_game: "Cancel a match",
+  accept_game: "Accept a match",
+  decline_game: "Decline a match",
+  speak_message: "Hear a message in its sender's voice",
+  get_voice: "Your cloned voice",
+  begin_upload: "Upload a file",
+  attach_media: "Attach a small file",
+  leave_room: "Leave the room",
+};
 export function mcpCatalog() {
   const id = { type: "integer", description: "The item's id." };
   const baseUpdated = {
@@ -467,7 +664,9 @@ export function mcpCatalog() {
     else if (t.name === "react") t.annotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
     else t.annotations = { readOnlyHint: false, destructiveHint: destructive.has(t.name), idempotentHint: false, openWorldHint: false };
   }
-  return list;
+  // the title beside the name, where a client looks for it (both kinds of
+  // revision carry it; a client that predates titles ignores it)
+  return list.map((t): McpTool => ({ name: t.name, title: MCP_TOOL_TITLES[t.name], description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
 }
 /** @param obj a tool's result */
 export function mcpOk(obj: unknown) {
@@ -719,6 +918,12 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error(mediaTooBig("video", "inline")); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video", r.ver)) } }; }
       throw new Error("\"kind\" must be image, audio or video");
     }
-    default: throw new Error("Unknown tool: " + name + ". Call tools/list for the catalog.");
+    default: throw new Error(mcpUnknownTool(name));
   }
+}
+/** The answer to a tools/call naming no tool of the catalog (as a tool
+ *  error over the revisions that open with initialize, -32602 over the
+ *  others). @param name the name as the answer repeats it */
+export function mcpUnknownTool(name: string) {
+  return "Unknown tool: " + name + ". Call tools/list for the catalog.";
 }

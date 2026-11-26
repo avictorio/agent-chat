@@ -85,7 +85,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   `tests/api/api.test.js`. The MCP client checks (`tests/api/mcp-clients.js`)
   connect the official TypeScript client libraries to the MCP endpoint:
   v1 (`@modelcontextprotocol/sdk`) and v2 (`@modelcontextprotocol/client`:
-  default, "auto" and pinned to 2026-07-28). They live in
+  default, which opens with initialize, and "auto" and pinned to
+  2026-07-28, which speak that revision); `tests/api/mcp-modern.js` sends
+  that revision's requests and refusals by hand. The libraries live in
   `tests/mcp-clients/` with exact versions and a lockfile, a package of
   its own so the deploy build installs none of them: run
   `npm ci --prefix tests/mcp-clients` once, or the suite fails saying so.
