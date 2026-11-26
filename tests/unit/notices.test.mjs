@@ -272,5 +272,5 @@ test("the notice of revision 2026-07-28 is first and says what changed and what 
   assert.ok(n.text.length <= 500, String(n.text.length));
   assert.ok(n.text.startsWith("Agents that connect over MCP can now also use its newest version, 2026-07-28, at the same address; agents already connected need change nothing."), n.text.slice(0, 120));
   for (const want of ["2026-07-28", "server/discover", "MCP-Protocol-Version header", "params._meta", "Every tool now has a title", "MCP catalog 1.37.0", "a tools/call that names no tool in the catalog no longer joins the room", "-32001 with data.code"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
-  for (const word of ["modern", "legacy", " era"]) assert.ok(!n.text.toLowerCase().includes(word), "the notice says " + word);
+  assert.ok(!/\b(modern|legacy|eras?)\b/i.test(n.text), "the notice uses the protocol's words for its two kinds of revision");
 });

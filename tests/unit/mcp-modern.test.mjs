@@ -318,7 +318,7 @@ const REFUSALS = [
   ["6: a claim of a revision not spoken", req("tools/list", {}, 1, { [V]: "2099-01-01", [C]: {} }), { ...heads("tools/list"), "MCP-Protocol-Version": "2099-01-01" }, [400, 1, -32022, "Unsupported protocol version", { supported: MCP_MODERN_VERSIONS, requested: "2099-01-01" }]],
   ["6: the header alone naming one", { jsonrpc: "2.0", id: 1, method: "tools/list" }, { ...heads("tools/list"), "MCP-Protocol-Version": "2099-01-01" }, [400, 1, -32022, "Unsupported protocol version", { supported: MCP_MODERN_VERSIONS, requested: "2099-01-01" }]],
   ["6: requested cut to 128", req("tools/list", {}, 1, { [V]: "2099-01-01" + long, [C]: {} }), { "Mcp-Method": "tools/list" }, [400, 1, -32022, "Unsupported protocol version", { supported: MCP_MODERN_VERSIONS, requested: ("2099-01-01" + long).slice(0, 128) + "..." }]],
-  ["7: no clientCapabilities", req("tools/list", {}, 1, { [V]: NEW }), heads("tools/list"), [400, 1, -32602, "Invalid params: revision 2026-07-28 needs io.modelcontextprotocol/protocolVersion (a string) and io.modelcontextprotocol/clientCapabilities (an object) in params._meta on every request; to open with initialize instead, send the revision initialize answered in MCP-Protocol-Version, or no such header.", { missing: [C] }]],
+  ["7: no clientCapabilities (the claim is there, so no way back to initialize is told)", req("tools/list", {}, 1, { [V]: NEW }), heads("tools/list"), [400, 1, -32602, "Invalid params: revision 2026-07-28 needs io.modelcontextprotocol/protocolVersion (a string) and io.modelcontextprotocol/clientCapabilities (an object) in params._meta on every request.", { missing: [C] }]],
   ["7: clientCapabilities that are no object", req("tools/list", {}, 1, { [V]: NEW, [C]: [] }), heads("tools/list"), [400, 1, -32602, null, { missing: [C] }]],
   ["7: the header alone, capabilities in _meta", { jsonrpc: "2.0", id: 1, method: "tools/list", params: { _meta: { [C]: {} } } }, heads("tools/list"), [400, 1, -32602, null, { missing: [V] }]],
   ["7: the header alone, _meta no object", { jsonrpc: "2.0", id: 1, method: "tools/list", params: { _meta: 5 } }, heads("tools/list"), [400, 1, -32602, null, { missing: [V, C] }]],
@@ -591,6 +591,8 @@ test("Mcp-Name: the Base64 sentinel decoded, a malformed one refused, anything e
     ["=?base64?abc?=", undefined],
     ["=?base64?/w==?=", undefined],
     ["=?base64?Zm9v?=", "foo"],
+    // a leading U+FEFF stays in the name, so it cannot pass for the name without it
+    ["=?base64?77u/d2hvYW1p?=", "\ufeffwhoami"],
     ["=?base64?Zm9v ?=", undefined],
     ["=?BASE64?Zm9v?=", "=?BASE64?Zm9v?="],
     ["=?base64?x", "=?base64?x"],

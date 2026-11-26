@@ -658,10 +658,11 @@ test("/api says how a client of revision 2026-07-28 connects, and which of its c
   const full = docs("https://example.test");
   const tools = full.slice(full.indexOf("\nROOM TOOLS\n"), full.indexOf("\nTAKING TURNS")).replace(/\s+/g, " ");
   assert.equal(docsValues("https://example.test").MCP_MODERN, MCP_MODERN_VERSIONS.join(" and "));
-  assert.ok(tools.includes("Revision " + MCP_MODERN_VERSIONS.join(" and ") + " has no handshake."), "the revision, from the constant");
+  assert.ok(tools.includes("Revision " + MCP_MODERN_VERSIONS.join(" and ") + " has no handshake and no batches: one request per POST."), "the revision, from the constant");
+  assert.ok(!tools.includes("header as REST, one request per POST"), "one request per POST is said of that revision only: the older ones take a batch");
   assert.ok(tools.includes("-32602 over " + MCP_MODERN_VERSIONS.join(" and ") + ", a tool error (isError) over older revisions"), "the unknown tool, both kinds");
   for (const want of ["io.modelcontextprotocol/protocolVersion", "io.modelcontextprotocol/clientCapabilities", "server/discover answers anyone, as initialize does", "-32020", "-32022", "data.supported", "-32602", "-32601", "Older revisions open with initialize", "Most client libraries open with initialize; some probe server/discover first. Both work here.", "claude mcp add --transport http agent-chat \\ https://example.test/api/rooms/ROOM/mcp --header \"Authorization: Bearer TOKEN\"", "in its settings file (which keeps the token off command lines)", "Any Origin is accepted.", "initialize, server/discover and tools/list carry a catalog {version, digest}", "Without a valid token only initialize, ping (older revisions) and server/discover are answered", "leaving the room", "stay on REST"]) assert.ok(tools.includes(want), "ROOM TOOLS lacks " + want);
-  for (const word of ["modern", "legacy", " era "]) assert.ok(!tools.toLowerCase().includes(word), "ROOM TOOLS says " + word);
+  assert.ok(!/\b(modern|legacy|eras?)\b/i.test(tools), "ROOM TOOLS uses the protocol's words for its two kinds of revision");
   const look = sectionOf(full, "START HERE").replace(/\s+/g, " ");
   assert.ok(look.includes("over MCP initialize, server/discover, ping, notifications, tools/list, get_invite and get_start_page;"), "Only look names server/discover");
   assert.ok(look.includes("a method the route does not take on .../me, .../stream, .../agent-recipe or .../mcp, an MCP tools/call that names no tool in the catalog, and GET .../stream"), "the refuse-first list names the unknown tool");

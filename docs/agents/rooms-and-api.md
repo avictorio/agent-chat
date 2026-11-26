@@ -390,8 +390,9 @@ docs.txt section that owns its routes, caps and formats.
      stream a file into storage (`/video/stream`, `/KIND/part`) are
      exempt and look the invite up again when the stream ends; the
      upload-link steps read their small bodies before looking up the
-     link; MCP runs `access` before every `tools/call`, a batch's
-     included. A request with no credential the Worker trusts is never
+     link; MCP runs `access` before every `tools/call` that joins, a
+     batch's included (the looks, `leave_room` and a name that is no
+     tool run none). A request with no credential the Worker trusts is never
      read whole without a cap either: create-room, the link steps and
      tokenless MCP take up to `SMALL_BODY_MAX` (413 beyond; tokenless MCP
      takes no batch), so do the POSTs of `.../leave` (after its token is
@@ -519,8 +520,9 @@ docs.txt section that owns its routes, caps and formats.
     the `initialize` way). A client of the `initialize` kind sends that
     header too, with the older revision it negotiated, so the header alone
     never moves it. Anything else is the `initialize` kind.
-  - **The per-request kind.** Before anything else, its checks
-    (`mcpCheck`), in the order the official server uses (the protocol
+  - **The per-request kind.** A notification (no `id`) gets the bare
+    202 at once, checked for nothing. Any other request passes its checks
+    (`mcpCheck`) first, in the order the official server uses (the protocol
     fixes none) except that the revision comes before the rest of
     `_meta`: an id that is a string or an integer and a method that is a
     string (400, -32600), a readable revision (400, -32602), the headers
@@ -539,8 +541,9 @@ docs.txt section that owns its routes, caps and formats.
     `tools/list` carry `ttlMs` (0, and `MCP_TOOLS_TTL_MS`) and
     `cacheScope` "private": the list is the same for everyone, but it is
     answered only for a token. Notifications get a bare 202, with CORS, in
-    both kinds. A batch belongs to the `initialize` kind; one holding a
-    per-request-kind request is refused (400, -32600).
+    both kinds. A batch belongs to the `initialize` kind; one in which
+    any element carries the claim in `_meta` (an `initialize` included)
+    is refused whole (400, -32600).
   - Identity is fixed by the credential: an invite acts under its own
     name, and the owner key may pass `as`. Unauthenticated callers get no
     catalog. Auth refusals are -32001 with `data.code` (`invite_missing`,
@@ -554,9 +557,9 @@ docs.txt section that owns its routes, caps and formats.
     (`mcpHasTool`: membership, so `constructor` is no tool) is answered
     after the token check and before `access()`, so it joins nothing
     (`access()` would open the invite for a misspelled name): -32602 over
-    the per-request kind (the protocol's own answer), and the same tool
-    error (isError) as always over the `initialize` kind, which its
-    clients hand to their model. There the token check is a fresh
+    the per-request kind (the protocol's own answer), and a tool error
+    (isError) over the `initialize` kind, which its clients hand to
+    their model. There the token check is a fresh
     `lookupInvite`, as a batch can run a while.
   - **Origin.** The endpoint accepts any `Origin` header. The protocol
     asks a server to validate it against DNS rebinding, which threatens a
@@ -612,11 +615,11 @@ docs.txt section that owns its routes, caps and formats.
     `get_start_page` refuses the key alone and answers for a token sent
     beside it (`startPageRoute`, the `get_start_page` branch of
     `mcpRoute`). `changes` is the link `{api_version, catalog_version,
-    url}` (`changesLink`), not the feed, in both. `serverInfo` (in
-    `server/discover`, under `_meta`) carries `title` and `websiteUrl`
-    beside `name` and `version` (`mcpServerInfo`). A call refused for having no
-    token carries `MCP_NO_TOKEN` (`missing()`), not the REST sentence,
-    whose second half the web app shows people.
+    url}` (`changesLink`), not the feed, in both. `serverInfo` (under
+    `_meta` in every result of the per-request kind) carries `title` and
+    `websiteUrl` beside `name` and `version` (`mcpServerInfo`). A call
+    refused for having no token carries `MCP_NO_TOKEN` (`missing()`), not
+    the REST sentence, whose second half the web app shows people.
   - Bytes never ride the protocol. `post_message` and `attach_media`
     carry small inline files (the same sniff and limits as REST);
     `begin_upload` creates a draft and returns upload URLs that need no

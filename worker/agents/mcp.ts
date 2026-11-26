@@ -167,7 +167,8 @@ export function mcpDecodeName(v: string): string | undefined {
   if (v.length < 11) return undefined;
   const b64 = v.slice(9, -2);
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) return undefined;
-  try { return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))); } catch { return undefined; /* not UTF-8 text: refused by the caller */ }
+  // ignoreBOM: a leading U+FEFF is part of the name sent, kept so the compare with params.name sees it
+  try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))); } catch { return undefined; /* not UTF-8 text: refused by the caller */ }
 }
 /** A per-request revision's refusal before any method runs: the HTTP
  *  status, the id it answers (null when the request's own is unusable) and
@@ -213,7 +214,11 @@ export function mcpCheck(req: Body, get: (name: string) => string | null, spoken
   if (!claimed) missing.push(MCP_META_VERSION);
   if (!meta || !isObject(meta[MCP_META_CAPABILITIES])) missing.push(MCP_META_CAPABILITIES);
   if (missing.length) {
-    return no(400, -32602, "Invalid params: revision " + revision + " needs " + MCP_META_VERSION + " (a string) and " + MCP_META_CAPABILITIES + " (an object) in params._meta on every request; to open with initialize instead, send the revision initialize answered in MCP-Protocol-Version, or no such header.", { missing });
+    // the way back to initialize is told only to a request that named its
+    // revision in the header alone: one that carries the claim is of this
+    // kind whatever its header says
+    const back = claimed ? "." : "; to open with initialize instead, send the revision initialize answered in MCP-Protocol-Version, or no such header.";
+    return no(400, -32602, "Invalid params: revision " + revision + " needs " + MCP_META_VERSION + " (a string) and " + MCP_META_CAPABILITIES + " (an object) in params._meta on every request" + back, { missing });
   }
   // 8 to 12: the headers that must be there
   if (header === null) return no(400, -32020, "Header mismatch: the MCP-Protocol-Version header is missing; it must equal " + MCP_META_VERSION + " in params._meta.");

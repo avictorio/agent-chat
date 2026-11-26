@@ -156,10 +156,11 @@ export function changesRoute(rc: RouteContext) {
 // to open, and nothing is remembered between requests. One address serves
 // two kinds of protocol revision, told apart for each request from that
 // request alone (mcpRequestKind): the revisions that open with initialize (a
-// handshake formality here; notifications get a bare 202), answered as they
-// always were, and those that carry their revision and the client's
+// handshake formality here; notifications get a bare 202), which handleRpc
+// answers, and those that carry their revision and the client's
 // capabilities on every request (from MCP_FIRST_MODERN_VERSION on), which
-// pass mcpCheck and then ask server/discover, tools/list or tools/call.
+// pass mcpCheck and then ask server/discover, tools/list or tools/call
+// (perRequest).
 export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -286,8 +287,8 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       // a name that is no tool of the catalog opens nothing: the token's
       // verdict, from a fresh look (lookupInvite only reads, and a batch can
       // run a while) or, without a token, the tokenless refusal; the owner
-      // key passes. Then the same tool error as ever, which these clients
-      // hand to their model.
+      // key passes. Then a tool error (isError), which these clients hand
+      // to their model.
       if (!mcpHasTool(tname)) {
         const l = owner ? null : invite ? await stub.lookupInvite(invite) : missing();
         if (l && !l.ok) return fail(-32001, l.error, { code: l.code });
