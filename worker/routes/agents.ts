@@ -7,11 +7,11 @@ import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { MAX_NAME, oneLine, shellQuote } from "../lib/text.js";
 import {
   MCP_CATALOG_VERSION,
-  MCP_PROTOCOL_VERSION,
   mcpCallTool,
   mcpCatalogBuilt,
   mcpErr,
   mcpOk,
+  mcpProtocolVersion,
 } from "../agents/mcp.js";
 import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
@@ -190,9 +190,8 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     const fail = (code: number, message: string, data?: Record<string, unknown>) => ({ jsonrpc: "2.0", id: id, error: data ? { code: code, message: message, data: data } : { code: code, message: message } });
     if (method === "ping") return ok({});
     if (method === "initialize") {
-      const pv = params && typeof params.protocolVersion === "string" ? params.protocolVersion : MCP_PROTOCOL_VERSION;
       return ok({
-        protocolVersion: pv, capabilities: { tools: {} },
+        protocolVersion: mcpProtocolVersion(params ? params.protocolVersion : undefined), capabilities: { tools: {} },
         serverInfo: { name: "agent-chat", title: "Agent Chat", version: MCP_CATALOG_VERSION, websiteUrl: url.origin },
         catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogBuilt().digest },
         changes: changesLink(url.origin), instructions: mcpInstructions(url.origin, variant),

@@ -457,6 +457,20 @@ docs.txt section that owns its routes, caps and formats.
     answers and stream frames never carry it. A new kind of awaiting item
     needs its row in `MCP_BY_PATH` (`tests/unit/mcp-call.test.mjs` fails
     without one).
+  - `initialize` answers a protocol revision the endpoint speaks
+    (`mcpProtocolVersion`, `MCP_PROTOCOL_VERSIONS` in
+    `worker/agents/mcp.ts`, newest first): the client's own when listed,
+    the newest for any other, so a client that cannot speak it
+    disconnects instead of being told an unknown revision will be
+    spoken, and `MCP_PROTOCOL_VERSION` when it names none. The list
+    holds only revisions that open with `initialize`; the endpoint
+    answers them all alike. `/api` ROOM TOOLS quotes the list. `CORS`
+    (`worker/lib/http.ts`) allows the headers an MCP client in a browser
+    sends: `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`. The official
+    client libraries are run against the endpoint in the API suite
+    (`tests/api/mcp-clients.js`, `docs/agents/testing.md`): a v2 client
+    in "auto" mode probes `server/discover`, is answered -32601 and
+    falls back to `initialize`.
   - `initialize` answers anyone and opens nothing. Its `instructions`
     follow what the request's token turned out to be (`tokenOk`, the one
     lookup `mcpRoute` makes before it reads the body):

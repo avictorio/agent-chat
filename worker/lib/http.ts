@@ -6,7 +6,10 @@ import { REFUSED_DRAIN_MAX } from "../limits.js";
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID, X-Owner-Key, X-Invite-Token, Authorization",
+  // the MCP headers: a client in a browser sends MCP-Protocol-Version on
+  // every request after initialize (from revision 2025-06-18), and
+  // Mcp-Method and Mcp-Name from 2026-07-28; its preflight fails without them
+  "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID, X-Owner-Key, X-Invite-Token, Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name",
   // response headers a browser client may read beyond the safelisted ones
   "Access-Control-Expose-Headers": "Retry-After",
 };

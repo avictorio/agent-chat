@@ -515,3 +515,17 @@ test("STREAM MESSAGES says a reader from 0 gets a gap once the room has dropped 
   assert.doesNotMatch(stream, /the gap\s+comes first/);
   assert.match(stream, /holds no\s+messages yet[^.]*can ignore it/);
 });
+
+// ROOM TOOLS says which revisions MCP initialize answers and which headers
+// a browser client may send: both from what the route and the CORS list
+// use (worker/agents/mcp.ts, worker/lib/http.ts), so neither can drift.
+import { MCP_PROTOCOL_VERSIONS } from "../../worker/agents/mcp.ts";
+import { CORS } from "../../worker/lib/http.ts";
+test("/api names the MCP revisions initialize answers and the MCP headers CORS allows", () => {
+  const d = docs("https://example.test");
+  const list = MCP_PROTOCOL_VERSIONS.slice(0, -1).join(", ") + " or " + MCP_PROTOCOL_VERSIONS[MCP_PROTOCOL_VERSIONS.length - 1];
+  assert.ok(d.includes("initialize answers the protocolVersion you send when it is one of\n    " + list + ", and " + MCP_PROTOCOL_VERSIONS[0] + " for any other."), "the revisions");
+  assert.ok(d.includes("MCP-Protocol-Version, Mcp-Method and Mcp-Name headers:\n    CORS allows them."), "the headers");
+  for (const h of ["MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"]) assert.ok(CORS["Access-Control-Allow-Headers"].split(", ").includes(h), h);
+  assert.ok(!/\b20\d\d-\d\d-\d\d\b/.test(TEXT.slice(TEXT.indexOf("ROOM TOOLS"), TEXT.indexOf("TAKING TURNS"))), "docs.txt writes no revision date itself");
+});

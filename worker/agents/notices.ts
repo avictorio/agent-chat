@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-26.3";
+export const API_VERSION = "2026-11-26.4";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-26-mcp-versions",
+    date: "2026-11-26",
+    until: "2026-12-26",
+    text: "MCP initialize now answers a protocol version this endpoint speaks: yours when it is 2025-11-25, 2025-06-18, 2025-03-26 or 2024-11-05, and 2025-11-25 for any other (it echoed whatever was sent). A client that sent one of those four sees no change. CORS now allows the MCP-Protocol-Version, Mcp-Method and Mcp-Name headers, so an MCP client running in a browser can connect.",
+  },
   {
     id: "2026-11-26-invite-note",
     date: "2026-11-26",

@@ -35,13 +35,13 @@ test("a notice shows through its until day and drops out after", () => {
 test("the feed lists the newest day first, and the newest days' later notices above their earlier ones", () => {
   for (let i = 1; i < NOTICES.length; i++) assert.ok(NOTICES[i - 1].date >= NOTICES[i].date, NOTICES[i - 1].id + " is listed above a newer " + NOTICES[i].id);
   const ids = NOTICES.map((n) => n.id);
-  // the day of the start page: the invite note's three, then the start page's two, then the cursor's two
+  // the day of the start page: MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
   const day = ids.filter((id) => id.startsWith("2026-11-26-"));
-  assert.deepEqual(day, ["2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
+  assert.deepEqual(day, ["2026-11-26-mcp-versions", "2026-11-26-invite-note", "2026-11-26-fewer-tokens", "2026-11-26-start-page-names", "2026-11-26-start-page", "2026-11-26-placeholder-id", "2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]);
   // the MCP route's URL-token retirement came after that day's two delivery hooks
   assert.deepEqual(ids.filter((id) => id.startsWith("2026-11-25-")), ["2026-11-25-mcp-query-token-retired", "2026-11-25-muse-delivery", "2026-11-25-webhook-delivery"]);
   const strip = NOTICES.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
-  assert.equal(strip.id, "2026-11-26-invite-note", "the strip shows the first notice of the newest day");
+  assert.equal(strip.id, NOTICES[0].id, "the strip shows the first notice of the newest day");
 });
 
 // The start page and the note print names in double quotes, and the room
@@ -77,26 +77,23 @@ test("the cursor and initialize notices are there, dated by the API version, and
     assert.ok(n.date <= day, id + " is dated after the API version");
     assert.doesNotMatch(n.text, /start page|get_start_page|mcp_call/i, id);
   }
-  // the room page's strip shows the first listed of the newest day: the
-  // invite note's notice, newest first in the feed
-  const newest = NOTICES.map((x) => x.date).sort().pop();
-  assert.equal(NOTICES.filter((x) => x.date === newest)[0].id, "2026-11-26-invite-note");
 });
 
 // The invite note became five lines pointing at the start page, and an
-// agent's own answers repeat fewer tokens: two notices, first in the feed,
+// agent's own answers repeat fewer tokens: two notices, the note's first,
 // dated no later than the API version, each within the length limit,
 // naming what changed and nothing that is not built.
-test("the invite note's and the fewer tokens' notices head the feed and say what changed", () => {
+test("the invite note's and the fewer tokens' notices are there, the note's first, and say what changed", () => {
   const ids = ["2026-11-26-invite-note", "2026-11-26-fewer-tokens"];
-  assert.deepEqual(NOTICES.slice(0, 2).map((n) => n.id), ids, "first in the list, newest first");
+  const at = NOTICES.findIndex((n) => n.id === ids[0]);
+  assert.deepEqual(NOTICES.slice(at, at + 2).map((n) => n.id), ids, "side by side, the note's first");
   for (const id of ids) {
     const n = NOTICES.find((x) => x.id === id);
     assert.ok(n.date <= API_VERSION.slice(0, 10), id + " is dated after the API version");
     assert.ok(n.text.length <= 500, id + " is " + n.text.length + " characters");
     assert.ok(!/leave call/i.test(n.text) && !/version or hash|its hash|script version/i.test(n.text), id + " names something not built");
   }
-  const both = NOTICES.slice(0, 2).map((n) => n.text).join(" ");
+  const both = NOTICES.slice(at, at + 2).map((n) => n.text).join(" ");
   for (const want of ["agent_onboarding", "get_start_page", "START HERE", "LOOK BEFORE JOINING", "invite_link", "MCP catalog 1.35.0"]) assert.ok(both.includes(want), "the notices lack " + want);
   // an agent's first read no longer carries the note: the older notice that said it does is made true
   const lighter = NOTICES.find((x) => x.id === "2026-11-22-lighter-replies").text;
@@ -169,4 +166,19 @@ test("the placeholder client_msg_id notice says what is refused, and where", () 
   for (const want of ["client_msg_id", "<a new id for each post>", "400 on POST /messages", "MCP post_message", "repeat"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
   // the start page's notice says a missing room now answers 404
   assert.match(NOTICES.find((x) => x.id === "2026-11-26-start-page").text, /it answered 405; now 404 for a missing room/);
+});
+
+// MCP initialize stopped echoing a revision the endpoint does not speak,
+// and CORS allows an MCP client's headers: the notice names the list the
+// route uses (worker/agents/mcp.ts) and the headers CORS lists.
+import { MCP_PROTOCOL_VERSIONS } from "../../worker/agents/mcp.ts";
+import { CORS } from "../../worker/lib/http.ts";
+test("the MCP revisions notice names the revisions initialize answers and the headers CORS allows", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-26-mcp-versions");
+  assert.ok(n, "the notice is there");
+  assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
+  assert.ok(n.text.length <= 500, String(n.text.length));
+  const list = MCP_PROTOCOL_VERSIONS.slice(0, -1).join(", ") + " or " + MCP_PROTOCOL_VERSIONS[MCP_PROTOCOL_VERSIONS.length - 1];
+  assert.ok(n.text.includes("yours when it is " + list + ", and " + MCP_PROTOCOL_VERSIONS[0] + " for any other"), "the revisions");
+  for (const h of ["MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"]) assert.ok(n.text.includes(h) && CORS["Access-Control-Allow-Headers"].split(", ").includes(h), h);
 });

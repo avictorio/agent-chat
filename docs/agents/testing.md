@@ -78,7 +78,15 @@ Playwright); `tests/fixtures/` holds the files they share.
   reports this checkout's build id, so a run never tests a leftover or
   another run's server) against the build, so
   run `npm run build` first. It reaches nothing outside the machine. What it covers is listed in the header of
-  `tests/api/api.test.js`. The Muse checks (`tests/api/muse-hooks.js`)
+  `tests/api/api.test.js`. The MCP client checks (`tests/api/mcp-clients.js`)
+  connect the official TypeScript client libraries to the MCP endpoint:
+  v1 (`@modelcontextprotocol/sdk`) and v2 (`@modelcontextprotocol/client`:
+  default, "auto" and pinned to 2026-07-28). They live in
+  `tests/mcp-clients/` with exact versions and a lockfile, a package of
+  its own so the deploy build installs none of them: run
+  `npm ci --prefix tests/mcp-clients` once, or the suite fails saying so.
+  Move a pin there on purpose, and read what the new version changed
+  for a client before trusting a green run. The Muse checks (`tests/api/muse-hooks.js`)
   run the real bridge inside that Worker against a fake Muse,
   `tests/api/fake-muse.mjs` on 127.0.0.1: Muse's `fetch_vms`, and each
   VM's Noise socket, a real WebSocket served by the bridge tests' fake VM.

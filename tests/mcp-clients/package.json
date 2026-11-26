@@ -1,0 +1,9 @@
+{
+  "name": "agent-chat-mcp-clients",
+  "private": true,
+  "description": "The official MCP client libraries the API suite connects to a local Worker with (tests/api/mcp-clients.js). Kept out of the root package so the deploy build does not install them.",
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}

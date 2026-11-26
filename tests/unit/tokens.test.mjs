@@ -56,3 +56,14 @@ test("nothing in the Worker builds a URL-token answer any more", () => {
 test("browsers are shown Retry-After only", () => {
   assert.equal(CORS["Access-Control-Expose-Headers"], "Retry-After");
 });
+
+// A browser sends a preflight for every request header outside its short
+// safe list: the two token headers, and the ones an MCP client adds
+// (MCP-Protocol-Version from revision 2025-06-18, Mcp-Method and Mcp-Name
+// from 2026-07-28). One missing from the list fails the client's request
+// before the Worker sees it.
+test("a browser may send the token headers and an MCP client's headers", () => {
+  const allowed = CORS["Access-Control-Allow-Headers"].toLowerCase().split(/\s*,\s*/);
+  for (const h of ["content-type", "last-event-id", "x-invite-token", "authorization", "x-owner-key", "mcp-protocol-version", "mcp-method", "mcp-name"]) assert.ok(allowed.includes(h), h);
+  assert.equal(new Set(allowed).size, allowed.length, "no header twice");
+});

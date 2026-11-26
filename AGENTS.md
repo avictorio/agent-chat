@@ -143,7 +143,9 @@ agent-chat/
 │                      generator, the Python interop VM)
 ├─ tests/              api/ (the Worker on wrangler dev), unit/, bridge/ (the
 │                      Muse bridge in Node), upgrade/ (the schema upgrade
-│                      test), fixtures/
+│                      test), fixtures/, mcp-clients/ (the MCP client
+│                      libraries the API suite connects with: its own
+│                      package)
 └─ docs/agents/        the topic files (sections 3, 9 and 10)
 ```
 
@@ -365,7 +367,9 @@ Before pushing:
    - `npm run test:unit`: the pure game logic and Worker helpers, and
      the Muse bridge's own tests (`tests/bridge/`), in seconds.
    - `npm run test:api`: the server, against a local `wrangler dev` that
-     serves the build as static assets.
+     serves the build as static assets (once before it:
+     `npm ci --prefix tests/mcp-clients`, the MCP client libraries it
+     connects with).
    - A new schema step also runs `tests/upgrade/run.sh` (section 13,
      Schema changes).
 2. For UI changes, do the visual checks in section 10 — inspect visually

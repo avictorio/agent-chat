@@ -83,6 +83,7 @@ import {
   WAIT_MAX_S,
 } from "../limits.js";
 import { MAX_NAME } from "../lib/text.js";
+import { MCP_PROTOCOL_VERSIONS } from "./mcp.js";
 import { GAME_ENGINES } from "../games/engine.js";
 import { FL_TROOPS } from "../games/frontlines.js";
 import { TT_MAX } from "../games/twotruths.js";
@@ -162,6 +163,9 @@ export function docsValues(o: string) {
     MUSE_PER_WAKE: String(MUSE_PER_WAKE),
     // spanS, as the start page says it (agents/start.ts)
     MUSE_LINK_CODE_TTL: spanS(MUSE_LINK_CODE_TTL_S),
+    // the revisions MCP initialize answers, and the one an unknown version gets
+    MCP_VERSIONS: MCP_PROTOCOL_VERSIONS.slice(0, -1).join(", ") + " or " + MCP_PROTOCOL_VERSIONS[MCP_PROTOCOL_VERSIONS.length - 1],
+    MCP_LATEST: MCP_PROTOCOL_VERSIONS[0],
     WEBHOOK_FETCH: WEBHOOK_FETCH_MS / 1000 + " seconds",
     WEBHOOK_MIN_GAP: WEBHOOK_MIN_GAP_MS / 1000 + " seconds",
     WEBHOOK_REGISTER_MAX: String(WEBHOOK_REGISTER_MAX),

@@ -5,10 +5,12 @@
 // privacy, room destruction, the upload engine (direct-upload signing
 // included), MCP, stream frames, the game engines and Muse delivery hooks
 // (tests/api/muse-hooks.js: the real bridge, against a fake Muse,
-// tests/api/fake-muse.mjs). Exits non-zero on any failure.
+// tests/api/fake-muse.mjs), and the official MCP client libraries against
+// the MCP endpoint (tests/api/mcp-clients.js). Exits non-zero on any failure.
 //
 //   npm run build     (once, and after web/ changes: the page shell and
 //                      its assets come from web/app/dist)
+//   npm ci --prefix tests/mcp-clients   (once: the MCP client libraries)
 //   npm run test:api
 //
 // Hermetic (tests/api/server.js): each run gets its own port (a free one
@@ -32,6 +34,7 @@ const { golden } = require('./golden.js');
 const { inviteApi } = require('./invite-api.js');
 const { museHooks } = require('./muse-hooks.js');
 const { webhooks } = require('./webhooks.js');
+const { mcpClients } = require('./mcp-clients.js');
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -158,6 +161,8 @@ async function takenPortRefused() {
     await museHooks(museCtx);
     // Webhook hooks (tests/api/webhooks.js, against a local receiver).
     await webhooks(museCtx);
+    // The official MCP client libraries (tests/api/mcp-clients.js).
+    await mcpClients({ req, check, BASE, SUF });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);
@@ -456,6 +461,10 @@ async function takenPortRefused() {
       const pf = await fetch(BASE + R + '/messages', { method: 'OPTIONS', headers: { Origin: 'https://example.test', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' } });
       check('CORS preflight allows Authorization', pf.status === 204 && /Authorization/i.test(pf.headers.get('access-control-allow-headers') || ''), pf.headers.get('access-control-allow-headers'));
       check('CORS exposes Retry-After only', pf.headers.get('access-control-expose-headers') === 'Retry-After', pf.headers.get('access-control-expose-headers'));
+      // an MCP client in a browser: the headers it sends beside the token's
+      const mp = await fetch(BASE + R + '/mcp', { method: 'OPTIONS', headers: { Origin: 'https://example.test', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization, content-type, mcp-protocol-version, mcp-method, mcp-name' } });
+      const allowed = (mp.headers.get('access-control-allow-headers') || '').toLowerCase().split(/\s*,\s*/);
+      check('CORS preflight allows an MCP client\'s headers', mp.status === 204 && ['authorization', 'content-type', 'mcp-protocol-version', 'mcp-method', 'mcp-name'].every((h) => allowed.includes(h)), mp.status + ' ' + allowed.join(','));
     }
 
     // Draft media privacy.
@@ -2671,6 +2680,10 @@ async function takenPortRefused() {
     check('mcp unauthenticated tools/call -> -32001', !!(r.json && r.json.error && r.json.error.code === -32001), JSON.stringify(r.json).slice(0, 120));
     r = await mcp(R2, 'initialize', { protocolVersion: '2025-03-26', capabilities: {} }, { token: TP });
     check('mcp initialize handshake', !!(r.json && r.json.result && r.json.result.serverInfo && r.json.result.serverInfo.name === 'agent-chat' && r.json.result.protocolVersion === '2025-03-26'), JSON.stringify(r.json).slice(0, 160));
+    for (const [sent, want] of [['2025-11-25', '2025-11-25'], ['2024-11-05', '2024-11-05'], ['2026-07-28', '2025-11-25'], ['not-a-version', '2025-11-25'], [undefined, '2025-03-26']]) {
+      const v = await mcp(R2, 'initialize', sent === undefined ? {} : { protocolVersion: sent }, { token: TP });
+      check('mcp initialize answers ' + want + ' to ' + (sent === undefined ? 'no protocolVersion' : sent), !!(v.json && v.json.result) && v.json.result.protocolVersion === want, JSON.stringify(v.json).slice(0, 120));
+    }
     check('mcp instructions point agents at games and how_to_play', /awaiting_you/.test((r.json.result || {}).instructions || '') && /how_to_play/.test((r.json.result || {}).instructions || ''), String((r.json.result || {}).instructions || '').slice(0, 120));
     r = await req('POST', R2 + '/mcp', { token: TP, json: { jsonrpc: '2.0', method: 'notifications/initialized' } });
     check('mcp notification -> bare 202', r.status === 202 && r.text === '', r.status + ' ' + r.text.slice(0, 40));
