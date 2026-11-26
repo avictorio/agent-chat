@@ -1,7 +1,7 @@
 // The agent surfaces: the wake recipe and watcher, room tools, MCP.
 
 import { FETCH_DAILY_CAP, FETCH_URL_MAX, MAX_TEXT, MIB, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
-import { bodyText, deny, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
+import { CORS, bodyText, deny, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { MAX_NAME, shellQuote } from "../lib/text.js";
@@ -18,6 +18,7 @@ import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { invitePreviewBody } from "./members.js";
 import { MCP_NO_TOKEN, mcpInstructions, type McpVariant } from "../agents/onboarding.js";
 import { recipe } from "../agents/docs.js";
+import { OWNER_NO_START_PAGE, START_LIMITS, START_NO_TOKEN, startPage } from "../agents/start.js";
 import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
@@ -50,6 +51,23 @@ export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   // as a single-quoted literal, so none of it can be expanded or run.
   const text = m[2] ? fill(AGENT_WATCH, Object.fromEntries(Object.entries(subs).map(([k, v]) => [k, shellQuote(v)]))) : fill(recipe(), subs);
   return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+// GET or HEAD /api/rooms/ROOM with an invite token: the start page, as
+// text (agents/start.ts). A look: Room.startView runs no access(), so it
+// opens nothing and marks nothing seen, and it shows the token's holder
+// nothing its own reads do not. The owner key alone is no member (400);
+// beside a header token the page is that token's, as GET /invite's is,
+// opening with a line that calls carrying the key act as the owner. A token
+// only in the URL is not read (lib/tokens.ts): answered as none. The room
+// exists (roomRoute answered 404 before the token, as on every room route).
+export async function startPageRoute(rc: RouteContext, stub: DurableObjectStub, room: string): Promise<Response> {
+  const { request, url, owner, invite } = rc;
+  if (!invite) return owner ? json({ error: OWNER_NO_START_PAGE }, 400) : json({ error: START_NO_TOKEN, code: "invite_missing" }, 401);
+  const v = await stub.startView(invite, room);
+  if (!v.ok) return deny(v);
+  const headers = Object.assign({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }, CORS);
+  return new Response(request.method === "HEAD" ? null : startPage(v, url.origin, room, START_LIMITS, owner), { headers });
 }
 
 export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
@@ -118,8 +136,9 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // Connecting is not joining: ping, initialize and notifications
   // open no invite. A token that was sent is looked up, without opening
   // it, once per HTTP request before the body is read (it decides how big a body and
-  // whether a batch is taken), and tools/list, an unknown method and
-  // get_invite are refused when it fails; any other
+  // whether a batch is taken), and tools/list, an unknown method,
+  // get_invite and get_start_page (the two looks: previewInvite,
+  // startView) are refused when it fails; any other
   // tools/call runs access(), which opens it - before every call, a
   // batch's included. A batch can take a while (a call may fetch a page or
   // wait on storage), and one checked only at its start went on reading
@@ -184,6 +203,15 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
         const pv = invite ? await stub.previewInvite(invite) : missing();
         if (!pv.ok) return fail(-32001, pv.error, { code: pv.code });
         return ok(mcpOk(invitePreviewBody(url.origin, room, invite, pv)));
+      }
+      // the start page's text, once (no structuredContent copy); the owner
+      // key alone has none, and with a token it is that token's page, with
+      // the line that says calls carrying the key act as the owner
+      if (tname === "get_start_page") {
+        if (!invite) { if (owner) return ok(mcpErr(OWNER_NO_START_PAGE)); const none = missing(); return fail(-32001, none.error, { code: none.code }); }
+        const v = await stub.startView(invite, room);
+        if (!v.ok) return fail(-32001, v.error, { code: v.code });
+        return ok({ content: [{ type: "text", text: startPage(v, url.origin, room, START_LIMITS, owner) }] });
       }
       const acc = owner || invite ? await getAcc() : missing();
       if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });

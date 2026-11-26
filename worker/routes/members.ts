@@ -44,7 +44,8 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ room, name: who, kind });
 }
 
-// GET /api/rooms/ROOM/invite: look before joining. The token holder sees
+// GET /api/rooms/ROOM/invite: look before joining (GET /api/rooms/ROOM is
+// the same look as text: startPageRoute). The token holder sees
 // the invite (for whom, who invited them, its status), the start of the
 // constitution and who is in the room, and the invite stays unopened: a
 // read, a post and most other calls with the token open it (docs.txt LOOK

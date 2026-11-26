@@ -35,12 +35,14 @@ import { StateMethods } from "./state.js";
 import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
 import { MuseMethods } from "./muse.js";
+import type { MuseHookView } from "./muse.js";
 import { TestHookMethods, withR2Delay } from "./test-hooks.js";
-import type { GameStatus, QuestionStatus } from "@chat/contract";
+import type { AwaitingItem, GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
 import type { UpFinish } from "./uploads.js";
 import { LINK_REFUSED, mediaLinkOk, type MediaLink } from "../lib/media.js";
 import { warn } from "../lib/log.js";
+import { nameFold } from "../lib/text.js";
 
 /* ---------- storage rows ----------
    One type per table: the columns ensureSchema creates. A column is
@@ -90,6 +92,16 @@ export type InvitePreview = {
   /** the members who have opened their invites */
   members: { name: string, kind: "human" | "agent" }[],
   opened: boolean,
+};
+/** What the start page is built from (startView): the preview, and for an
+ *  opened invite the member's own posted flag, hook, room_state.awaiting_you
+ *  (with its _more count) and what others posted since its latest post. */
+export type StartView = InvitePreview & {
+  posted: boolean,
+  hook: MuseHookView | null,
+  awaiting: AwaitingItem[],
+  awaiting_more: number,
+  since: { after: number, count: number, for_you: number } | null,
 };
 export type CfgRow = { k: string, v: string };
 /** tf: one tool fetch. */
@@ -759,10 +771,33 @@ export class Room extends DurableObject {
   // Look at an invite without opening it (GET /invite, MCP get_invite):
   // the same lookup and refusals as access(), but nothing is marked used or
   // seen - previewing is not joining, and it never counts as presence.
+  // startView shares its body (previewOf).
   previewInvite(token: string | null | undefined): Refusal | InvitePreview {
     const l = this.lookupInvite(token);
     if (!l.ok) return l;
-    const r = l.row;
+    return this.previewOf(l.row);
+  }
+
+  // The start page's view (GET /api/rooms/ROOM and MCP get_start_page,
+  // agents/start.ts): the preview and, once the invite is open, what the
+  // member's own reads already show it - its posted flag, its hook, its
+  // room_state.awaiting_you and what others posted since its latest post.
+  // Reads only: no access(), so it opens nothing and marks nothing seen,
+  // and an unused invite sees exactly what the preview shows.
+  startView(token: string | null | undefined, room: string): Refusal | StartView {
+    const l = this.lookupInvite(token);
+    if (!l.ok) return l;
+    const pv = this.previewOf(l.row);
+    if (!l.row.used) return { ...pv, posted: false, hook: null, awaiting: [], awaiting_more: 0, since: null };
+    const name = l.row.name;
+    const h = this.museRow(nameFold(name));
+    const st = this.roomState(name, room);
+    const posted = !!l.row.posted;
+    return { ...pv, posted, hook: h ? this.museView(h) : null, awaiting: st.awaiting_you || [], awaiting_more: st.awaiting_you_more || 0, since: posted ? this.sinceLastPost(name) : null };
+  }
+
+  /** The preview of an invite row the lookup found. */
+  private previewOf(r: InviteCols): InvitePreview {
     const con = this.sql.exec<{ text: string }>("SELECT text FROM con ORDER BY v DESC LIMIT 1").toArray()[0];
     const members = this.sql.exec<Pick<InvRow, "name" | "kind">>("SELECT name, kind FROM inv WHERE revoked IS NULL AND used IS NOT NULL ORDER BY created").toArray()
       .map((m) => ({ name: m.name, kind: (m.kind === "human" ? "human" : "agent") as "human" | "agent" }));

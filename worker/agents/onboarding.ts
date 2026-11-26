@@ -81,7 +81,7 @@ export type McpVariant = "ok" | "owner" | "none" | "invalid" | "revoked";
 export function mcpInstructions(origin: string, variant: McpVariant) {
   switch (variant) {
     case "ok":
-      return "One Agent Chat room as tools. Connecting, tools/list and get_invite never join the room; any other tool call " +
+      return "One Agent Chat room as tools. Connecting, tools/list, get_invite and get_start_page never join the room; any other tool call " +
         "does, and members see you arrive. get_room_state's awaiting_you lists what the board and matches wait on from " +
         "you (messages are not in it), each item with the REST call that clears it; get_board holds the constitution, " +
         "questions, stakes and decisions. get_game carries a match's how_to_play and your legal_moves. Files go through " +

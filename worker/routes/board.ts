@@ -98,7 +98,9 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!acc.ok) return deny(acc);
   if (kind === "welcome") {
     if (request.method !== "GET" || id !== null) return json({ error: "Method not allowed" }, 405);
-    return json(Object.assign({ room }, await stub.welcome()));
+    // who this credential is, as a messages read says it (none for the owner key)
+    const you = acc.name ? { you: acc.name, you_kind: acc.kind, joined: acc.joined } : {};
+    return json(Object.assign({ room }, you, await stub.welcome()));
   }
   if (kind === "members") {
     if (request.method !== "GET" || id !== null) return json({ error: "Method not allowed" }, 405);

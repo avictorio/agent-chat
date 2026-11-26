@@ -50,8 +50,8 @@ test("the dir-type notice names the games where a list used to work", () => {
 
 // The day the read cursors, the placeholder rule and MCP initialize changed:
 // two notices (each within the length limit), dated no later than the API
-// version, naming nothing that is not built.
-test("the cursor and initialize notices are there, dated by the API version, and name nothing unbuilt", () => {
+// version, naming nothing of the start page, which came after them.
+test("the cursor and initialize notices are there, dated by the API version, and name nothing of the start page", () => {
   const day = API_VERSION.slice(0, 10);
   for (const id of ["2026-11-26-cursor-placeholder", "2026-11-26-mcp-and-url-token"]) {
     const n = NOTICES.find((x) => x.id === id);
@@ -92,4 +92,43 @@ test("both URL-token notices stay until 2027-01-31", () => {
     assert.ok(n, id + " is there");
     assert.equal(n.until, "2027-01-31", id);
   }
+});
+
+// The start page's notice: dated no later than the API version, within the
+// length limit, naming what an agent can now call (the page, get_start_page,
+// mcp_call, the welcome packet's you_kind, the catalog it came with) and
+// nothing that is not built yet. It is listed after the same day's two
+// earlier notices, so the room page's strip still shows the cursor one.
+test("the start page's notice says what came, and names nothing unbuilt", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-26-start-page");
+  assert.ok(n, "the notice is there");
+  assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
+  assert.ok(n.text.length <= 500, String(n.text.length));
+  for (const want of ["GET /api/rooms/ROOM", "get_start_page", "mcp_call", "you_kind", "MCP catalog 1.34.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  assert.doesNotMatch(n.text, /START HERE|for_agents\.start|next\.start|llms\.txt/);
+  const day = NOTICES.filter((x) => x.date === n.date).map((x) => x.id);
+  assert.ok(day.indexOf(n.id) > day.indexOf("2026-11-26-cursor-placeholder"), "listed after the day's first notice");
+});
+
+// get_start_page is a second tool that looks without joining, so "your
+// first other tool call" (after get_invite) no longer says which call joins.
+test("the look-before-joining notice no longer says the first other tool call joins", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-21-preview");
+  assert.doesNotMatch(n.text, /first other tool call/);
+  assert.match(n.text, /LOOK BEFORE JOINING/);
+});
+
+// An agent's client_msg_id left as the start page's template is refused
+// (kept for every post, it would make each later one a silent repeat): a
+// client that sent one can notice, so a notice says so, after the day's
+// first notice.
+test("the placeholder client_msg_id notice says what is refused, and where", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-26-placeholder-id");
+  assert.ok(n, "the notice is there");
+  assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
+  for (const want of ["client_msg_id", "<a new id for each post>", "400 on POST /messages", "MCP post_message", "repeat"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  const day = NOTICES.filter((x) => x.date === n.date).map((x) => x.id);
+  assert.ok(day.indexOf(n.id) > day.indexOf("2026-11-26-cursor-placeholder"), "listed after the day's first notice");
+  // the start page's notice says a missing room now answers 404
+  assert.match(NOTICES.find((x) => x.id === "2026-11-26-start-page").text, /it answered 405; now 404 for a missing room/);
 });

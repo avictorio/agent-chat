@@ -7,6 +7,8 @@ import { mcpRoute } from "../../worker/routes/agents.ts";
 import { MCP_NO_TOKEN, mcpInstructions } from "../../worker/agents/onboarding.ts";
 import { MCP_CATALOG_VERSION } from "../../worker/agents/mcp.ts";
 import { API_VERSION } from "../../worker/agents/notices.ts";
+import { OWNER_NO_START_PAGE, startPage } from "../../worker/agents/start.ts";
+import { base, joined } from "./start-views.mjs";
 
 // Node wants duplex: "half" on a Request built with a stream body, which
 // settleBody (lib/http.ts) makes; the Workers runtime does not.
@@ -18,16 +20,18 @@ globalThis.Request = class extends NodeRequest {
 /** a route context for POST /api/rooms/unit/mcp with that body and token
  *  (the header token, as index.ts reads it), and that query string; lookup
  *  is what the stand-in's lookupInvite answers (invite_invalid unless given),
- *  owner whether the request carries the owner key */
-function call(body, invite, search, lookup, owner) {
+ *  owner whether the request carries the owner key, view what its
+ *  startView answers (args records each call's arguments) */
+function call(body, invite, search, lookup, owner, view) {
   const asked = [];
+  const args = [];
   const found = lookup || { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
-  const stub = new Proxy({}, { get: (_, name) => async (...args) => { asked.push(String(name)); if (name === "lookupInvite") return found; throw new Error("unexpected call " + String(name) + " " + JSON.stringify(args)); } });
+  const stub = new Proxy({}, { get: (_, name) => async (...a) => { asked.push(String(name)); args.push(a); if (name === "lookupInvite") return found; if (name === "startView" && view) return view; throw new Error("unexpected call " + String(name) + " " + JSON.stringify(a)); } });
   const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
   const url = new URL("http://localhost/api/rooms/unit/mcp" + (search || ""));
   const request = new Request(url, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
   const m = /^\/api\/rooms\/([^/]+)\/mcp$/.exec(url.pathname);
-  return { asked, res: mcpRoute({ request, env, url, path: url.pathname, owner: !!owner, invite }, m) };
+  return { asked, args, res: mcpRoute({ request, env, url, path: url.pathname, owner: !!owner, invite }, m) };
 }
 const ORIGIN = "http://localhost";
 const INIT = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
@@ -152,4 +156,55 @@ test("initialize's result: its fields, serverInfo, the changes link and its size
     assert.deepEqual(result.changes, { api_version: API_VERSION, catalog_version: MCP_CATALOG_VERSION, url: ORIGIN + "/api/changes" }, what);
     assert.ok(JSON.stringify(result).length <= 2000, what + ": " + JSON.stringify(result).length + " characters");
   }
+});
+
+// get_start_page is a look, dispatched before access() beside get_invite:
+// the page's text once (no structuredContent copy), the token's lookup the
+// route already makes, then startView, never access().
+const START = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_start_page", arguments: {} } };
+test("get_start_page returns the page's text once, from startView, and never opens the invite", async () => {
+  for (const view of [base, joined]) {
+    const { asked, args, res } = call(START, "tok-good", "", GOOD, false, view);
+    const r = await res;
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.deepEqual(j, { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: startPage(view, ORIGIN, "unit") }] } });
+    assert.deepEqual(asked, ["lookupInvite", "startView"], "a look: no access()");
+    assert.deepEqual(args[1], ["tok-good", "unit"]);
+  }
+});
+
+test("get_start_page without a header token is refused invite_missing, asking the room nothing", async () => {
+  for (const search of ["", "?invite=tok-in-the-url"]) {
+    const { asked, res } = call(START, "", search);
+    const j = await (await res).json();
+    assert.equal(j.error.code, -32001, search);
+    assert.equal(j.error.data.code, "invite_missing", search);
+    assert.equal(j.error.message, MCP_NO_TOKEN, search);
+    assert.deepEqual(asked, [], search);
+  }
+});
+
+test("get_start_page: the owner key alone gets a tool error; with a token, that token's page with the owner-key line", async () => {
+  let { asked, res } = call(START, "", "", undefined, true);
+  let j = await (await res).json();
+  assert.equal(j.result.isError, true);
+  assert.equal(j.result.content[0].text, OWNER_NO_START_PAGE);
+  assert.deepEqual(asked, []);
+  let args;
+  ({ asked, args, res } = call(START, "tok-good", "", undefined, true, joined));
+  j = await (await res).json();
+  assert.equal(j.result.content[0].text, startPage(joined, ORIGIN, "unit", undefined, true));
+  assert.match(j.result.content[0].text, /\nThis request also carried the owner key\. Calls that carry it act as the owner, not as Scout: they join nothing, and a post needs "from" \(over MCP, "as"\)\./);
+  assert.deepEqual(asked, ["startView"], "the owner key skips the lookup; the view is the token's");
+  assert.deepEqual(args[0], ["tok-good", "unit"]);
+});
+
+test("get_start_page refuses a revoked token with -32001 invite_revoked", async () => {
+  const { asked, res } = call(START, "tok-gone", "", GOOD, false, REVOKED);
+  const j = await (await res).json();
+  assert.equal(j.error.code, -32001);
+  assert.equal(j.error.data.code, "invite_revoked");
+  assert.equal(j.error.message, REVOKED.error);
+  assert.ok(!asked.includes("access"));
 });

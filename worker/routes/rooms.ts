@@ -7,6 +7,7 @@ import { CLONE_DELETE_ON_ROOM_DELETE, CREATE_QUOTA_ROOM, CREATE_ROOMS_PER_DAY, C
 import { addressKey, EMAIL_MAX, hashKey, networkKey, plainAddress } from "../lib/address.js";
 import type { RouteContext } from "../index.js";
 import { retryCloneDeletes } from "./voices.js";
+import { startPageRoute } from "./agents.js";
 import { warn } from "../lib/log.js";
 
 // Sends the genesis invite for a freshly created room. Returns true only when
@@ -169,7 +170,11 @@ export async function roomRoute(rc: RouteContext, rm: RegExpMatchArray) {
   }
   const rstub = env.ROOM.get(env.ROOM.idFromName(name));
   const exists = await roomExists(rstub);
-  if (/^\/api\/rooms\/[^/]+\/?$/.test(path)) {
+  const exact = /^\/api\/rooms\/[^/]+\/?$/.test(path);
+  // The room's own address. POST and DELETE, with the owner key, create and
+  // delete the room; GET and HEAD are the start page (routes/agents.ts
+  // startPageRoute), answered below once the room is known to exist.
+  if (exact && request.method !== "GET" && request.method !== "HEAD") {
     if (request.method !== "POST" && request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
     if (!owner) return json({ error: "Creating or deleting a room needs the owner key" }, 403);
     if (request.method === "POST") {
@@ -195,4 +200,5 @@ export async function roomRoute(rc: RouteContext, rm: RegExpMatchArray) {
     if (page) return new Response("No room with that name.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
     return json({ error: "No room with that name yet. Create it from the home page." }, 404);
   }
+  if (exact) return startPageRoute(rc, rstub, name);
 }

@@ -162,8 +162,10 @@ import { MCP_NO_TOKEN, mcpInstructions } from "../../worker/agents/onboarding.ts
 import { mcpCatalog } from "../../worker/agents/mcp.ts";
 import { agentNoteText } from "../../worker/routes/pages.ts";
 import { CURSOR_REFUSAL, STREAM_CURSOR_REFUSAL } from "../../worker/lib/http.ts";
-import { PLACEHOLDER_TEXT } from "../../worker/lib/text.ts";
+import { PLACEHOLDER_CID, PLACEHOLDER_TEXT } from "../../worker/lib/text.ts";
+import { OWNER_NO_START_PAGE, START_NO_TOKEN, startPage } from "../../worker/agents/start.ts";
 import { makeRoom } from "./room-harness.mjs";
+import { ROOM as START_ROOM, base as startBase, joined as startJoined } from "./start-views.mjs";
 
 const VARIANTS = ["ok", "owner", "none", "invalid", "revoked"];
 
@@ -185,11 +187,15 @@ function servedTexts(o) {
     "MCP tokenless refusal": MCP_NO_TOKEN,
     "MCP tool catalog": JSON.stringify(mcpCatalog()),
     "cursor refusals": CURSOR_REFUSAL + " " + STREAM_CURSOR_REFUSAL,
-    "placeholder refusal": PLACEHOLDER_TEXT,
+    "placeholder refusals": PLACEHOLDER_TEXT + " " + PLACEHOLDER_CID,
     "revoked refusal": revokedSentence(),
     "agent recipe": recipe(),
     "agent watcher": WATCHER,
     "room page note": agentNoteText(o, "lima"),
+    "start page": startPage(startBase, o, START_ROOM),
+    "start page, joined": startPage(startJoined, o, START_ROOM),
+    "start page, with the owner key": startPage(startJoined, o, START_ROOM, undefined, true),
+    "start page refusals": START_NO_TOKEN + " " + OWNER_NO_START_PAGE,
   };
 }
 
@@ -199,14 +205,15 @@ test("the served texts are all there", () => {
 });
 
 // Every text is true of the code as it is: none names what is not built
-// (a start page, its tool, an mcp_call on awaiting items), and none repeats
-// a statement that was false: stopping reads stops no hook or webhook, whoami
-// joins, no room owner revokes, and "any other call joins" was wrong both
-// ways.
+// (a START HERE section in /api, a start link in for_agents or in the
+// preview's next), and none repeats a statement that was false: stopping
+// reads stops no hook or webhook, whoami joins, no room owner revokes,
+// "any other call joins" was wrong both ways, and get_invite is not the
+// only tool that looks without joining.
 test("no served text names what is not built, or a false rule", () => {
   for (const [name, text] of Object.entries(servedTexts("https://example.test"))) {
-    assert.ok(!/start page|get_start_page|mcp_call/i.test(text), name + " names something not built: " + (text.match(/.{0,40}(start page|get_start_page|mcp_call).{0,20}/i) || [""])[0]);
-    for (const bad of ["stop polling", "call whoami", "room owner", "Any other call"]) assert.ok(!text.toLowerCase().includes(bad.toLowerCase()), name + " still says " + bad);
+    assert.ok(!/START HERE|for_agents\.start|next\.start/.test(text), name + " names something not built: " + (text.match(/.{0,40}(START HERE|for_agents\.start|next\.start).{0,20}/) || [""])[0]);
+    for (const bad of ["stop polling", "call whoami", "room owner", "Any other call", "every tool but get_invite)", "The only tool that does not"]) assert.ok(!text.toLowerCase().includes(bad.toLowerCase()), name + " still says " + bad);
   }
 });
 
@@ -232,6 +239,7 @@ test("MCP initialize's instructions, by token: short, and the ok one carries the
   assert.match(mcpInstructions(o, "invalid"), /invite_invalid/);
   assert.match(mcpInstructions(o, "revoked"), /invite_revoked/);
   assert.match(mcpInstructions(o, "owner"), /"as"/);
+  assert.ok(ok.includes("get_invite and get_start_page never join"), "the ok instructions name both looks");
 });
 
 test("three tool descriptions say what joins and what the invite links are", () => {
@@ -239,6 +247,18 @@ test("three tool descriptions say what joins and what the invite links are", () 
   assert.ok(by.whoami.includes("joins the room: it opens your invite"), by.whoami);
   assert.ok(by.get_invite.includes("(unused until you join)"), by.get_invite);
   assert.ok(by.get_members.includes("never use or post them"), by.get_members);
+  assert.ok(by.whoami.includes("every tool but get_invite and get_start_page"), by.whoami);
+  assert.ok(by.get_invite.includes("call get_start_page"), by.get_invite);
+  assert.ok(by.get_start_page.includes("It changes nothing in the room"), by.get_start_page);
+  // the start page names get_invite as a look, so agents call it: its
+  // description says the answer holds the token, as the page does
+  assert.ok(by.get_invite.includes("agent_onboarding, its hand-off note with your token in it: keep that field out of anything you save or share"), by.get_invite);
+});
+
+// get_start_page reads the token's invite only: the owner key's "as" would
+// be ignored there, so its schema does not offer it; every other tool does.
+test("every tool offers the owner key's as, except get_start_page", () => {
+  for (const t of mcpCatalog()) assert.equal("as" in t.inputSchema.properties, t.name !== "get_start_page", t.name);
 });
 
 test("the poll numbers come from limits.ts", async () => {
@@ -268,6 +288,23 @@ test("/api says exactly which calls join", () => {
   for (const gone of ["Any other call", "first other call", "Joining a room is"]) assert.ok(!api.includes(gone), "/api still says " + gone);
   const look = sectionOf(api, "LOOK BEFORE JOINING");
   for (const want of ["Only look, never join:", "Act without joining:", "Join only when they succeed:", "Join: every other room call"]) assert.ok(look.includes(want), "LOOK BEFORE JOINING lacks " + want);
+  const folded = look.replace(/\s+/g, " ");
+  for (const want of ["GET or HEAD /api/rooms/ROOM (the start page)", "get_start_page", "the owner key alone has no start page (400)"]) assert.ok(folded.includes(want), "LOOK BEFORE JOINING lacks " + want);
+});
+
+test("/api documents mcp_call in ROOM STATE and the caller's fields in WELCOME PACKET", () => {
+  const api = docs("https://example.test");
+  const state = sectionOf(api, "ROOM STATE").replace(/\s+/g, " ");
+  for (const want of ["mcp_call", "as for the owner key", "over MCP, mcp_call is added after the cut"]) assert.ok(state.includes(want), "ROOM STATE lacks " + want);
+  const welcome = sectionOf(api, "WELCOME PACKET").replace(/\s+/g, " ");
+  for (const want of ["you_kind", "get_board", "the owner key gets none of the three"]) assert.ok(welcome.includes(want), "WELCOME PACKET lacks " + want);
+  assert.ok(sectionOf(api, "ROOMS").replace(/\s+/g, " ").includes("GET or HEAD /api/rooms/ROOM is your start page"), "ROOMS names the start page");
+});
+
+test("/llms.txt names get_start_page beside get_invite as a look", () => {
+  const out = primer("https://example.test").replace(/\s+/g, " ");
+  assert.ok(out.includes("get_invite and get_start_page look without joining"));
+  assert.ok(!out.includes("get_invite looks without"));
 });
 
 test("/api's statements about Muse wakes, muting and the webhook challenge are true", () => {
@@ -286,6 +323,7 @@ test("/api states the cursor refusals, the placeholder refusal and initialize's 
   assert.ok(api.includes("after must be a whole number: anything else answers 400 (an empty after= is the same as none)"));
   assert.ok(api.includes("anything else answers 400 (a literal placeholder too)"));
   assert.ok(sectionOf(raw, "SEND A MESSAGE").includes("<...> placeholder"));
+  assert.ok(sectionOf(raw, "SEND A MESSAGE").replace(/\s+/g, " ").includes("An agent's client_msg_id (below) that is one such placeholder, such as <a new id for each post>, is refused the same way"), "/api states the client_msg_id refusal");
   // the message test leaves out autolinks (isPlaceholderMessage), and says so
   assert.ok(sectionOf(raw, "SEND A MESSAGE").replace(/\s+/g, " ").includes("a link or an address in angle brackets (<https://...>, <mailto:...>, <name@example.com>) is no placeholder"));
 });

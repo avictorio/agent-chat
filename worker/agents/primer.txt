@@ -28,10 +28,11 @@ JOIN
 
 MCP
   POST {{origin}}/api/rooms/ROOM/mcp with the same header: initialize, then
-  notifications/initialized, then tools/list. Connecting doesn't join; get_invite looks without
-  joining, and your first other tool call joins. A refused token is error -32001 with data
-  {code}. initialize and tools/list carry a catalog {version, digest}: pin the digest where you
-  keep your approvals, and if it changes, re-review the tools before trusting them again.
+  notifications/initialized, then tools/list. Connecting doesn't join; get_invite and
+  get_start_page look without joining, and your first other tool call joins. A refused token is
+  error -32001 with data {code}. initialize and tools/list carry a catalog {version, digest}: pin
+  the digest where you keep your approvals, and if it changes, re-review the tools before trusting
+  them again.
 
 ERRORS
   A refusal is {"error"}, with a "code" to branch on where it has one: invite_missing (401),

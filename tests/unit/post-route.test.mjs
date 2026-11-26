@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { messagesRoute, publishRoute } from "../../worker/routes/messages.ts";
 import { mcpCallTool } from "../../worker/agents/mcp.ts";
 import { BadRequest } from "../../worker/lib/http.ts";
-import { PLACEHOLDER_TEXT, isPlaceholder, isPlaceholderMessage } from "../../worker/lib/text.ts";
+import { PLACEHOLDER_CID, PLACEHOLDER_TEXT, isPlaceholder, isPlaceholderMessage } from "../../worker/lib/text.ts";
 import { makeRoom } from "./room-harness.mjs";
 import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MAX, CLIENT_MSG_ID_MS, DOC_MAX, HTML_MAX, IMAGE_MAX, INLINE_TOTAL_MAX, VIDEO_MAX } from "../../worker/limits.ts";
 
@@ -450,4 +450,32 @@ test("over MCP an agent's placeholder-only text is a tool error for post_message
   assert.equal(m.text, "<sigh>");
   const own = await mcpCallTool({}, h.room, R, "http://localhost", true, {}, "claude", "post_message", { text: "<note>" });
   assert.equal(own.text, "<note>", "the owner key acting as a name is not refused");
+});
+
+// The start page's post template ends in "client_msg_id": "<a new id for
+// each post>". Kept as written for every post, the first would post and
+// each later one come back as its repeat (200, repeat: true), posting nothing.
+// From an agent's invite such an id is refused as a placeholder text is;
+// a person's, the owner key's, a real id and an address in angle brackets
+// are not.
+test("an agent's placeholder client_msg_id is refused over REST and MCP; others post", async () => {
+  const h = makeRoom();
+  h.member("Ada", "agent"); h.member("Bea", "human");
+  const template = { text: "First real post.", client_msg_id: "<a new id for each post>" };
+  let r = await postAs(h, { token: "tok-Ada" }, JSON.stringify(template), asJson);
+  assert.equal(r.status, 400);
+  assert.equal(r.json.error, PLACEHOLDER_CID);
+  r = await postAs(h, { token: "tok-Ada" }, JSON.stringify({ text: "<your words>", client_msg_id: "<a new id for each post>" }), asJson);
+  assert.equal(r.json.error, PLACEHOLDER_TEXT, "the text is named first, as before");
+  await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, { kind: "agent" }, "Ada", "post_message", template), (e) => e.message === PLACEHOLDER_CID);
+  assert.equal(h.all("SELECT id FROM m").length, 0, "nothing was stored");
+  for (const id of ["ada-2", "<ada-2@example.com>"]) {
+    r = await postAs(h, { token: "tok-Ada" }, JSON.stringify({ text: "Post " + id, client_msg_id: id }), asJson);
+    assert.equal(r.status, 201, id);
+  }
+  r = await postAs(h, { token: "tok-Bea" }, JSON.stringify({ text: "From Bea", client_msg_id: "<a new id for each post>" }), asJson);
+  assert.equal(r.status, 201, "a person's id is not refused");
+  r = await postAs(h, { owner: true }, JSON.stringify({ from: "claude", text: "From the key", client_msg_id: "<a new id for each post>" }), asJson);
+  assert.equal(r.status, 201, "the owner key's id is not refused");
+  assert.deepEqual(texts(h).map((x) => x.text), ["Post ada-2", "Post <ada-2@example.com>", "From Bea", "From the key"]);
 });

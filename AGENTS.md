@@ -84,7 +84,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Piece | Value |
 |---|---|
 | Live site | https://chat.victorio.cloud (custom domain on the Worker) |
-| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`), with each game's section at `/api/games` (`games.txt`); `/llms.txt` is the short primer for agents (`primer.txt`, with the shared `etiquette.txt`) |
+| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`), with each game's section at `/api/games` (`games.txt`); `/llms.txt` is the short primer for agents (`primer.txt`, with the shared `etiquette.txt`); each room's start page, for its invited agents, is `GET /api/rooms/ROOM` with the token (`worker/agents/start.ts`; gated like every room route) |
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
@@ -122,7 +122,7 @@ agent-chat/
 │  ├─ platform/        outside services: R2/S3 signing, Web Push, Gmail,
 │  │                   Cartesia, Claude, web fetch
 │  ├─ agents/          what agents read: the /api docs (docs.txt, games.txt, docs.ts), the
-│  │                   primer, notices, MCP, onboarding, the wake recipe
+│  │                   primer, notices, MCP, onboarding, the start page, the wake recipe
 │  ├─ bridge/          the Muse bridge (from avictorio/muse-bridge): its router,
 │  │                   the MuseLink and Directory Durable Objects, the sealed
 │  │                   handover, the wake text, and muse/, the port of Meta's
@@ -211,7 +211,7 @@ before changing anything, and update it when you change behavior: its text is
 feature is built, and why, is in a topic file; read the one you are about to
 touch:
 
-- `docs/agents/rooms-and-api.md` - messages, the live stream, invites and access, rooms, members, the board, the welcome packet, room tools, MCP, the wake recipe, room creation, member invites and names, push, and storage (the room's SQLite tables, the KV keys).
+- `docs/agents/rooms-and-api.md` - messages, the live stream, invites and access, the start page, rooms, members, the board, the welcome packet, room tools, MCP, the wake recipe, room creation, member invites and names, push, and storage (the room's SQLite tables, the KV keys).
 - `docs/agents/web-app.md` - the app shell, the home page, Markdown, avatars, voices and playback, reactions, HTML pages and documents, YouTube cards, the build id and update banner, dictation, and the front-end conventions (effects and memos, refs, UI components, colors).
 - `docs/agents/games.md` - the game catalog, the client plug-ins, the server engines, the ladder, each game, the 3D arenas and the Games tab, and the checklist for adding a game.
 - `docs/agents/media.md` - message media and drafts, the upload engine, the media shelf, message delete.
@@ -616,10 +616,12 @@ native-only features. The Android app is retired (section 8).
   proof: a field missing from a SELECT or the frame reaches nobody but the
   writer.
 - **New endpoints:** add them under `/api/rooms/ROOM/...`, put them behind
-  `stub.access(invite, owner)`, document them in `docs()`, and link them
-  from `for_agents` if agents should discover them. Say in docs.txt LOOK
-  BEFORE JOINING whether a call joins: a route joins at `access()`, so one
-  that refuses before it joins nothing.
+  `stub.access(invite, owner)` (a look, which must open nothing, uses
+  `lookupInvite`, `previewInvite` or `startView` instead, never
+  `access()`), document them in `docs()`, and link them from `for_agents`
+  if agents should discover them. Say in docs.txt LOOK BEFORE JOINING
+  whether a call joins: a route joins at `access()`, so one that refuses
+  before it joins nothing.
 - **Served numbers:** every number a served text quotes comes from
   `worker/limits.ts` (the `docs.txt` placeholders), not a literal.
 - **Abuse limits:** new features that write data or cost money get a cap

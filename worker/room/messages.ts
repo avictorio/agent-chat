@@ -7,7 +7,7 @@ import { deleteFrame, gapFrame, messageFrameData, sseFrame } from "../lib/http.j
 import { mentionsName, nameFold, sameName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
-import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, PcidRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
+import type { CfgRow, CountRow, InvRow, MdRow, MdelRow, MsgRow, PcidRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
 import { warn } from "../lib/log.js";
 
 /** The columns a message is served from (withKinds turns them into the API's fields). */
@@ -687,6 +687,42 @@ export const MessageMethods = {
     // count. It can be past the newest message's id (a late publish, media
     // landed on an older message).
     return this.sql.exec<{ n: number | null }>("SELECT MAX(COALESCE(seq, id)) AS n FROM m WHERE draft IS NULL OR draft = 0").one().n || 0;
+  },
+
+  /** What others posted since this member's latest live message (the
+   *  start page's "Since your last post"): after is that message's id - a
+   *  read from it (GET /messages?after=) returns everything that went live
+   *  since, the member's own late-published post included - count the live
+   *  messages from other senders delivered past it, for_you those of them
+   *  whose text @-mentions the member (mentionsName, as targets do). null
+   *  when the room holds no live message of theirs. Reads only. The anchor is
+   *  an id, not the delivery number: a message that went live while the
+   *  member's own post waited would never be counted from that. Accepted:
+   *  a deleted latest post moves the anchor to an earlier one, a message
+   *  that went live before the member's late post and one whose media landed
+   *  since are counted (all over-counts); a post the owner key made under the
+   *  member's name is the member's, so it moves the anchor (the one
+   *  under-count). */
+  sinceLastPost(name: string): { after: number, count: number, for_you: number } | null {
+    const live = "(draft IS NULL OR draft = 0)";
+    // the senders that are this member (sameName), as each is stored
+    const mine = this.sql.exec<{ s: string }>("SELECT DISTINCT sender AS s FROM m WHERE " + live).toArray().map((r) => r.s).filter((s) => sameName(s, name));
+    if (!mine.length) return null;
+    const ins = mine.map(() => "?").join(", ");
+    const k = this.sql.exec<{ k: number | null }>("SELECT MAX(id) AS k FROM m WHERE " + live + " AND sender IN (" + ins + ")", ...mine).one().k;
+    if (!k) return null;
+    const others = live + " AND COALESCE(seq, id) > ? AND sender NOT IN (" + ins + ")";
+    const count = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM m WHERE " + others, k, ...mine).one().n;
+    // Only the texts that can mention the member are read, one row at a
+    // time, never the room's history: "@" and the name, where LIKE folds
+    // A-Z as the mention test does and each character outside printable
+    // ASCII is _ (any one character: LIKE folds no other letter, and the
+    // mention test never matches one against an ASCII letter). A % or _ in
+    // the name only widens it. The check itself is mentionsName's.
+    const like = "%@" + [...name].map((c) => (/^[\x20-\x7e]$/.test(c) ? c : "_")).join("") + "%";
+    let forYou = 0;
+    if (count) for (const r of this.sql.exec<Pick<MsgRow, "text">>("SELECT text FROM m WHERE " + others + " AND text LIKE ?", k, ...mine, like)) if (mentionsName(r.text, name)) forYou++;
+    return { after: k, count, for_you: forYou };
   },
 
   // The room's attachments, newest first: one entry per media row on a

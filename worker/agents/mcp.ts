@@ -52,7 +52,7 @@ import { CURSOR_REFUSAL, readCursor, secondsToUtcMidnight, type Body, bodyNumber
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
 import { LC_MOVE_LOG_TICKS } from "../games/lightcycles.js";
-import { PLACEHOLDER_TEXT, clamp, isPlaceholder, isPlaceholderMessage } from "../lib/text.js";
+import { PLACEHOLDER_CID, PLACEHOLDER_TEXT, clamp, isPlaceholder, isPlaceholderMessage } from "../lib/text.js";
 import {
   cleanFileName,
   decodeTextPayload,
@@ -70,6 +70,7 @@ import { memberReply } from "../routes/members.js";
 import { CID_ERROR, postId, stateAfterWrite } from "../routes/messages.js";
 import type { RoomMember } from "../room/members.js";
 import type { InlineMedia } from "../room/messages.js";
+import type { AwaitingItem, McpCall, RoomState } from "@chat/contract";
 
 export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // The catalog carries a version and a content digest so a client can pin
@@ -77,7 +78,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.33.0";
+export const MCP_CATALOG_VERSION = "1.34.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -89,9 +90,11 @@ export function mcpCatalogDigest(list: McpTool[]) {
  *  reads to tell reads from writes (mcpCatalog sets them on every tool). */
 export type McpTool = { name: string, description: string, inputSchema: { type: string, properties: Record<string, object>, required: string[], additionalProperties: boolean },
   annotations?: { readOnlyHint: boolean, destructiveHint?: boolean, idempotentHint: boolean, openWorldHint: boolean } };
-/** @param properties the arguments' JSON Schemas */
-export function mcpTool(name: string, description: string, properties?: Record<string, object>, required?: string[]): McpTool {
-  const props = Object.assign({ as: { type: "string", description: "Owner key only: act as this member." } }, properties || {});
+/** @param properties the arguments' JSON Schemas
+ *  @param ownerAs whether the owner key can name a member with "as" (a
+ *  tool that takes no "as", such as get_start_page, does not offer it) */
+export function mcpTool(name: string, description: string, properties?: Record<string, object>, required?: string[], ownerAs = true): McpTool {
+  const props = Object.assign(ownerAs ? { as: { type: "string", description: "Owner key only: act as this member." } } : {}, properties || {});
   return { name: name, description: description, inputSchema: { type: "object", properties: props, required: required || [], additionalProperties: false } };
 }
 let built: { tools: McpTool[], digest: string } | null = null;
@@ -111,16 +114,28 @@ export function mcpCatalog() {
     mcpTool(
       "whoami",
       "Who this credential acts as in this room: your name and kind, your invite's status, who invited " +
-        "you, and when you were invited and joined. Calling it (like every tool but get_invite) joins the " +
-        "room: it opens your invite.",
+        "you, and when you were invited and joined. Calling it (like every tool but get_invite and " +
+        "get_start_page) joins the room: it opens your invite.",
       {},
     ),
     mcpTool(
       "get_invite",
-      "Look at your invite without joining: who it is for, who invited you, its status (unused until you " +
-        "join), the start of the room's constitution and who is in the room. The only tool that does not " +
-        "open your invite; connecting (initialize, tools/list) doesn't either.",
+      "Look at your invite without joining, as JSON: who it is for, who invited you, its status (unused " +
+        "until you join), the start of the room's constitution and who has joined, and for an agent's " +
+        "invite agent_onboarding, its hand-off note with your token in it: keep that field out of anything " +
+        "you save or share. For your next steps as text, call get_start_page. Neither joins the room; " +
+        "connecting (initialize, tools/list) doesn't either.",
       {},
+    ),
+    mcpTool(
+      "get_start_page",
+      "Your start page, as plain text: this room, who has joined, and your next steps in order, with the " +
+        "REST call and the MCP tool for each step that has one; once you have joined, also what was posted " +
+        "since your last post, what waits on you and the state of your wake. It changes nothing in the room, " +
+        "like get_invite, connecting and tools/list; any other tool call joins. The same text as a GET of " +
+        "/api/rooms/ROOM with your token.",
+      // it reads the token's invite only: the owner key names no member here
+      {}, [], false,
     ),
     mcpTool(
       "get_room_state",
@@ -414,7 +429,7 @@ export function mcpCatalog() {
   // answer. Every tool is annotated - reads as read-only and idempotent,
   // writes with honest destructive/idempotent/open-world hints - so a
   // harness can make its trust call from the catalog instead of guessing.
-  const readOnly = new Set(["whoami", "get_invite", "get_room_state", "list_messages", "list_attachments", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
+  const readOnly = new Set(["whoami", "get_invite", "get_start_page", "get_room_state", "list_messages", "list_attachments", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
   const destructive = new Set(["delete_message", "delete_digest", "decision_action", "question_action", "stake_action", "cancel_game", "decline_game"]);
   for (const t of list) {
     if (readOnly.has(t.name)) t.annotations = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
@@ -435,6 +450,39 @@ export function mcpErr(message: unknown, structured?: Record<string, unknown>) {
   const out: { content: { type: string, text: string }[], isError: boolean, structuredContent?: Record<string, unknown> } = { content: [{ type: "text", text: String(message) }], isError: true };
   if (structured) out.structuredContent = structured;
   return out;
+}
+
+/** The tool that does what an awaiting_you call does, by the call's path
+ *  under /api/rooms/ROOM/, and whether it takes the item's id. A new kind
+ *  of awaiting item needs its row (tests/unit/mcp-call.test.mjs checks). */
+const MCP_BY_PATH: Array<[RegExp, string, boolean]> = [
+  [/^digests$/, "file_digest", false],
+  [/^games\/\d+\/accept$/, "accept_game", true],
+  [/^games\/\d+\/moves$/, "submit_move", true],
+  [/^decisions\/\d+$/, "decision_action", true],
+  [/^questions\/\d+$/, "question_action", true],
+  [/^tools\/fetch$/, "fetch_url", false],
+];
+/** An awaiting_you item's call as a tool call: the body without from
+ *  (the credential names the caller), the item's id first where the
+ *  tool takes one, and as for the owner key. null for a call no tool makes. */
+export function mcpCallOf(item: AwaitingItem, as?: string): McpCall | null {
+  const p = item.call.path.replace(/^\/api\/rooms\/[^/]+\//, "");
+  const hit = MCP_BY_PATH.find(([re]) => re.test(p));
+  if (!hit) return null;
+  const args: Record<string, unknown> = {};
+  if (hit[2] && item.id !== undefined) args.id = item.id;
+  for (const [k, v] of Object.entries(item.call.body)) if (k !== "from") args[k] = v;
+  if (as) args.as = as;
+  return { tool: hit[1], arguments: args };
+}
+/** room_state as an MCP result carries it: each awaiting_you item with its
+ *  mcp_call beside its call. Added after the block was cut to
+ *  STATE_MAX_BYTES, so the cap drops no item for it; REST and the stream
+ *  never carry it. A copy: the block passed in is left as it was. */
+export function withMcpCalls<T extends RoomState | undefined>(s: T, as?: string): T {
+  if (!s || !s.awaiting_you) return s;
+  return { ...s, awaiting_you: s.awaiting_you.map((i) => { const m = mcpCallOf(i, as); return m ? { ...i, mcp_call: m } : i; }) };
 }
 /**
  * @param s base64, or a data: URL
@@ -466,6 +514,8 @@ function needFrom(from: string | null | undefined): asserts from is string {
  */
 export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null, invited_by?: string | null, invited?: number, joined?: number }, from: string | null | undefined, name: string, args: Body | null | undefined, token?: string | null) {
   const A: Body = args || {};
+  // the name the owner key acts as, for each awaiting_you item's mcp_call
+  const as = owner ? from || undefined : undefined;
   switch (name) {
     case "whoami": {
       // /me's fields (an invite caller is always active here: this call opened it), plus
@@ -473,14 +523,16 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (owner) return { room: room, name: from || null, kind: acc.kind || null, status: null, invited_by: null, invited: null, joined: null, invite_only: true, owner: true };
       return { room: room, name: from || null, kind: acc.kind || null, status: "active", invited_by: acc.invited_by || null, invited: acc.invited || null, joined: acc.joined || null, invite_only: true, owner: false };
     }
-    case "get_room_state": needFrom(from); return await stub.roomState(from, room);
+    case "get_room_state": needFrom(from); return withMcpCalls(await stub.roomState(from, room), as);
     case "list_messages": {
       // a cursor that is not a whole number is refused: parseInt read a
       // literal LAST_ID as 0, the room's oldest message
       const after = readCursor(A.after);
       if (after === undefined) throw new Error(CURSOR_REFUSAL);
       const limit = clamp(bodyNumber(A.limit, "limit", true) || MESSAGES_PAGE, 1, 100);
-      return Object.assign({ room: room, you: from || undefined }, await stub.list(after, limit, 0, from || "", room));
+      const r = await stub.list(after, limit, 0, from || "", room);
+      if ("room_state" in r) r.room_state = withMcpCalls(r.room_state, as);
+      return Object.assign({ room: room, you: from || undefined }, r);
     }
     case "list_attachments": {
       const r = await stub.attachments({ kind: bodyText(A.kind, "kind"), from: bodyText(A.from, "from"), before: bodyText(A.before, "before"), limit: A.limit === undefined || A.limit === null ? "" : bodyText(A.limit, "limit") }, room);
@@ -494,6 +546,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (acc.kind === "agent" && isPlaceholderMessage(text)) throw new Error(PLACEHOLDER_TEXT);
       const cid = postId(A.client_msg_id);
       if (cid === undefined) throw new Error(CID_ERROR);
+      if (cid && acc.kind === "agent" && isPlaceholderMessage(cid)) throw new Error(PLACEHOLDER_CID);
       const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
       if (draft && (A.audio_base64 || A.image_base64 || A.video_base64 || A.html || A.doc)) throw new Error("\"draft\" cannot be combined with inline media; use begin_upload, then publish");
       let audio = null as InlineMedia | null, image = null as InlineMedia | null, video = null as InlineMedia | null, htmlArt = null as InlineMedia | null, doc = null as InlineMedia | null;
@@ -508,8 +561,8 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const msg = await stub.postKeyed(cid, from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       if (!msg) throw new Error("That message was deleted while its attachment was being stored; nothing was posted");
       if ("status" in msg) throw new Error(msg.error);
-      if ("repeat" in msg) return Object.assign({ room: room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: await stateAfterWrite(stub, from, room) });
-      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room) });
+      if ("repeat" in msg) return Object.assign({ room: room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as) });
+      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as) });
     }
     case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
     case "publish_message": {
@@ -520,7 +573,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (text !== undefined && acc.kind === "agent" && isPlaceholderMessage(text)) throw new Error(PLACEHOLDER_TEXT);
       const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, text);
       if (refused(r)) throw new Error(r.error);
-      return Object.assign({ room: room }, r.msg, { room_state: await stateAfterWrite(stub, from, room) });
+      return Object.assign({ room: room }, r.msg, { room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as) });
     }
     case "react": {
       needFrom(from);
@@ -539,7 +592,8 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (sign) for (const x of list.members) if (x.avatar_version) avq[x.name] = sign(String(x.name).toLowerCase(), "avatar");
       return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name], owner || acc.kind === "human")) });
     }
-    case "get_board": return Object.assign({ room: room }, await stub.welcome());
+    // who the call is, as a messages read says it (none for the owner key)
+    case "get_board": return Object.assign({ room: room }, !owner && from ? { you: from, you_kind: acc.kind, joined: acc.joined } : {}, await stub.welcome());
     case "get_constitution": return Object.assign({ room: room }, await stub.constitution(!!A.history));
     case "set_constitution": { needFrom(from); const text = bodyText(A.text, "text"); if (!text.trim()) throw new Error("\"text\" is required"); if (text.length > MAX_CON) throw new Error("\"text\" is limited to " + MAX_CON + " characters"); return { room: room, constitution: await stub.setConstitution(text, from) }; }
     case "get_decisions": return Object.assign({ room: room }, await stub.decisions());

@@ -236,6 +236,11 @@ export function isPlaceholderMessage(s: unknown) {
  *  would post "<your words>" into the room. A person's text is never refused
  *  for it. */
 export const PLACEHOLDER_TEXT = "\"text\" is still a placeholder. Replace the <...> with your own words.";
+/** The refusal of a post from an agent's invite whose client_msg_id is one
+ *  placeholder (isPlaceholderMessage): a template's "<a new id for each
+ *  post>" kept as written would make every later post with it a repeat of
+ *  the first, answered 200 and posting nothing. */
+export const PLACEHOLDER_CID = "\"client_msg_id\" is still a placeholder. Replace the <...> with a new id for this post.";
 
 export function escHtml(x: unknown) {
   return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

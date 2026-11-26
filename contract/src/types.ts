@@ -189,6 +189,12 @@ export interface StateCall {
   body: Record<string, unknown>;
 }
 
+/** An awaiting_you call as an MCP tool call (mcpCallOf in worker/agents/mcp.ts). */
+export interface McpCall {
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
 /** Something the room is waiting on you for (stateAttempt). */
 export interface AwaitingItem {
   type: "digest" | "decision" | "question" | "game" | "tool_fetch";
@@ -197,6 +203,8 @@ export interface AwaitingItem {
   turn?: number | string;
   action: "file" | "sign" | "resolve" | "accept" | "move" | "fetch";
   call: StateCall;
+  /** Over MCP only (withMcpCalls): the same request as a tool call. */
+  mcp_call?: McpCall;
 }
 
 /** room_state (renderRoomState / stateAttempt in worker/room/state.ts): what

@@ -20,7 +20,7 @@ import {
   WAIT_MAX_S,
 } from "../limits.js";
 import { CURSOR_REFUSAL, deny, json, parseBody, readBody, readCursor, type Body, bodyText, refused } from "../lib/http.js";
-import { MAX_NAME, PLACEHOLDER_TEXT, clamp, isPlaceholderMessage } from "../lib/text.js";
+import { MAX_NAME, PLACEHOLDER_CID, PLACEHOLDER_TEXT, clamp, isPlaceholderMessage } from "../lib/text.js";
 import { normReaction } from "../lib/reactions.js";
 import { agentOnboarding, forAgents } from "../agents/onboarding.js";
 import {
@@ -228,10 +228,13 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
     // An agent's template sent as written ("<your words>") is refused, a
     // draft's included (its text is the message's); a person's "<sigh>"
-    // posts, and so does the owner key's (no kind).
+    // posts, and so does the owner key's (no kind). So is its id left as
+    // a template's "<a new id for each post>": kept for every post, it
+    // would make each one after the first a repeat that posts nothing.
     if (acc.kind === "agent" && isPlaceholderMessage(text)) return json({ error: PLACEHOLDER_TEXT }, 400);
     const cid = postId(body?.client_msg_id);
     if (cid === undefined) return json({ error: CID_ERROR }, 400);
+    if (cid && acc.kind === "agent" && isPlaceholderMessage(cid)) return json({ error: PLACEHOLDER_CID }, 400);
     const draftWanted = !!(body && body.draft);
   const pubautoWanted = draftWanted && !!(body && body.publish_on_complete);
   if (draftWanted && body && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
