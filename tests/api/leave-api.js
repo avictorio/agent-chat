@@ -10,6 +10,8 @@
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// the refusal of a token whose member left with it (worker/room/Room.ts LEFT_MSG)
+const LEFT = 'You left this room with this invite, so it will not work again. A member of the room can invite you anew.';
 
 async function leaveApi(ctx) {
   const { req, check, SUF } = ctx;
@@ -45,6 +47,18 @@ async function leaveApi(ctx) {
   }
   r = await leave('leave-bogus', OK);
   check('leave: an unknown token -> 403 invite_invalid', r.status === 403 && codeOf(r) === 'invite_invalid', r.status + ' ' + codeOf(r));
+  r = await leave('leave-bogus', {});
+  check('leave: ... the token\'s refusal comes before the confirm\'s', r.status === 403 && codeOf(r) === 'invite_invalid', r.status + ' ' + codeOf(r));
+  // a body is read only for a token the room takes, and at most SMALL_BODY_MAX
+  const filler = '{"confirm": "' + room + '", "pad": "' + 'x'.repeat(2 * 1024 * 1024) + '"}';
+  r = await req('POST', R + '/leave', { token: 'leave-bogus', headers: { 'Content-Type': 'application/json' }, body: filler });
+  check('leave: a refused token with a large body -> its 403', r.status === 403 && codeOf(r) === 'invite_invalid', r.status + ' ' + r.text.slice(0, 100));
+  r = await req('POST', R + '/leave', { token: A, headers: { 'Content-Type': 'application/json' }, body: filler });
+  check('leave: a member\'s body over SMALL_BODY_MAX -> 413, nothing changed', r.status === 413 && (await row('LvA')).status === 'active', r.status + ' ' + r.text.slice(0, 100));
+  for (const [label, path] of [['muse-hook', '/muse-hook'], ['webhook', '/webhook']]) {
+    r = await req('POST', R + path, { token: A, headers: { 'Content-Type': 'application/json' }, body: filler });
+    check(label + ': a POST body over SMALL_BODY_MAX -> 413', r.status === 413, r.status + ' ' + r.text.slice(0, 100));
+  }
   check('leave: ... and nobody left', (await row('LvA')).status === 'active', JSON.stringify(await row('LvA')));
 
   // an invite never opened: refused, and left unopened, over REST and MCP
@@ -75,7 +89,7 @@ async function leaveApi(ctx) {
   r = await req('GET', R + '/avatars/LvA', { token: H });
   check('leave: its picture is gone', r.status === 404, r.status);
   r = await req('GET', R + '/messages?limit=50', { token: A });
-  check('leave: its token is refused from then on (403 invite_revoked)', r.status === 403 && codeOf(r) === 'invite_revoked', r.status + ' ' + codeOf(r));
+  check('leave: its token is refused from then on (403 invite_revoked), with the sentence that it left', r.status === 403 && codeOf(r) === 'invite_revoked' && r.json.error === LEFT, r.status + ' ' + codeOf(r));
   r = await req('GET', R + '/messages?limit=50', { token: H });
   const texts = ((r.json && r.json.messages) || []).map((m) => m.from + ': ' + m.text);
   check('leave: its message stays, and the Referee calls the lobby off', texts.includes('LvA: LvA was here') && texts.includes('Referee: Duel match #' + lobby.id + ' is off - LvA declined the seat.'), JSON.stringify(texts.slice(-4)));
@@ -87,8 +101,10 @@ async function leaveApi(ctx) {
   r = await req('GET', R + '/decisions', { token: H });
   const dd = ((r.json && r.json.decisions) || []).find((x) => x.id === d.id) || {};
   check('leave: its signature stays', JSON.stringify(dd.signers) === '["LvA"]', JSON.stringify(dd));
+  r = await rpc(A, { confirm: 'nope' });
+  check('leave: MCP leave_room answers the token\'s refusal before a wrong confirm', r.json && r.json.error && r.json.error.code === -32001 && r.json.error.data.code === 'invite_revoked', r.text.slice(0, 160));
   r = await rpc(A, OK);
-  check('leave: MCP leave_room with the token it left with -> -32001 invite_revoked', r.json && r.json.error && r.json.error.code === -32001 && r.json.error.data.code === 'invite_revoked', r.text.slice(0, 160));
+  check('leave: MCP leave_room with the token it left with -> -32001 invite_revoked, with the sentence that it left', r.json && r.json.error && r.json.error.code === -32001 && r.json.error.data.code === 'invite_revoked' && r.json.error.message === LEFT, r.text.slice(0, 160));
   // the name is free at once: a member invites it again
   r = await req('POST', R + '/invites', { token: H, json: { name: 'LvA', kind: 'agent' } });
   check('leave: its name can be invited again at once', r.status === 201 && r.json.name === 'LvA', r.status + ' ' + r.text.slice(0, 120));
@@ -101,10 +117,14 @@ async function leaveApi(ctx) {
 
   // LvH is the last member who has joined: LvU and the new LvA are unopened
   r = await leave(H, OK);
-  check('leave: the last member without delete_room -> 409 last_member, counting the unopened invites', r.status === 409 && codeOf(r) === 'last_member' && r.json.error.includes('the 2 invites not yet opened stop working too'), r.status + ' ' + r.text.slice(0, 220));
+  check('leave: the last member without delete_room -> 409 last_member, counting the unopened invites (unopened: 2)', r.status === 409 && codeOf(r) === 'last_member' && r.json.unopened === 2 && r.json.error.includes('the 2 invites not yet opened stop working too'), r.status + ' ' + r.text.slice(0, 220));
   check('leave: ... and nothing changed', (await row('LvH')).status === 'active', JSON.stringify(await row('LvH')));
   r = await rpc(H, OK);
-  check('leave: MCP says the same', r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.code === 'last_member', r.text.slice(0, 160));
+  check('leave: MCP says the same', r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.code === 'last_member' && r.json.result.structuredContent.unopened === 2, r.text.slice(0, 160));
+  for (const v of ['true', 1, 'yes']) {
+    r = await leave(H, { confirm: room, delete_room: v });
+    check('leave: delete_room ' + JSON.stringify(v) + ' is no yes -> 409 last_member', r.status === 409 && codeOf(r) === 'last_member', r.status + ' ' + codeOf(r));
+  }
   // a post in flight while the room goes answers 410
   await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room, ms: 1500 } });
   const inflight = req('POST', R + '/messages', { token: H, json: { text: 'posted as the room goes', image: PNG.toString('base64') } });

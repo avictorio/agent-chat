@@ -122,7 +122,12 @@ export async function museHookRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, name: s.name, removed: true });
   }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const body = await readBody(request);
+  // three small fields, read before the room has checked the token: at
+  // most SMALL_BODY_MAX, so a caller the room would refuse cannot make the
+  // Worker read a body of any size (index.ts settles one only for a good token)
+  const small = await settleBody(request, SMALL_BODY_MAX);
+  if (!small) return json({ error: "That request's body is too large: send {\"routing\", \"muted\", \"enabled\"}." }, 413);
+  const body = await readBody(small);
   const change: { routing?: string, muted?: boolean, enabled?: boolean } = {};
   if (body && body.routing !== undefined && body.routing !== null) {
     const r = museRouting(bodyText(body.routing, "routing"));

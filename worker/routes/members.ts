@@ -1,14 +1,14 @@
 // Members and invites.
 
-import { CLONE_DELETE_ON_ROOM_DELETE, MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
-import { deny, json, limitReached, rateLimited, readBody, bodyText, type Body } from "../lib/http.js";
+import { CLONE_DELETE_ON_ROOM_DELETE, MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
+import { deny, json, limitReached, rateLimited, readBody, bodyText, settleBody, type Body } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { cleanName, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
-import { inviteMissing, type InvRow, type InvitePreview, type Refusal } from "../room/Room.js";
+import { inviteMissing, type InvRow, type InviteLookup, type InvitePreview, type Refusal } from "../room/Room.js";
 /** a row of the room's invite list (room/members.ts invites()) */
 type InviteListRow = Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind" | "invited_by"> & { left: number | null };
-import type { LeaveResult, RoomMember } from "../room/members.js";
+import type { LastMemberRefusal, LeaveResult, RoomMember } from "../room/members.js";
 import type { Member } from "@chat/contract";
 import { cartesiaDelete } from "../platform/cartesia.js";
 import { retryCloneDeletes } from "./voices.js";
@@ -173,9 +173,17 @@ export function leaveConfirmRefusal(room: string): string {
 }
 
 /** What a leave reads from its body (REST) or arguments (MCP): whether
- *  confirm names the room, and the yes to the room's deletion. */
+ *  confirm names the room, and the yes to the room's deletion, which is
+ *  the boolean true and nothing else (not "true", 1 or "yes"): it is the
+ *  explicit second yes to deleting everything. */
 export function leaveAsk(b: Body | null | undefined, room: string): { confirmed: boolean, deleteRoom: boolean } {
-  return { confirmed: bodyText(b?.confirm, "confirm") === room, deleteRoom: b?.delete_room === true || b?.delete_room === "true" };
+  return { confirmed: bodyText(b?.confirm, "confirm") === room, deleteRoom: b?.delete_room === true };
+}
+
+/** A leave's refusal as JSON: its sentence and code, and for last_member
+ *  the count of invites not yet opened (unopened) the deletion would end. */
+export function leaveRefusalBody(r: Refusal | LastMemberRefusal): { error: string, code: string, unopened?: number } {
+  return "unopened" in r ? { error: r.error, code: r.code, unopened: r.unopened } : { error: r.error, code: r.code };
 }
 
 /** What storage outside the room still owes once a leave is done, beside
@@ -197,8 +205,13 @@ export function leaveBody(room: string, r: LeaveResult) {
 }
 
 // POST /api/rooms/ROOM/leave {"confirm": "ROOM", "delete_room"?: true}
-// with the member's token. Refused before the room is asked: another
-// method, the owner key, no token, a confirm that is not the room's name.
+// with the member's token. Refused before the leave itself: another
+// method, the owner key, no token, then a token the room does not take
+// (a look, lookupInvite: it opens nothing), and only then is the body
+// read, at most SMALL_BODY_MAX (a leave's body is two fields), and its
+// confirm checked. A body is never read whole for a caller the room has
+// not taken: index.ts settles a body only for a good token, so a refused
+// token's body is still unread here and gets its 403 that way.
 export async function leaveRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -206,11 +219,15 @@ export async function leaveRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (owner) return json({ error: LEAVE_OWNER, code: "owner_not_member" }, 400);
   if (!invite) return deny(inviteMissing());
-  const ask = leaveAsk(await readBody(request), room);
-  if (!ask.confirmed) return json({ error: leaveConfirmRefusal(room), code: "confirm_mismatch" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  const r: LeaveResult | Refusal = await stub.leave(invite, room, ask.deleteRoom);
-  if (!r.ok) return deny(r);
+  const known: InviteLookup = await stub.lookupInvite(invite);
+  if (!known.ok) return deny(known);
+  const small = await settleBody(request, SMALL_BODY_MAX);
+  if (!small) return json({ error: "That request's body is too large: send {\"confirm\": \"" + room + "\"}, and \"delete_room\": true from the last member." }, 413);
+  const ask = leaveAsk(await readBody(small), room);
+  if (!ask.confirmed) return json({ error: leaveConfirmRefusal(room), code: "confirm_mismatch" }, 400);
+  const r: LeaveResult | Refusal | LastMemberRefusal = await stub.leave(invite, room, ask.deleteRoom);
+  if (!r.ok) return json(leaveRefusalBody(r), r.status);
   leaveAfter(rc, stub, room, r);
   return json(leaveBody(room, r));
 }

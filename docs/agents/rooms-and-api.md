@@ -318,36 +318,51 @@ docs.txt section that owns its routes, caps and formats.
 - **Leaving.** API: docs.txt LEAVING THE ROOM. `POST .../leave` with
   `confirm` and `delete_room` (`leaveRoute`, `routes/members.ts`) and MCP
   `leave_room` take the caller's own invite out; no call removes another
-  member. Both refuse before asking the room: another method,
-  the owner key alone or beside a token (400 `owner_not_member`: the
-  key acts as the owner, `Room.access`, who is no member), no token,
-  and a `confirm` that is not the room's name (400 `confirm_mismatch`,
-  as the owner's `DELETE ?confirm=` asks). Then one call,
-  `MemberMethods.leave`, does it all in one step with no await: the
-  lookup (`lookupInvite`, so an invite never opened is refused, 409
-  `not_joined`, and stays unopened: MCP dispatches the tool before
-  `access()`, beside `get_invite` and `get_start_page`), the last-member
-  check, `revoke()` itself (streams, push rows, upload links, the hook,
-  the direct uploads to abort, the members frame), `left_ts`, the
-  unclaim of every question it claimed, the decline of every lobby
-  waiting for its accept (`lobbiesAwaiting`, `gameDecline`: the Referee's
-  call-off line) and, with the name's last active invite, its picture
-  (`avatarDrop`) and voice (`voiceDrop`: the clone recorded as a pending
-  delete). Storage comes after (`mediaDelete`, `invalidateSpeakCache`,
-  and in the route `leaveAfter`: `cartesiaDelete` then `voiceDelDone`),
-  each failure logged, none undoing the leave. Signatures, messages,
-  files and the invites it made stay; running matches go by their
-  clocks; the name is free at once (`nameHeld` counts active invites).
+  member. Both refuse in this order, and nothing runs `access()`:
+  another method; the owner key alone or beside a token (400
+  `owner_not_member`: the key acts as the owner, `Room.access`, who is
+  no member); the token (no token 401, then the look `lookupInvite`:
+  403, before any body is read; MCP has the verdict of the look it made
+  for the request, `checkToken`); a REST body over `SMALL_BODY_MAX`
+  (413); a `confirm` that is not the room's name (400 `confirm_mismatch`,
+  as the owner's `DELETE ?confirm=` asks). Only the boolean `true` is a
+  `delete_room` yes. MCP dispatches the tool before `access()`, beside
+  `get_invite` and `get_start_page`. Then one call, `MemberMethods.leave`,
+  does it all in one step with no await: the lookup (an invite never
+  opened is refused, 409 `not_joined`, and stays unopened), the
+  last-member check, `revoke()` itself (streams, push rows, upload
+  links, the hook, the direct uploads to abort, the members frame) and
+  `left_ts`. Then, unless another active invite still holds the name
+  (`nameHeld`, the test `invite()` makes: an older "Ada" beside "ada", or
+  two names that lower-case alike and fold apart, whose claims, lobbies,
+  picture and voice are that member's too), the unclaim of every
+  question it claimed, the decline of every lobby waiting for its accept
+  (`lobbiesAwaiting`, `gameDecline`: the Referee's call-off line), its
+  picture (`avatarDrop`) and its voice (`voiceDrop`: the clone recorded
+  as a pending delete). `revoke()` drops push rows, filed by `nameKey`,
+  only when no active invite shares that key, for the same pair. Storage
+  comes after (`mediaDelete`; `invalidateSpeakCache` only while
+  `alive(gen)`, since it writes rows; in the route `leaveAfter`:
+  `cartesiaDelete` then `voiceDelDone`), each failure logged, none
+  undoing the leave. Signatures, messages, files and the invites it made
+  stay; running matches go by their clocks, and lobbies it created or
+  had accepted wait on the others; the name is free at once (`nameHeld`
+  counts active invites). The token is refused from then on with 403
+  `invite_revoked` and a sentence of its own (`LEFT_MSG`, by `left_ts`
+  in `lookupInvite`), so REST, MCP, streams and the web app's lock
+  screen all say the member left.
   The last member is the caller when no other unrevoked invite has been
   opened: unopened invites do not count. Its leave is refused (409
-  `last_member`, with the count of unopened invites, nothing changed)
-  unless `delete_room` is true; then `leaveWithRoom` records its clone,
-  starts `revokeAll` and, in the same step, `destroy()`, the owner's
-  deletion path (the activity log says the last member left), and the
-  route runs `retryCloneDeletes` as the owner's delete does. A room in
+  `last_member`, nothing changed, the body's `unopened` the count of
+  unopened invites: `LastMemberRefusal`, `leaveRefusalBody`) unless
+  `delete_room` is true; then `leaveWithRoom` records its clone, starts
+  `revokeAll` and, in the same step, `destroy()`, the owner's deletion
+  path (the activity log says the last member left), and the route runs
+  `retryCloneDeletes` as the owner's delete does. A room in
   `PROTECTED_ROOMS` is never deleted: its last member leaves like any
-  other. Requests in flight across a leave meet a revoke (A revoke and
-  the requests in flight), or a deleted room (`Room.gen`, 410).
+  other, and never gets `last_member`. Requests in flight across a leave
+  meet a revoke (A revoke and the requests in flight), or a deleted room
+  (`Room.gen`, 410).
 
 - **A revoke and the requests in flight.** A route checks the invite
   (`access`) in one call to the room and acts in a later one, and the
@@ -378,7 +393,12 @@ docs.txt section that owns its routes, caps and formats.
      included. A request with no credential the Worker trusts is never
      read whole without a cap either: create-room, the link steps and
      tokenless MCP take up to `SMALL_BODY_MAX` (413 beyond; tokenless MCP
-     takes no batch), and a single-shot upload link is looked up first
+     takes no batch), so do the POSTs of `.../leave` (after its token is
+     looked up: a refused one gets its 401 or 403 unread), `.../muse-hook`
+     and `.../webhook`, which read their few fields before the room has
+     checked the token (`settleRoomBody` leaves a refused token's body
+     unread, so without the cap the route would read it whole), and a
+     single-shot upload link is looked up first
      (`uploadTicketLimit`) and its body read only up to the ticket's
      `max_bytes`. Before this, anyone could make the Worker hold a
      body up to the edge's 100 MB, and 1 MB of tokenless MCP
@@ -1018,7 +1038,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `mdel` | deletes of live messages (`dn` its own delivery number, `id` the message's, `ts`, `who`, null for the owner key), the newest `KEEP` kept: what a stream's replay sends as `delete` frames (Live stream, Deletes and gaps). Schema step 5; deletes from before it were never recorded. |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees), the `avatar_*` pointer columns and `left_ts` (when the member left by itself with this invite, equal to `revoked`; null on every other row; schema step 9) |
-| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`), `msg_forgot` (the highest delivery number the room no longer holds: a replay from below it opens with a `gap` frame; it only rises, and a room created again starts it at `msg_hwm`), `room_name` (kept for alarms), `genesis` (a publicly created room whose genesis mail is not yet confirmed: `{at, token}`; gone once confirmed or the invite opened), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones on their last cloning day, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read: one row per member who ever cloned, kept for the room's life), `voice-del:<clone id>` (a clone a member removed or a new clone replaced that Cartesia has not confirmed deleted, the value when it was recorded: written in the call that drops or replaces the voice, tried again up to `CLONE_DELETE_RETRY` at a time by the room's voice routes with the key set and up to `CLONE_DELETE_ON_ROOM_DELETE` by a room delete, and removed only on Cartesia's 2xx or 404; `web-app.md`, Voices), test-hook flags. A deleted room keeps `msg_hwm` and the `voice-del:` rows (`destroy()` writes them back after `deleteAll`), and `msg_forgot` set to that `msg_hwm`. |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`), `msg_forgot` (the highest delivery number the room no longer holds: a replay from below it opens with a `gap` frame; it only rises, and a room created again starts it at `msg_hwm`), `room_name` (kept for alarms), `genesis` (a publicly created room whose genesis mail is not yet confirmed: `{at, token}`; gone once confirmed or the invite opened), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones on their last cloning day, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read: one row per member who ever cloned, kept for the room's life), `voice-del:<clone id>` (a clone a member removed, a new clone replaced or a member who left took with it, that Cartesia has not confirmed deleted, the value when it was recorded: written in the call that drops or replaces the voice (the leave's own step: `voiceDrop`, or `leaveWithRoom` before the room goes), tried again up to `CLONE_DELETE_RETRY` at a time by the room's voice routes with the key set and up to `CLONE_DELETE_ON_ROOM_DELETE` by a room delete, and removed only on Cartesia's 2xx or 404; `web-app.md`, Voices), test-hook flags. A deleted room keeps `msg_hwm` and the `voice-del:` rows (`destroy()` writes them back after `deleteAll`), and `msg_forgot` set to that `msg_hwm`. |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
 | `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |

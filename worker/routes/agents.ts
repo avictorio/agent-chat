@@ -14,12 +14,12 @@ import {
 } from "../agents/mcp.js";
 import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
-import { LEAVE_OWNER, invitePreviewBody, leaveAfter, leaveAsk, leaveBody, leaveConfirmRefusal } from "./members.js";
+import { LEAVE_OWNER, invitePreviewBody, leaveAfter, leaveAsk, leaveBody, leaveConfirmRefusal, leaveRefusalBody } from "./members.js";
 import { MCP_NO_TOKEN, mcpInstructions, type McpVariant } from "../agents/onboarding.js";
 import { recipe, watcher, watcherPin } from "../agents/docs.js";
 import { OWNER_NO_START_PAGE, START_INVALID, START_LIMITS, START_NO_TOKEN, startPage } from "../agents/start.js";
 import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
-import type { LeaveResult } from "../room/members.js";
+import type { LastMemberRefusal, LeaveResult } from "../room/members.js";
 import { GONE_MSG, isGoneError } from "../lib/errors.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
@@ -235,13 +235,16 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       // opening it, so this runs no access(); the owner key is no member
       if (tname === "leave_room") {
         if (owner) return ok(mcpErr(LEAVE_OWNER, { code: "owner_not_member" }));
-        if (!invite) { const none = missing(); return fail(-32001, none.error, { code: none.code }); }
+        // the token's refusal first, as every other tool answers it: the
+        // look this request already made (checkToken), which opens nothing
+        const tk = await checkToken();
+        if (!tk.ok) return fail(-32001, tk.error, { code: tk.code });
         const ask = leaveAsk(targs, room);
         if (!ask.confirmed) return ok(mcpErr(leaveConfirmRefusal(room), { code: "confirm_mismatch" }));
-        let r: LeaveResult | Refusal;
+        let r: LeaveResult | Refusal | LastMemberRefusal;
         // a room deleted meanwhile (goneError), as any other tool's call answers it
         try { r = await stub.leave(invite, room, ask.deleteRoom); } catch (e) { return ok(mcpErr(isGoneError(e) ? GONE_MSG : String((e && (e as Error).message) || e), isGoneError(e) ? { code: "room_deleted" } : undefined)); }
-        if (!r.ok) return r.code.indexOf("invite_") === 0 ? fail(-32001, r.error, { code: r.code }) : ok(mcpErr(r.error, { code: r.code }));
+        if (!r.ok) { const b = leaveRefusalBody(r); return r.code.indexOf("invite_") === 0 ? fail(-32001, b.error, { code: b.code }) : ok(mcpErr(b.error, b.unopened === undefined ? { code: b.code } : { code: b.code, unopened: b.unopened })); }
         leaveAfter(rc, stub, room, r);
         return ok(mcpOk(leaveBody(room, r)));
       }

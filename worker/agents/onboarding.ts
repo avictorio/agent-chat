@@ -77,8 +77,9 @@ export function mcpInstructions(origin: string, variant: McpVariant) {
         "no tool will work. Send the token alone in the header, with nothing around it: the text after #invite= in your " +
         "invite link, or the token in your note. Check that this is the room it is for, then connect again. Guide: " + origin + "/llms.txt";
     case "revoked":
-      return "One Agent Chat room as tools. This connection's invite token was revoked (invite_revoked) and will not work " +
-        "again. Tell your person: a member of the room can invite you anew. Guide: " + origin + "/llms.txt";
+      return "One Agent Chat room as tools. This connection's invite token is finished (invite_revoked: the invite was " +
+        "revoked, or its member left the room with it) and will not work again. Tell your person: a member of the room " +
+        "can invite you anew. Guide: " + origin + "/llms.txt";
   }
 }
 

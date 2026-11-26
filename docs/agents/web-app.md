@@ -58,21 +58,30 @@ Front-end conventions.
 - **Leave room:** the caller's own row in Members (`MemberCard` in
   `features/board/board.tsx`: a person's, or the agent invite a person
   uses in the web app) has a Leave room button that opens `LeaveDialog`
-  (`features/board/leave.tsx`). It says what leaving does and sends
-  `POST /leave` with the room's name (`RoomClient.leave`). When the list
-  on screen shows no other member who has joined, or the server answers
-  409 `last_member` (which changes nothing), the dialog says instead that
-  leaving deletes the room and everything in it, with the count of
-  unopened invites that stop working, and asks with a second, separately
-  worded button ("Leave and delete the room", which sends
-  `delete_room`): the app confirms nothing else by a typed name. The
-  page cannot tell a protected room (`PROTECTED_ROOMS` is the Worker's),
-  so there its last member is asked the deletion question and the room
-  stays (`room_deleted` false). After the leave the device forgets the room as Home's Forget
-  does (`forgetRoomKeys`, `lib/index.ts`: every key of `AGENTS.md`
-  section 5) and goes to the home page; the server has already dropped
-  its push registrations there. A revoked row reads "Left <date>" when
-  it carries `left`, else "Access removed <date>".
+  (`features/board/leave.tsx`). It always opens on what leaving does and
+  sends `POST /leave` with the room's name (`RoomClient.leave`). The
+  server decides who is the last member: only its 409 `last_member`
+  answer, which changes nothing, turns the dialog into the second
+  question, that leaving deletes the room and everything in it, with the
+  count of unopened invites from the answer's `unopened` (a fresh members
+  read when it has none), and only that question's separately worded
+  button ("Leave and delete the room") sends `delete_room`: the app
+  confirms nothing else by a typed name. If that call answers
+  `room_deleted` false (someone joined between the two calls) the dialog
+  says so before going home. After a leave the device forgets the room
+  as Home's Forget does (`forgetRoomKeys`, `lib/index.ts`: every key of
+  `AGENTS.md` section 5) and goes to the home page; the server has
+  already dropped its push registrations there. A refusal of the
+  Worker's own that says the person is out whatever happened (403
+  `invite_revoked` or `invite_invalid`, the JSON 404 of a room that does
+  not exist, 410 `room_deleted`: a lost answer's retry, say) forgets the
+  room too and says so. A network failure, a 5xx, or a 403 or 404 that
+  is not the Worker's (an edge rule, a build without the route: no code,
+  no JSON sentence) says the result is not known and to try again, and
+  keeps the room: forgetting it there would lose the device its only key
+  to the room. Only a 400 or 409, which the server refuses with nothing
+  changed, says "Nothing was changed." A revoked row reads "Left <date>"
+  when it carries `left`, else "Access removed <date>".
 
 - **Install strip:** the native install prompt on Android, Share steps on
   iOS, with one shared 30-day dismissal for the home banner and the room

@@ -13,6 +13,7 @@ import { leaveRoute } from "../../worker/routes/members.ts";
 import { roomRoute } from "../../worker/routes/rooms.ts";
 import { mcpRoute } from "../../worker/routes/agents.ts";
 import { PROTECTED_ROOMS } from "../../worker/limits.ts";
+import { nameFold } from "../../worker/lib/text.ts";
 
 // Node wants duplex: "half" on a Request built with a stream body, which
 // settleBody (lib/http.ts) makes; the Workers runtime does not.
@@ -394,4 +395,301 @@ test("MCP leave_room: refuses an invite never opened without joining, refuses th
   j = await mcpLeave(h, "tok-Bea", { confirm: R, delete_room: true });
   assert.equal(j.result.structuredContent.room_deleted, true);
   assert.equal(h.room.exists(), false);
+});
+
+/* ---------- the review round: shared names, body caps, the refusals' details ---------- */
+
+/** console.warn's lines while fn runs (warn() writes one JSON line each) */
+async function warnsDuring(fn) {
+  const real = console.warn;
+  const lines = [];
+  console.warn = (s) => { lines.push(String(s)); };
+  try { await fn(); } finally { console.warn = real; }
+  return lines;
+}
+
+// A room may still hold two active invites for one name, from before the
+// name rules: "Ada" beside "ada" (one fold), or two names that lower-case
+// alike and fold apart (U+03F9 and U+03F2). The claims, lobbies, picture,
+// voice, push rows and hook the name holds are the other holder's too: A's
+// leave touches none of them, and the Referee names nobody.
+for (const [kind, A, B] of [["the same fold", "Ada", "ada"], ["the same lower case, folding apart", "Ϲx", "ϲx"]]) {
+  test("a second active invite for the name (" + kind + "): the leave takes nothing that holder holds", async () => {
+    const c = cartesia(() => new Response(null, { status: 200 }));
+    try {
+      const h = makeRoom();
+      const ins = (tok, name) => { const at = Date.now() - 30 * 86400000; h.db.prepare("INSERT INTO inv (token, name, created, used, kind) VALUES (?, ?, ?, ?, 'agent')").run(tok, name, at, at); };
+      ins("tA", A);
+      ins("tB", B);
+      h.member("Cy");
+      const q = h.room.addQuestion("B's question", "Cy");
+      h.room.updateQuestion(q.id, "claim", B, null);
+      const lobby = (await h.room.createGame("Cy", ["Cy", B], { game: "duel" }, R)).game;
+      assert.ok(await h.room.setAvatar(B, PNG, "image/png", R));
+      const put = await h.room.putVoiceSample(B, MP3, "audio/mpeg", R);
+      await h.room.setVoiceId(B, "cartesia", "v-B", put.gen, put.key);
+      const keyB = B.toLowerCase(); // lowercase-ok: the push rows' key (nameKey)
+      h.db.prepare("INSERT INTO push (member, endpoint, p256dh, auth, ts) VALUES (?, 'https://fcm.googleapis.com/fcm/send/b', 'k', 'a', ?)").run(keyB, Date.now());
+      // B's hook, filed under the fold (for the first pair, A's fold too)
+      h.db.prepare("INSERT INTO mh (member, name, room, link, routing, enabled, muted, created, updated, kind, url, secret) VALUES (?, ?, 'unit', '', '', 1, 0, ?, ?, 'webhook', 'https://agent.example.org/wake', 's')").run(nameFold(B), B, Date.now(), Date.now());
+      const r = await h.room.leave("tA", R, false);
+      await h.settled();
+      assert.equal(r.ok, true, JSON.stringify(r));
+      assert.ok(h.one("SELECT revoked FROM inv WHERE token = 'tA'").revoked, "A left");
+      assert.equal(h.one("SELECT revoked FROM inv WHERE token = 'tB'").revoked, null, "B is still in");
+      assert.deepEqual({ ...h.one("SELECT status, claimed_by FROM oq WHERE id = ?", q.id) }, { status: "claimed", claimed_by: B }, "B's claim stays");
+      assert.equal(h.room.gameRow(lobby.id).status, "lobby", "B's lobby still waits");
+      assert.equal(h.one("SELECT COUNT(*) AS n FROM m WHERE sender = 'Referee'").n, 0, "no Referee line");
+      assert.ok(h.one("SELECT avatar_key FROM inv WHERE token = 'tB'").avatar_key, "B's picture stays");
+      assert.equal(h.room.voiceOf(B).voice_id, "v-B", "B's voice stays");
+      assert.equal(h.one("SELECT COUNT(*) AS n FROM cfg WHERE k LIKE 'voice-del:%'").n, 0, "no clone queued for deletion");
+      assert.deepEqual(c.calls, [], "nothing asked of Cartesia");
+      assert.equal(h.one("SELECT COUNT(*) AS n FROM push WHERE member = ?", keyB).n, 1, "B's push row stays");
+      assert.equal(h.one("SELECT COUNT(*) AS n FROM mh").n, 1, "B's hook stays");
+      for (const k of [put.key]) assert.ok(h.objects.has(k), "B's sample object stays");
+      assert.equal(r.clone, null);
+    } finally { c.restore(); }
+  });
+}
+
+/** a JSON body of about mb MiB (an object, then spaces), as a stream that counts what was read */
+function bigBody(mb) {
+  let pulled = 0, first = true;
+  const stream = new ReadableStream({
+    pull(ctl) {
+      if (pulled >= mb * (1 << 20)) { ctl.enqueue(new TextEncoder().encode("}")); ctl.close(); return; }
+      const b = new Uint8Array(1 << 20).fill(0x20);
+      if (first) { b.set(new TextEncoder().encode("{\"confirm\": \"unit\"")); first = false; }
+      pulled += b.byteLength;
+      ctl.enqueue(b);
+    },
+  });
+  return { stream, pulled: () => pulled };
+}
+import { museHookRoute } from "../../worker/routes/muse.ts";
+import { webhookHookRoute } from "../../worker/routes/webhook.ts";
+import { SMALL_BODY_MAX, REFUSED_DRAIN_MAX } from "../../worker/limits.ts";
+// what a refused body may cost: the cap, what settleBody reads away past it
+// so the 413 arrives (REFUSED_DRAIN_MAX), and the stream's 1 MiB chunks
+// read ahead; well under the 40 MiB sent
+const READ_MAX = SMALL_BODY_MAX + REFUSED_DRAIN_MAX + 3 * (1 << 20);
+
+test("the leave looks the token up before it reads a body: a refused token gets its 403 unread, and a body over SMALL_BODY_MAX is 413", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  h.member("Bea");
+  for (const tok of ["not-a-token", "tok-gone"]) {
+    if (tok === "tok-gone") { h.member("Gone"); h.room.revoke("tok-Gone"); }
+    const b = bigBody(40);
+    const url = new URL("http://localhost/api/rooms/unit/leave");
+    const rc = { request: new Request(url, { method: "POST", body: b.stream, headers: { "Content-Type": "application/json" } }), env: { ROOM: { idFromName: (n) => n, get: () => stubOf(h) } }, url, path: url.pathname, owner: false, invite: tok === "tok-gone" ? "tok-Gone" : tok, ctx: { waitUntil() {} } };
+    const r = await leaveRoute(rc, /^\/api\/rooms\/([^/]+)\/leave$/.exec(url.pathname));
+    assert.equal(r.status, 403, tok);
+    assert.ok(b.pulled() <= 2 * (1 << 20), tok + ": read " + b.pulled() + " bytes of a refused caller's body");
+  }
+  // a member's own body: at most SMALL_BODY_MAX
+  const b = bigBody(40);
+  const url = new URL("http://localhost/api/rooms/unit/leave");
+  const rc = { request: new Request(url, { method: "POST", body: b.stream, headers: { "Content-Type": "application/json" } }), env: { ROOM: { idFromName: (n) => n, get: () => stubOf(h) } }, url, path: url.pathname, owner: false, invite: "tok-Ada", ctx: { waitUntil() {} } };
+  const r = await leaveRoute(rc, /^\/api\/rooms\/([^/]+)\/leave$/.exec(url.pathname));
+  assert.equal(r.status, 413);
+  assert.ok(b.pulled() <= READ_MAX, "read " + b.pulled());
+  assert.equal(inv(h, "Ada").revoked, null, "nothing changed");
+  // the token's refusal comes before a body's: no confirm, a junk token -> 403, not 400
+  assert.deepEqual([(await leave(h, "not-a-token", {})).status], [403]);
+});
+
+// The muse-hook and webhook POSTs read their few fields before the room has
+// checked the token: at most SMALL_BODY_MAX now (413 past it), for any
+// caller; a body within it is answered as before.
+for (const [label, route, re, path] of [["muse-hook", museHookRoute, /^\/api\/rooms\/([^/]+)\/muse-hook\/?$/, "muse-hook"], ["webhook", webhookHookRoute, /^\/api\/rooms\/([^/]+)\/webhook\/?$/, "webhook"]]) {
+  test("POST .../" + label + " reads at most SMALL_BODY_MAX of a body (413 past it), whatever the token", async () => {
+    const h = makeRoom();
+    h.member("Ada");
+    for (const tok of ["not-a-token", "tok-Ada"]) {
+      const b = bigBody(40);
+      const url = new URL("http://localhost/api/rooms/unit/" + path);
+      const rc = { request: new Request(url, { method: "POST", body: b.stream, headers: { "Content-Type": "application/json" } }), env: { ROOM: { idFromName: (n) => n, get: () => stubOf(h) } }, url, path: url.pathname, owner: false, invite: tok, ctx: { waitUntil() {} } };
+      const r = await route(rc, re.exec(url.pathname));
+      assert.equal(r.status, 413, label + " " + tok);
+      assert.ok(b.pulled() <= READ_MAX, label + " " + tok + ": read " + b.pulled());
+    }
+    // a small body is answered as it was: a junk token's 403, and a member's 400 for an empty change
+    const small = async (tok, body) => {
+      const url = new URL("http://localhost/api/rooms/unit/" + path);
+      const rc = { request: new Request(url, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }), env: { ROOM: { idFromName: (n) => n, get: () => stubOf(h) } }, url, path: url.pathname, owner: false, invite: tok, ctx: { waitUntil() {} } };
+      const r = await route(rc, re.exec(url.pathname));
+      return { status: r.status, json: await r.json() };
+    };
+    assert.equal((await small("tok-Ada", {})).status, 400);
+    assert.equal((await small("not-a-token", { muted: true })).status, 403);
+  });
+}
+
+test("last_member's refusal carries unopened, the count of invites not yet opened, over REST and MCP", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  unopened(h, "Cy");
+  unopened(h, "Dee");
+  const r = await leave(h, "tok-Ada", OK);
+  assert.deepEqual(r.json, { error: r.json.error, code: "last_member", unopened: 2 });
+  const j = await mcpLeave(h, "tok-Ada", OK);
+  assert.deepEqual(j.result.structuredContent, { code: "last_member", unopened: 2 });
+  const h2 = makeRoom();
+  h2.member("Ada");
+  assert.equal((await leave(h2, "tok-Ada", OK)).json.unopened, 0);
+});
+
+test("delete_room is the boolean true and nothing else: \"true\", 1 and \"yes\" are no yes, and change nothing", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  for (const v of ["true", 1, "yes", "1", {}]) {
+    const r = await leave(h, "tok-Ada", { confirm: R, delete_room: v });
+    assert.deepEqual([r.status, r.json.code], [409, "last_member"], JSON.stringify(v));
+    const j = await mcpLeave(h, "tok-Ada", { confirm: R, delete_room: v });
+    assert.equal(j.result.structuredContent.code, "last_member", "MCP " + JSON.stringify(v));
+  }
+  assert.equal(inv(h, "Ada").revoked, null);
+  assert.equal(h.room.exists(), true);
+});
+
+test("MCP leave_room answers the token's refusal before a wrong confirm, as every tool does", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  h.member("Gone");
+  h.room.revoke("tok-Gone");
+  for (const [tok, code] of [["tok-Gone", "invite_revoked"], ["not-a-token", "invite_invalid"]]) {
+    const j = await mcpLeave(h, tok, { confirm: "nope" });
+    assert.deepEqual([j.error && j.error.code, j.error && j.error.data.code], [-32001, code], tok);
+  }
+});
+
+import { LEFT_MSG } from "../../worker/room/Room.ts";
+test("a token whose member left is refused with a sentence of its own, under 403 invite_revoked; an owner's revoke keeps its sentence", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  h.member("Bea");
+  h.member("Cut");
+  h.room.revoke("tok-Cut");
+  assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
+  const l = h.room.lookupInvite("tok-Ada");
+  assert.deepEqual([l.ok, l.status, l.code, l.error], [false, 403, "invite_revoked", LEFT_MSG]);
+  assert.equal(LEFT_MSG, "You left this room with this invite, so it will not work again. A member of the room can invite you anew.");
+  assert.equal(h.room.lookupInvite("tok-Cut").error, "This invite link has been revoked. Ask whoever gave it to you for a new one.");
+  // every surface says it: access (REST), the stream, MCP
+  assert.equal(h.room.access("tok-Ada", false).error, LEFT_MSG);
+  const s = await h.room.fetch(new Request("http://do/stream?room=unit&after=0", { headers: { "X-Invite-Token": "tok-Ada" } }));
+  assert.deepEqual([s.status, (await s.json()).error], [403, LEFT_MSG]);
+  const j = await mcpLeave(h, "tok-Ada", OK);
+  assert.deepEqual([j.error.code, j.error.message, j.error.data.code], [-32001, LEFT_MSG, "invite_revoked"]);
+});
+
+test("after its waits the leave writes no rows in a room deleted meanwhile (its cached speak audio is left to the room's deletion)", async () => {
+  let release, hold = false;
+  const gate = new Promise((r) => { release = r; });
+  const h = makeRoom({ before: async (op, key) => { if (hold && op === "delete" && String(key).includes("avatars/")) await gate; } });
+  h.member("Ada");
+  h.member("Bea");
+  await h.room.setAvatar("Ada", PNG, "image/png", R);
+  const put = await h.room.putVoiceSample("Ada", MP3, "audio/mpeg", R);
+  await h.room.setVoiceId("Ada", "cartesia", "v-ada", put.gen, put.key);
+  hold = true;
+  let a, b;
+  const lines = await warnsDuring(async () => {
+    const pa = h.room.leave("tok-Ada", R, false);
+    await new Promise((r) => setTimeout(r, 5));
+    b = await h.room.leave("tok-Bea", R, true);
+    release();
+    a = await pa;
+    await h.settled();
+  });
+  assert.equal(a.ok, true);
+  assert.equal(b.room_deleted, true, "Bea was the last member then, and the room went");
+  assert.ok(!lines.some((l) => l.includes("leave.speak") || l.includes("no such table")), "no write was tried in the deleted room: " + lines.join(" | "));
+});
+
+test("a room-deleting leave whose clone delete fails keeps the clone's pending record through the deletion", async () => {
+  const c = cartesia(() => new Response("{}", { status: 500 }));
+  try {
+    const h = makeRoom();
+    h.member("Ada");
+    const put = await h.room.putVoiceSample("Ada", MP3, "audio/mpeg", R);
+    await h.room.setVoiceId("Ada", "cartesia", "v-kept", put.gen, put.key);
+    const r = await leave(h, "tok-Ada", { confirm: R, delete_room: true });
+    assert.equal(r.json.room_deleted, true);
+    assert.equal(h.room.exists(), false);
+    assert.ok(c.calls.includes("DELETE https://api.cartesia.ai/voices/v-kept"), "Cartesia was asked");
+    assert.deepEqual(h.all("SELECT k FROM cfg WHERE k LIKE 'voice-del:%'").map((x) => x.k), ["voice-del:v-kept"], "the record outlives the room, for a later try");
+  } finally { c.restore(); }
+});
+
+test("two leaves at once: the room is deleted at most once, and never left with nobody in it", async () => {
+  for (const del of [false, true]) {
+    const logged = [];
+    const h = makeRoom({ env: { REQUESTS: { put: async (k, v) => { logged.push(v); }, get: async () => null } } });
+    h.member("Ada");
+    h.member("Bea");
+    await h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R);
+    const [a, b] = await Promise.all([h.room.leave("tok-Ada", R, del), h.room.leave("tok-Bea", R, del)]);
+    await h.settled();
+    const deletions = logged.filter((v) => /room deleted/.test(v)).length;
+    if (del) {
+      assert.deepEqual([a.ok, b.ok, a.room_deleted, b.room_deleted], [true, true, false, true], JSON.stringify([a, b]));
+      assert.equal(deletions, 1);
+      assert.equal(h.room.exists(), false);
+    } else {
+      assert.deepEqual([a.ok, b.code], [true, "last_member"], JSON.stringify([a, b]));
+      assert.equal(deletions, 0);
+      assert.equal(inv(h, "Bea").revoked, null, "Bea is still in: the room is not empty");
+    }
+  }
+});
+
+test("lobbies it created, or accepted without creating, wait on the others: only those waiting for its accept are declined", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  h.member("Bea");
+  h.member("Cy");
+  const created = (await h.room.createGame("Ada", ["Ada", "Bea"], { game: "duel" }, R)).game;
+  const accepted = (await h.room.createGame("Bea", ["Bea", "Ada", "Cy"], { game: "auction" }, R)).game;
+  await h.room.gameAccept(accepted.id, "Ada", R);
+  const waiting = (await h.room.createGame("Cy", ["Cy", "Ada"], { game: "duel" }, R)).game;
+  assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
+  assert.deepEqual([created, accepted, waiting].map((g) => h.room.gameRow(g.id).status), ["lobby", "lobby", "cancelled"]);
+});
+
+test("a revoked older row of the same spelling loses its picture too (the clear reaches every row of the spelling), and stays as it was otherwise", async () => {
+  const h = makeRoom();
+  const at = Date.now() - 60 * 86400000;
+  h.db.prepare("INSERT INTO inv (token, name, created, used, kind) VALUES ('tOld', 'ADA', ?, ?, 'agent')").run(at, at);
+  await h.room.setAvatar("ADA", PNG, "image/png", R);
+  const oldKey = h.one("SELECT avatar_key FROM inv WHERE token = 'tOld'").avatar_key;
+  h.room.revoke("tOld");
+  h.member("Ada");
+  h.member("Bea");
+  assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
+  const old = { ...h.one("SELECT avatar_key, left_ts, revoked FROM inv WHERE token = 'tOld'") };
+  assert.equal(old.avatar_key, null);
+  assert.ok(!h.objects.has(oldKey), "its object is deleted");
+  assert.ok(old.revoked && old.left_ts === null, "it was revoked, not left: " + JSON.stringify(old));
+});
+
+import { speakRoute } from "../../worker/routes/voices.ts";
+test("the speak route's answer for a voice changed mid-synthesis (served uncached) carries the CORS headers", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const put = await h.room.putVoiceSample("Ada", MP3, "audio/mpeg", R);
+  await h.room.setVoiceId("Ada", "cartesia", "v-1", put.gen, put.key);
+  const m = await h.room.post("Ada", "say this", R, false);
+  const real = globalThis.fetch;
+  // Cartesia speaks, and the voice changes while it does: the play is not cached
+  globalThis.fetch = async () => { h.db.prepare("UPDATE mv SET voice_id = 'v-2'").run(); return new Response(MP3, { status: 200, headers: { "Content-Type": "audio/mpeg" } }); };
+  try {
+    const url = new URL("http://localhost/api/rooms/unit/messages/" + m.id + "/speak");
+    const rc = { request: new Request(url), env: { ROOM: { idFromName: (n) => n, get: () => stubOf(h) }, CARTESIA_API_KEY: "test-key" }, url, path: url.pathname, owner: false, invite: "tok-Ada", ctx: { waitUntil() {} } };
+    const r = await speakRoute(rc, /^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/speak$/.exec(url.pathname));
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("Cache-Control"), "no-store", "the uncached answer");
+    assert.equal(r.headers.get("Access-Control-Allow-Origin"), "*");
+  } finally { globalThis.fetch = real; }
 });

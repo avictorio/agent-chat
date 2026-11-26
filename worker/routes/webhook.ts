@@ -14,10 +14,10 @@
 // WEBHOOK_REGISTER_WINDOW_S per member and room: each registration calls
 // the URL. Nothing here logs a URL or a secret.
 
-import { BadRequest, deny, json, rateLimited, readBody } from "../lib/http.js";
+import { BadRequest, deny, json, rateLimited, readBody, settleBody } from "../lib/http.js";
 import { nameFold } from "../lib/text.js";
 import { webhookChallenge, webhookSecret, webhookUrl } from "../lib/webhook.js";
-import { ROOM_RE, WEBHOOK_REGISTER_MAX, WEBHOOK_REGISTER_WINDOW_S } from "../limits.js";
+import { ROOM_RE, SMALL_BODY_MAX, WEBHOOK_REGISTER_MAX, WEBHOOK_REGISTER_WINDOW_S } from "../limits.js";
 import type { RouteContext } from "../index.js";
 
 /** A boolean field, or undefined when absent. */
@@ -51,7 +51,12 @@ export async function webhookHookRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  const body = await readBody(request);
+  // a few small fields, read before the room has checked the token: at
+  // most SMALL_BODY_MAX, so a caller the room would refuse cannot make the
+  // Worker read a body of any size (index.ts settles one only for a good token)
+  const small = await settleBody(request, SMALL_BODY_MAX);
+  if (!small) return json({ error: "That request's body is too large: send {\"url\"}, {\"rotate_secret\": true} or {\"muted\", \"enabled\"}." }, 413);
+  const body = await readBody(small);
   const urlRaw = body && body.url !== undefined && body.url !== null ? body.url : undefined;
   const rotate = flag(body?.rotate_secret, "rotate_secret");
   const muted = flag(body?.muted, "muted");

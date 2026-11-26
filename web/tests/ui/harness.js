@@ -138,6 +138,13 @@ function fresh(opts) {
     // device's first POST /leave, so the server finds it the last member
     // who has joined (409 last_member) though the list on screen had them
     othersLeave: !!opts.othersLeave,
+    // joinBeforeDelete: someone joins between the last member's two calls,
+    // so the one with delete_room leaves without deleting the room
+    joinBeforeDelete: !!opts.joinBeforeDelete,
+    // leaveForce: answers POST /leave gives first, in order: [status, body]
+    // pairs (a string body is sent as plain text: an answer that is not the
+    // Worker's JSON), or 'abort' for a request that never gets an answer
+    leaveForce: opts.leaveForce ? opts.leaveForce.slice() : [],
     msgs: [
       { id: 1, ts: now - D - 2 * H, from: 'Henry', text: 'Morning all. Draft plan for Lima is in the board.' },
       { id: 2, ts: now - D - 2 * H + 60e3, from: 'Henry', text: 'Second thought: Huaca first, then Barranco.' },
@@ -783,13 +790,18 @@ async function setup(page, S, calls) {
     // active row) is refused without delete_room and changes nothing
     if (p.endsWith('/leave') && m === 'POST') {
       (S.leaves = S.leaves || []).push(body);
+      if (S.leaveForce.length) {
+        const f = S.leaveForce.shift();
+        if (f === 'abort') return route.abort('failed');
+        return typeof f[1] === 'string' ? route.fulfill({ status: f[0], contentType: 'text/plain', body: f[1] }) : J(f[1], f[0]);
+      }
       if (body.confirm !== 'demo') return J({ error: 'To leave this room for good, send {"confirm": "demo"}: the room\'s own name, so a call meant for another room cannot leave this one. Nothing was changed.', code: 'confirm_mismatch' }, 400);
       const me = S.agentYou ? 'Probe' : 'Anthony';
       if (S.othersLeave) { S.othersLeave = false; for (const x of S.mb.members) if (x.name !== me && x.status === 'active') Object.assign(x, { status: 'revoked', revoked: clockNow() - 60e3, left: clockNow() - 60e3, invite_link: undefined }); }
       const last = !S.mb.members.some((x) => x.name !== me && x.status === 'active');
       const unopened = S.mb.members.filter((x) => x.name !== me && x.status === 'unused').length;
-      if (last && body.delete_room !== true) return J({ error: 'You are the last member of this room who has joined: leaving deletes the room and everything in it, for good' + (unopened ? ', and the ' + unopened + ' invites not yet opened stop working too' : '') + '. To leave and delete it, send "delete_room": true beside "confirm". Nothing was changed.', code: 'last_member' }, 409);
-      return J({ room: 'demo', name: me, left: clockNow(), room_deleted: last });
+      if (last && body.delete_room !== true) return J({ error: 'You are the last member of this room who has joined: leaving deletes the room and everything in it, for good' + (unopened ? ', and the ' + unopened + ' invites not yet opened stop working too' : '') + '. To leave and delete it, send "delete_room": true beside "confirm". Nothing was changed.', code: 'last_member', unopened }, 409);
+      return J({ room: 'demo', name: me, left: clockNow(), room_deleted: last && !S.joinBeforeDelete });
     }
     if (p.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
     // Anything else is a request the stub doesn't know: record it, so a

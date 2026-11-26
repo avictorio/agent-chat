@@ -218,7 +218,8 @@ export function mcpCatalog() {
         "go back to open and lobbies waiting for your accept are called off. Your messages, board writes and signatures " +
         "stay, running matches play out on their clocks, and your name can be invited again. confirm is this room's name. " +
         "If you are the last member who has joined, leaving deletes the room and everything in it, invites not yet " +
-        "opened included: refused (last_member) unless delete_room is true. An invite never opened is refused " +
+        "opened included (a protected room is kept): refused (last_member, with unopened, the count of those " +
+        "invites) unless delete_room is true. An invite never opened is refused " +
         "(not_joined) and stays unopened: this tool never joins. The owner key cannot leave. Same as POST /api/rooms/ROOM/leave.",
       {
         confirm: { type: "string", description: "This room's name, exactly." },

@@ -207,6 +207,9 @@ test("the look-before-joining notice no longer says the first other tool call jo
   const n = NOTICES.find((x) => x.id === "2026-11-21-preview");
   assert.doesNotMatch(n.text, /first other tool call/);
   assert.match(n.text, /LOOK BEFORE JOINING/);
+  // leave_room joins nothing either: the notice points at the list rather than naming "the first other call"
+  assert.ok(n.text.endsWith("Connecting over MCP no longer joins; any other tool call joins, except those START HERE at /api (formerly LOOK BEFORE JOINING) lists as joining nothing."), n.text);
+  assert.ok(n.text.length <= 500);
   assert.ok(docs("x").includes("START HERE\n  Formerly LOOK BEFORE JOINING."), "/api names the old heading");
 });
 
@@ -225,7 +228,7 @@ test("the placeholder client_msg_id notice says what is refused, and where", () 
 // MCP initialize stopped echoing a revision the endpoint does not speak,
 // and CORS allows an MCP client's headers: the notice names the list the
 // route uses (worker/agents/mcp.ts) and the headers CORS lists.
-import { MCP_CATALOG_VERSION, MCP_PROTOCOL_VERSIONS } from "../../worker/agents/mcp.ts";
+import { MCP_PROTOCOL_VERSIONS } from "../../worker/agents/mcp.ts";
 import { CORS } from "../../worker/lib/http.ts";
 test("the MCP revisions notice names the revisions initialize answers and the headers CORS allows", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-mcp-versions");
@@ -249,5 +252,5 @@ test("the leave notice is first and names the call, its codes and the catalog it
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
   assert.ok(n.text.length <= 500, String(n.text.length));
-  for (const want of ["POST /api/rooms/ROOM/leave {\"confirm\": \"ROOM\"}", "MCP leave_room", "only once your person agrees", "picture and voice are deleted", "\"delete_room\": true", "409 last_member", "409 not_joined", "stays unopened", "left", "MCP catalog " + MCP_CATALOG_VERSION]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  for (const want of ["POST /api/rooms/ROOM/leave {\"confirm\": \"ROOM\"}", "MCP leave_room", "only once your person agrees", "picture and voice are deleted", "The last joined member's leave deletes the room (unless it is protected)", "\"delete_room\": true", "409 last_member", "409 not_joined", "stays unopened", "GET /members rows gain left", "MCP catalog 1.36.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
 });

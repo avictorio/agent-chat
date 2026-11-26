@@ -69,7 +69,10 @@ export type InvRow = { token: string, name: string, created: number, revoked: nu
   invited_by: string | null, posted: number | null, avatar_type: string | null, avatar_ver: number | null, avatar_key: string | null, left_ts: number | null };
 /** cfg: a room setting (every write stores a string). */
 /** What the invite lookup reads from an inv row. */
-export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "created" | "posted">;
+export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "created" | "posted" | "left_ts">;
+/** The refusal of a token whose member left the room with it (403
+ *  invite_revoked, as any revoked token: only the sentence differs). */
+export const LEFT_MSG = "You left this room with this invite, so it will not work again. A member of the room can invite you anew.";
 /** A refused credential: the status, its code and its sentence. */
 export type Refusal = { ok: false, status: number, code: string, error: string };
 export type InviteLookup = { ok: true, row: InviteCols } | Refusal;
@@ -781,8 +784,10 @@ export class Room extends DurableObject {
     // invite to a deleted room. Asked after a route's check, the room
     // was deleted meanwhile.
     if (!this.ready && !this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inv'").toArray().length) return { ok: false, status: 410, code: "room_deleted", error: GONE_MSG };
-    const row = this.sql.exec<InviteCols>("SELECT name, revoked, used, seen, kind, invited_by, created, posted FROM inv WHERE token = ?", token).toArray()[0];
+    const row = this.sql.exec<InviteCols>("SELECT name, revoked, used, seen, kind, invited_by, created, posted, left_ts FROM inv WHERE token = ?", token).toArray()[0];
     if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
+    // a member who left by itself (MemberMethods.leave) is told that, under the same code
+    if (row.revoked && row.left_ts) return { ok: false, status: 403, code: "invite_revoked", error: LEFT_MSG };
     if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask whoever gave it to you for a new one." };
     return { ok: true, row: row };
   }

@@ -31,14 +31,15 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
   });
   await run('invites-dark-mobile', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => { await shot(page, 'members-mobile-dark.png'); });
   /* Leave room: the caller's own row in Members has the control, and its
-     dialog says what leaving does. Here the other members leave just
-     before (othersLeave), so the server answers the first Leave room with
-     409 last_member, which changes nothing: the dialog asks the deletion
-     question instead, on a list read again that shows their rows as
-     "Left <date>". The second button sends delete_room; then the device
-     forgets the room as Home's Forget does (every per-room key, another
-     room's kept) and goes home. Each viewport and scheme looks at the
-     control, both confirmations and the Left rows. */
+     dialog always opens on what leaving does. Here the other members
+     leave just before (othersLeave), so the server answers Leave room with
+     409 last_member, which changes nothing: only then does the dialog ask
+     the deletion question, counting the unopened invites the answer
+     names (unopened), on a list read again whose rows show "Left <date>".
+     Its button sends delete_room; then the device forgets the room as
+     Home's Forget does (every per-room key, another room's kept) and goes
+     home. Each viewport and scheme looks at the control, both
+     confirmations and the Left rows. */
   const DEMO_KEYS = ['chat-invite:demo', 'chat-you:demo', 'chat-push-mode:/api/rooms/demo', 'ac-members:demo', 'ac:agent-app:demo', 'chat-upl:demo', 'chat-draft:demo:Anthony'];
   // once per tab (sessionStorage), not again on the home page it ends on
   const seedRoomKeys = () => {
@@ -49,6 +50,8 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     } catch { /* the scenario fails visibly */ }
   };
   const leaveText = (page) => page.$eval('#leaveDlg', (d) => d.innerText.replace(/\s+/g, ' ').trim());
+  const demoKeys = (page) => page.evaluate((keys) => keys.filter((k) => localStorage.getItem(k) !== null), DEMO_KEYS);
+  const openLeave = async (page) => { await page.click('#leaveRoom'); await page.waitForSelector('#leaveDlg[open] #leaveYes', { timeout: 4000 }); };
   for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) for (const scheme of ['light', 'dark']) {
     const tag = vp.tag + '-' + scheme;
     await run('leave-room-' + tag, { scheme, w: vp.w, h: vp.h, touch: vp.touch, hash: '#members', init: seedRoomKeys, state: { othersLeave: true } }, async (page, S, calls) => {
@@ -58,8 +61,7 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       must(rows.filter((r) => r.endsWith('|true')).length === 1 && rows.includes('Anthony (you)|true'), 'Leave room is on the caller\'s own row only: ' + JSON.stringify(rows));
       await page.$eval('#leaveRoom', (b) => b.scrollIntoView({ block: 'center' }));
       await shot(page, 'leave-control-' + tag + '.png');
-      await page.click('#leaveRoom');
-      await page.waitForSelector('#leaveDlg[open] #leaveYes', { timeout: 4000 });
+      await openLeave(page);
       const ask = await leaveText(page);
       for (const want of ['Leave demo?', 'You leave the room for good, as Anthony.', 'Your invite link stops working, on every device.', 'Your notifications, wake setups and pending uploads for this room stop.', 'Your picture and your voice are deleted.', 'Your messages and what you wrote on the board stay.', 'Questions you claimed go back to open, and matches waiting for you to accept are called off.', 'Games in progress play out on the clock.', 'Your name can be invited again.']) must(ask.includes(want), 'the dialog says: ' + want + ' / ' + ask);
       const fit = await page.$eval('#leaveDlg', (d) => { const r = d.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), vw: window.innerWidth, doc: document.documentElement.scrollWidth }; });
@@ -68,54 +70,148 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       await page.click('#leaveNo');
       must(await page.$eval('#leaveDlg', (d) => !d.open), 'Cancel closes it');
       must(!(S.leaves || []).length, 'Cancel sends nothing');
-      await page.click('#leaveRoom');
-      await page.waitForSelector('#leaveDlg[open] #leaveYes', { timeout: 4000 });
+      await openLeave(page);
       await page.click('#leaveYes');
       await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 6000 });
       await settle(page);
       const last = await leaveText(page);
-      must(last.includes('Delete demo?') && last.includes('You are the last member of demo who has joined. Leaving deletes the room and everything in it, for good: every message, file, board item and game. The 1 invite not yet opened stops working too.') && last.includes('This can\'t be undone.'), 'the deletion question: ' + last);
+      must(last.includes('Delete demo?') && last.includes('Nobody else has joined demo, so leaving deletes the room and everything in it, for good: every message, file, board item and game. The 1 invite not yet opened stops working too.') && last.includes('Nothing has changed yet. This can\'t be undone.'), 'the deletion question, after the server\'s answer: ' + last);
       must(JSON.stringify(S.leaves) === '[{"confirm":"demo"}]', 'the first press sent no delete_room: ' + JSON.stringify(S.leaves));
+      must((await demoKeys(page)).length === DEMO_KEYS.length, 'nothing forgotten while nothing changed');
       await shot(page, 'leave-last-' + tag + '.png');
-      // behind the dialog the list was read again: the members who left show "Left <date>", the owner's removal "Access removed <date>"
+      // the list was read again: the members who left show "Left <date>", the owner's removal "Access removed <date>"
+      await page.click('#leaveNo');
+      await settle(page);
       const subs = await page.$$eval('#mList .card.member', (cs) => cs.map((c) => c.querySelector('.card-title').textContent + ': ' + c.querySelector('.card-meta').textContent + ' [' + c.querySelector(':scope > .pill').textContent + ']'));
       must(subs.some((x) => /^Henry: Left \S/.test(x) && x.endsWith('[Left]')) && subs.some((x) => /^Ada: Left \S/.test(x)) && subs.some((x) => /^Old bot: Access removed \S/.test(x) && x.endsWith('[Removed]')), 'the Left rows: ' + JSON.stringify(subs));
-      await page.click('#leaveNo');
       await page.$eval('#mList', (l) => [...l.querySelectorAll('.card.member')].find((c) => c.textContent.startsWith('Henry')).scrollIntoView({ block: 'center' }));
       await settle(page);
       await shot(page, 'leave-left-rows-' + tag + '.png');
-      await page.click('#leaveRoom');
-      await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 4000 });
+      // again: the dialog opens on what leaving does, the server answers last_member, then the deletion
+      await openLeave(page);
+      must((await leaveText(page)).startsWith('Leave demo?'), 'the dialog always opens on what leaving does');
+      await page.click('#leaveYes');
+      await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 6000 });
       await Promise.all([page.waitForURL('https://chat.victorio.cloud/', { timeout: 10000 }), page.click('#leaveDelete')]);
       await page.waitForSelector('#view-rooms:not([hidden]) #roomlist', { timeout: 10000 });
       await settle(page);
-      must(JSON.stringify(S.leaves.slice(-1)) === '[{"confirm":"demo","delete_room":true}]', 'the second button sends delete_room: ' + JSON.stringify(S.leaves));
-      const kept = await page.evaluate((keys) => ({ demo: keys.filter((k) => localStorage.getItem(k) !== null), lima: [localStorage.getItem('chat-invite:lima'), localStorage.getItem('chat-you:lima')], rows: [...document.querySelectorAll('#roomlist .rn')].map((e) => e.textContent) }), DEMO_KEYS);
-      must(!kept.demo.length, 'every key of the room is gone: ' + JSON.stringify(kept.demo));
+      must(JSON.stringify(S.leaves) === '[{"confirm":"demo"},{"confirm":"demo"},{"confirm":"demo","delete_room":true}]', 'only the second question\'s button sends delete_room: ' + JSON.stringify(S.leaves));
+      const kept = await page.evaluate(() => ({ lima: [localStorage.getItem('chat-invite:lima'), localStorage.getItem('chat-you:lima')], rows: [...document.querySelectorAll('#roomlist .rn')].map((e) => e.textContent) }));
+      must(!(await demoKeys(page)).length, 'every key of the room is gone: ' + JSON.stringify(await demoKeys(page)));
       must(kept.lima[0] === 'tok_lima' && kept.lima[1] === 'Ann' && JSON.stringify(kept.rows) === '["lima"]', 'another room stays: ' + JSON.stringify(kept));
       must(!calls.some((c) => c.includes('/push/unsubscribe')), 'nothing asks the room to unsubscribe: the leave dropped the registrations');
       if (vp.tag === 'desktop' && scheme === 'light') await shot(page, 'leave-home.png');
       return { rows: rows.length, leaves: S.leaves.length };
     });
   }
-  /* The list on screen shows nobody else who has joined: Leave room asks
-     the deletion question at once, and its button sends delete_room. A
-     person using an agent's invite in the web app finds the control on
-     that invite's row. */
-  await run('leave-room-alone', { hash: '#members', init: seedRoomKeys }, async (page, S) => {
-    for (const x of S.mb.members) if (x.name !== 'Anthony' && x.status === 'active') Object.assign(x, { status: 'unused', joined: null, last_seen: null });
-    await page.reload();
+  /* An ordinary leave: the server answers 200 to the first press, and the
+     device forgets the room and goes home with no second question. */
+  await run('leave-room-ordinary', { hash: '#members', init: seedRoomKeys }, async (page, S) => {
     await page.waitForSelector('#mList .card.member', { timeout: 10000 });
     await settle(page);
-    await page.click('#leaveRoom');
-    await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 4000 });
-    const t = await leaveText(page);
-    must(t.includes('The 3 invites not yet opened stop working too.') && !(await page.$('#leaveYes')), 'asked the deletion question at once: ' + t);
-    await shot(page, 'leave-alone.png');
-    await Promise.all([page.waitForURL('https://chat.victorio.cloud/', { timeout: 10000 }), page.click('#leaveDelete')]);
-    must(JSON.stringify(S.leaves) === '[{"confirm":"demo","delete_room":true}]', 'one call, with delete_room: ' + JSON.stringify(S.leaves));
+    await openLeave(page);
+    await Promise.all([page.waitForURL('https://chat.victorio.cloud/', { timeout: 10000 }), page.click('#leaveYes')]);
+    must(JSON.stringify(S.leaves) === '[{"confirm":"demo"}]', 'one call, no delete_room: ' + JSON.stringify(S.leaves));
+    must(!(await demoKeys(page)).length, 'the room is forgotten');
     return { leaves: S.leaves };
   });
+  /* Someone joins between the last member's two calls: the one with
+     delete_room leaves without deleting the room, and the dialog says so
+     before going home. */
+  for (const [tag, o] of [['desktop-light', {}], ['phone-dark', { scheme: 'dark', w: 390, h: 844, touch: true }]]) {
+    await run('leave-room-kept-' + tag, { ...o, hash: '#members', init: seedRoomKeys, state: { othersLeave: true, joinBeforeDelete: true } }, async (page, S) => {
+      await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+      await settle(page);
+      await openLeave(page);
+      await page.click('#leaveYes');
+      await page.waitForSelector('#leaveDlg[open] #leaveDelete', { timeout: 6000 });
+      await page.click('#leaveDelete');
+      await page.waitForSelector('#leaveDlg[open] #leaveHome', { timeout: 6000 });
+      const t = await leaveText(page);
+      must(t.includes('You left demo') && t.includes('The room was not deleted: someone else joined it in the meantime, so it stays for them.') && !(await page.$('#leaveNo')), 'says the room stays: ' + t);
+      must(!(await demoKeys(page)).length, 'the room is forgotten already');
+      await shot(page, 'leave-kept-' + tag + '.png');
+      await page.keyboard.press('Escape');
+      must(await page.$eval('#leaveDlg', (d) => d.open), 'Escape does not close it: the person is out');
+      await Promise.all([page.waitForURL('https://chat.victorio.cloud/', { timeout: 10000 }), page.click('#leaveHome')]);
+      return { leaves: S.leaves };
+    });
+  }
+  /* The Worker's answers that say the person is out whatever this call did
+     (a refused invite, a room that is gone): the device forgets the room
+     and says so. A refusal that changed nothing (400, 409) says so; a lost
+     answer, a 5xx, or a 403 or 404 that is not the Worker's (no code, no
+     JSON sentence) says the result is not known, and keeps the room. */
+  const LEFT = 'You left this room with this invite, so it will not work again. A member of the room can invite you anew.';
+  const OUT = [
+    ['revoked', [403, { error: LEFT, code: 'invite_revoked' }], LEFT],
+    ['invalid', [403, { error: 'This invite link isn\'t valid for this room.', code: 'invite_invalid' }], 'This invite link isn\'t valid for this room.'],
+    ['no-room', [404, { error: 'No room with that name yet. Create it from the home page.' }], 'No room with that name yet.'],
+    ['deleted', [410, { error: 'This room was deleted while the request was in flight; nothing was saved', code: 'room_deleted' }], 'This room was deleted'],
+  ];
+  for (const [label, answer, said] of OUT) {
+    const shoot = label === 'revoked';
+    for (const [tag, o] of shoot ? [['desktop-light', {}], ['phone-dark', { scheme: 'dark', w: 390, h: 844, touch: true }]] : [['desktop-light', {}]]) {
+      await run('leave-room-out-' + label + '-' + tag, { ...o, hash: '#members', init: seedRoomKeys, state: { leaveForce: [answer] } }, async (page) => {
+        await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+        await settle(page);
+        await openLeave(page);
+        await page.click('#leaveYes');
+        await page.waitForSelector('#leaveDlg[open] #leaveHome', { timeout: 6000 });
+        const t = await leaveText(page);
+        must(t.includes('You are no longer in demo') && t.includes(said) && t.includes('This device no longer keeps the room.'), 'says the person is out: ' + t);
+        must(!(await demoKeys(page)).length, 'the room is forgotten: ' + JSON.stringify(await demoKeys(page)));
+        if (shoot) await shot(page, 'leave-out-' + tag + '.png');
+        await Promise.all([page.waitForURL('https://chat.victorio.cloud/', { timeout: 10000 }), page.click('#leaveHome')]);
+        return { said: t.slice(0, 80) };
+      });
+    }
+  }
+  const NOT_KNOWN = 'Couldn\'t tell whether you left the room (';
+  // the same line as server-error's: checked, not pictured again
+  const NO_SHOT = ['stray-403', 'codeless-403', 'no-route'];
+  for (const [label, answers, want, allowConsole] of [
+    ['lost', ['abort'], NOT_KNOWN, /net::ERR_FAILED/],
+    ['server-error', [[503, { error: 'upstream connect error' }]], NOT_KNOWN + 'upstream connect error). Try again: if you did leave, this device then forgets the room.'],
+    ['stray-403', [[403, '<html>Forbidden</html>']], NOT_KNOWN + 'Request failed: 403). Try again: if you did leave, this device then forgets the room.'],
+    ['codeless-403', [[403, { error: 'Blocked' }]], NOT_KNOWN + 'Blocked). Try again: if you did leave, this device then forgets the room.'],
+    ['no-route', [[404, 'Not found']], NOT_KNOWN + 'Request failed: 404). Try again: if you did leave, this device then forgets the room.'],
+    ['refused', [[400, { error: 'To leave this room for good, send {"confirm": "demo"}: the room\'s own name, so a call meant for another room cannot leave this one. Nothing was changed.', code: 'confirm_mismatch' }]], 'Couldn\'t leave the room: To leave this room for good, send {"confirm": "demo"}: the room\'s own name, so a call meant for another room cannot leave this one. Nothing was changed.'],
+    ['conflict', [[409, { error: 'This invite was never opened, so there is nothing to leave: not using it is all it takes. This call did not open it.', code: 'not_joined' }]], 'Couldn\'t leave the room: This invite was never opened, so there is nothing to leave: not using it is all it takes. This call did not open it. Nothing was changed.'],
+  ]) {
+    for (const [tag, o] of [['desktop-light', {}], ['phone-dark', { scheme: 'dark', w: 390, h: 844, touch: true }]]) {
+      await run('leave-room-error-' + label + '-' + tag, { ...o, hash: '#members', init: seedRoomKeys, state: { leaveForce: answers }, allowConsole }, async (page) => {
+        await page.waitForSelector('#mList .card.member', { timeout: 10000 });
+        await settle(page);
+        await openLeave(page);
+        await page.click('#leaveYes');
+        await page.waitForSelector('#leaveErr', { timeout: 6000 });
+        const err = await page.$eval('#leaveErr', (e) => e.textContent);
+        must(err.startsWith(want) || err.includes(want), label + ': ' + err);
+        must(label === 'refused' || label === 'conflict' ? /Nothing was changed\.$/.test(err) && err.split('Nothing was changed').length === 2 : !/Nothing was changed/.test(err), label + ': only a refusal says nothing changed, once: ' + err);
+        must((await demoKeys(page)).length === DEMO_KEYS.length, 'the room is kept on the device');
+        must(await page.$eval('#leaveDlg', (d) => d.open) && !!(await page.$('#leaveYes:not([disabled])')), 'the dialog stays, ready to try again');
+        if (!NO_SHOT.includes(label)) await shot(page, 'leave-error-' + label + '-' + tag + '.png');
+        return { err };
+      });
+    }
+  }
+  /* Home's Forget dialog: its solid red button, light and dark (the
+     colour of its text is a token both schemes define). */
+  for (const [tag, o] of [['light', {}], ['dark', { scheme: 'dark' }], ['phone-dark', { scheme: 'dark', w: 390, h: 844, touch: true }]]) {
+    await run('forget-dialog-' + tag, { ...o, init: seedRoomKeys }, async (page) => {
+      await page.goto('https://chat.victorio.cloud/');
+      await page.waitForSelector('.roomrow', { timeout: 10000 });
+      await settle(page);
+      await page.click('.roomrow:has(.rn:text-is("lima")) .forget');
+      await page.waitForSelector('#forgetDlg[open]', { timeout: 4000 });
+      const btn = await page.$eval('#forgetYes', (b) => { const cs = getComputedStyle(b); return { color: cs.color, bg: cs.backgroundColor }; });
+      must(btn.color !== btn.bg && btn.color !== 'rgba(0, 0, 0, 0)', 'the button\'s text has its own colour: ' + JSON.stringify(btn));
+      await shot(page, 'forget-dialog-' + tag + '.png');
+      await page.click('#forgetNo');
+      return btn;
+    });
+  }
   await run('leave-room-agent-invite', { hash: '#members', state: { agentYou: true }, init: () => { try { localStorage.setItem('chat-invite:demo', 'tok_Probe'); localStorage.setItem('ac:agent-app:demo', '1'); } catch { /* the scenario fails visibly */ } } }, async (page) => {
     await page.waitForSelector('#mList .card.member', { timeout: 10000 });
     await settle(page);
