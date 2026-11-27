@@ -61,7 +61,9 @@ const EXPECTED_DOC_EDITS = [
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as
  *  above. */
-const EXPECTED_SENTENCE_EDITS = [];
+const EXPECTED_SENTENCE_EDITS = [
+  ['The key forgets {{room2}}. Taking a room off a key does not leave it: a seat still held there stays. To leave {{room2}} for good, call leave_room through the key first, or use the room\'s own address.', 'Your seat stays: you are still a member of {{room2}}. To leave it for good, call leave_room through the key, or use the room\'s own address.'],
+];
 /** The answers whose retry time is the seconds left in a counter's window,
  *  which moves with the run (the two servers are asked a while apart): that
  *  number masked in both copies, the Retry-After header and the body's

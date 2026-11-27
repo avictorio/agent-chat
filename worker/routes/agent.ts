@@ -76,7 +76,7 @@ import { cleanName, memberNameProblem, nameFold, sameName } from "../lib/text.js
 import { warn } from "../lib/log.js";
 import {
   AGENT_KEY_INVALID, AGENT_KEY_MISSING, LEAVE_NO_DELETE, NOT_AGENT_KEY, activeCapError, agentInstructions, agentKeyNote, claudeCodeLine, dayCapError, dropBusy, dropNote, leaveEntryRefused,
-  leaveLastMember, leaveNote, leaveNotJoined, leaveRoomGone, mcpJsonEntry, nameTakenError, notPersonInviteError, personKeyHandoff, personKeyNote, removedRefusedNote, seatInUseError, unusedNote,
+  leaveLastMember, leaveNote, leaveNotJoined, leaveRoomGone, mcpJsonEntry, nameTakenError, notPersonInviteError, personKeyHandoff, personKeyNote, removedHeldNote, removedRefusedNote, seatInUseError, unusedNote,
   wakeAgain, wakeLinkUnusable, wakeLost, wakeNotSettled, wakeStillSetting, type AgentVariant, type LeaveKept,
 } from "../agents/onboarding.js";
 import { leaveAfter, leaveAsk, leaveBody, leaveConfirmRefusal } from "./members.js";
@@ -146,6 +146,20 @@ async function reopen(k: Keyed): Promise<Opened | null> {
 async function unseal(k: Opened): Promise<Unsealed | null> {
   const u = await agentUnseal(k.id, k.secret, k.wrapped, k.ver, k.ring);
   return u ? { ...k, dk: u.dk, rooms: u.rooms } : null;
+}
+
+/** The key opened again once a request's body is in, and its list as that
+ *  open finds it, for every REST route of the key that takes a body: a
+ *  client can hold a body back for as long as the platform lets it hold
+ *  one, and the key may be disconnected meanwhile, so what the key may do
+ *  is decided when the body is in, as the MCP address decides it (agentTool).
+ *  A key that no longer opens is refused (agent_key_invalid), a list that
+ *  does not open is agent_unreadable (room: the room the refusal names). */
+async function keyAfterBody(first: Opened, room?: string): Promise<Unsealed | Response> {
+  const o = await reopen(first);
+  if (!o) return refusedJson(KEY_REFUSED.invalid);
+  const u = await unseal(o);
+  return u || refusedJson(room === undefined ? UNREADABLE : { ...UNREADABLE, room });
 }
 
 /** A change to the key's list: the new list and what to answer, with the
@@ -690,11 +704,10 @@ async function removeRoom(env: Env, u: Unsealed, room: string): Promise<Rewritte
     const e = x.rooms.find((y) => y.room === room);
     if (!e) return { answer: { status: 404, code: "room_not_held", error: room + " is not on this key.", room } };
     const rooms = x.rooms.filter((y) => y.room !== room);
-    const held = "Your seat stays: you are still a member of " + room + ". To leave it for good, call leave_room through the key, or use the room's own address.";
-    if (!(e.hooks && e.hooks.length)) return { rooms, then: { room, removed: true as const, note: e.state === "refused" ? removedRefusedNote(room, false) : held } };
+    if (!(e.hooks && e.hooks.length)) return { rooms, then: { room, removed: true as const, note: e.state === "refused" ? removedRefusedNote(room, false) : removedHeldNote(room, false) } };
     const d = await dropWake(env, e, x.ver);
     if (!d.ok) return { answer: d.refused };
-    const note = e.state === "refused" ? removedRefusedNote(room, true) : held + " The Muse wake this key set up in " + room + " is off.";
+    const note = e.state === "refused" ? removedRefusedNote(room, true) : removedHeldNote(room, true);
     return { rooms, then: { room, removed: true as const, muse_wake_removed: true as const, note }, seen: [d.seen] };
   });
 }
@@ -719,8 +732,8 @@ export async function agentRoomsRoute(rc: RouteContext): Promise<Response> {
     if ("status" in e) return refusedJson(e);
     entries.push(e);
   }
-  const u = await unseal(k.key);
-  if (!u) return refusedJson(UNREADABLE);
+  const u = await keyAfterBody(k.key);
+  if (u instanceof Response) return u;
   const r = await addRooms(env, u, entries, true);
   if (!("done" in r) && !("answer" in r)) return rewriteRefusal(r);
   const out = "done" in r ? r.done : r.answer;
@@ -741,8 +754,8 @@ export async function agentRemoveRoute(rc: RouteContext): Promise<Response> {
   const b = await readBody(small);
   const room = fieldText(b ? b.room : undefined).trim().toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: ROOM_NAME_RULE }, 400);
-  const u = await unseal(k.key);
-  if (!u) return refusedJson(UNREADABLE);
+  const u = await keyAfterBody(k.key);
+  if (u instanceof Response) return u;
   const r = await outlive(rc, () => removeRoom(env, u, room));
   if (!("done" in r) && !("answer" in r)) return rewriteRefusal(r);
   const out = "done" in r ? r.done : r.answer;
@@ -761,15 +774,17 @@ export async function agentRemoveRoute(rc: RouteContext): Promise<Response> {
 // refused (last_member); the agent itself can leave and delete such a room
 // with leave_room. In order, each refusal before anything later runs: the
 // method, the key, the body (at most SMALL_BODY_MAX), the room's name,
-// "delete_room", confirm (leaveAsk, the rule of every leave), the key's
-// list, the room on it (a room the key already marks refused answers from
-// the record); none of these writes anything or asks a room. Then, under
+// "delete_room", confirm (leaveAsk, the rule of every leave), the key opened
+// again now that the body is in (keyAfterBody) and its list, the room on it
+// (a room the key already marks refused answers from the record); none of
+// these writes anything or asks a room. Then, under
 // waitUntil registered before the leave is asked: the leave (the room looks
 // the token up, lookupInvite, and runs no access(), so an invite never
 // opened is refused as it is), leaveAfter, and the key's list (leaveOff). A
 // refusal of the seat's token marks the entry refused, as a room tool's does.
-// The answer is the leave's (leaveBody) with off_key and a note saying what
-// the key holds now. The lines it logs are leaveAfter's, with {room}, as on
+// The answer is the leave's (leaveBody) with off_key, kept when the key still
+// lists the room (what it holds there: LeaveKept, which the web app words for
+// a person) and a note saying it for an agent. The lines it logs are leaveAfter's, with {room}, as on
 // the room's own leave route, and markRefused's, with no room.
 export async function agentLeaveRoute(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
@@ -791,8 +806,8 @@ export async function agentLeaveRoute(rc: RouteContext): Promise<Response> {
     throw e;
   }
   if (!confirmed) return json({ error: leaveConfirmRefusal(room), code: "confirm_mismatch", room }, 400);
-  const u = await unseal(k.key);
-  if (!u) return refusedJson({ ...UNREADABLE, room });
+  const u = await keyAfterBody(k.key, room);
+  if (u instanceof Response) return u;
   const e = u.rooms.find((x) => x.room === room);
   if (!e) return refusedJson({ status: 404, code: "room_not_held", error: room + " is not on this key.", room });
   if (e.state === "refused") {
@@ -825,7 +840,7 @@ async function leaveNow(rc: RouteContext, u: Unsealed, e: AgentEntry): Promise<R
   }
   leaveAfter(rc, stub, room, r);
   const kept = await leaveOff(rc.env, u, e);
-  return json({ ...leaveBody(room, r), off_key: kept === "off", note: leaveNote(r.name, room, kept) });
+  return json({ ...leaveBody(room, r), off_key: kept === "off", ...(kept === "off" ? {} : { kept }), note: leaveNote(r.name, room, kept) });
 }
 
 /** After a leave, the key's entry for the seat that left (by its room and
@@ -838,19 +853,21 @@ async function leaveNow(rc: RouteContext, u: Unsealed, e: AgentEntry): Promise<R
  *  when it is on a recorded link). Every link may leave: the entry comes
  *  off. One may not (the room could not be reached for it, or a
  *  registration's set may still reach the room): the entry stays with its
- *  links, marked left (refused, invite_revoked, as markRefused marks it),
- *  for a take-off to settle them. An entry already gone stays gone; one put
- *  back with another invite is left alone. A write that does not go through
+ *  links, marked left (refused, invite_revoked, as markRefused marks it; an
+ *  entry marked refused already keeps its code), for a take-off to settle
+ *  them. An entry already gone stays gone; one put back with another
+ *  invite is left alone. A write that does not go through
  *  (the list moved AGENT_SWAP_TRIES times, the key's object threw) is
  *  followed by the mark alone, tried twice; the key cut meanwhile is
  *  said so. What the key holds then (LeaveKept). */
 async function leaveOff(env: Env, u: Unsealed, e: AgentEntry): Promise<LeaveKept> {
   const mine = (y: AgentEntry) => y.room === e.room && y.token === e.token;
   const at = Date.now();
-  // the entry marked left, its links as they are (nothing leaves the record in this write)
+  // the entry marked left, its links as they are (nothing leaves the record in this write); one marked
+  // refused already keeps its code (room_deleted, say), written by the call that saw it
   const marked = (x: Unsealed, y: AgentEntry): Changed<LeaveKept> => {
     const kept: LeaveKept = y.hooks && y.hooks.length ? "marked_wake" : "marked";
-    if (y.state === "refused" && y.code === "invite_revoked") return { answer: kept };
+    if (y.state === "refused") return { answer: kept };
     return { rooms: x.rooms.map((z) => (z === y ? { ...z, state: "refused" as const, code: "invite_revoked", at } : z)), then: kept };
   };
   const elsewhere = (x: Unsealed): LeaveKept => (x.rooms.some((y) => y.room === e.room) ? "other" : "off");
@@ -1274,8 +1291,8 @@ export async function agentInviteAddRoute(rc: RouteContext): Promise<Response> {
   if (!small) return json({ error: PERSON_BODY_TOO_LARGE }, 413);
   const pb = personBody(await readBody(small));
   if ("status" in pb) return refusedJson(pb);
-  const u = await unseal(k.key);
-  if (!u) return refusedJson(UNREADABLE);
+  const u = await keyAfterBody(k.key);
+  if (u instanceof Response) return u;
   const planned: Planned[] = pb.entries.map((e) => {
     const h = u.rooms.find((x) => x.room === e.room);
     return h && h.state === "held" ? { e, problem: { status: 409, code: "room_held", error: about(e.i, e.room + " is already on this key", false), room: e.room } } : { e };

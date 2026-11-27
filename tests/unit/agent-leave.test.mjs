@@ -15,11 +15,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, read, agentInvite } from "./agent-world.mjs";
 import { bridgeWorld } from "./bridge-world.mjs";
-import { agentCreateRoute, agentLeaveRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
+import { agentCreateRoute, agentInviteAddRoute, agentLeaveRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
 import { AGENT_KEY_INVALID, AGENT_KEY_MISSING, LEAVE_NO_DELETE, NOT_AGENT_KEY, dropNote, leaveEntryRefused, leaveLastMember, leaveNote, leaveNotJoined, leaveRoomGone, removedRefusedNote } from "../../worker/agents/onboarding.ts";
 import { leaveConfirmRefusal } from "../../worker/routes/members.ts";
 import { AGENT_WAKE_SET_MS, AGENT_WAKE_SKEW_MS, PROTECTED_ROOMS, SMALL_BODY_MAX } from "../../worker/limits.ts";
-import { agentCredential, agentUnseal, newAgentKey } from "../../worker/lib/agentkey.ts";
+import { agentCredential, agentUnseal, agentVerifier, newAgentKey } from "../../worker/lib/agentkey.ts";
 import { BadRequest } from "../../worker/lib/http.ts";
 import { LEFT_MSG } from "../../worker/room/Room.ts";
 
@@ -111,14 +111,14 @@ test("every refusal before the leave changes nothing and asks no room: the metho
     ["confirm naming another room", { room: "lima", confirm: "oslo" }, {}, 400, { error: leaveConfirmRefusal("lima"), code: "confirm_mismatch", room: "lima" }, true],
     ["confirm in capitals", { room: "LIMA", confirm: "LIMA" }, {}, 400, { error: leaveConfirmRefusal("lima"), code: "confirm_mismatch", room: "lima" }, true],
     ["confirm not text", { room: "lima", confirm: { room: "lima" } }, {}, 400, { error: "\"confirm\" must be text", room: "lima" }, true],
-    ["a room not on the key", { room: "rome", confirm: "rome" }, {}, 404, { error: "rome is not on this key.", code: "room_not_held", room: "rome" }, true],
-    ["a room the key marks refused", { room: "oslo", confirm: "oslo" }, {}, 403, { error: leaveEntryRefused("oslo", "invite_revoked"), code: "invite_revoked", room: "oslo" }, true],
+    ["a room not on the key", { room: "rome", confirm: "rome" }, {}, 404, { error: "rome is not on this key.", code: "room_not_held", room: "rome" }, 2],
+    ["a room the key marks refused", { room: "oslo", confirm: "oslo" }, {}, 403, { error: leaveEntryRefused("oslo", "invite_revoked"), code: "invite_revoked", room: "oslo" }, 2],
   ];
   for (const [what, body, o, status, answer, opens] of cases) {
     const r = await leave(k.w, k.key, body, o);
     assert.deepEqual([r.status, r.json], [status, answer], what);
-    // the key's own object at most, with one open: no room asked, nothing written
-    assert.deepEqual(r.asked.map((a) => a.method), opens ? ["agentOpen"] : [], what + ": " + r.asked.map((a) => a.name + "." + a.method));
+    // the key's own object at most, opened once before the body and once again once it is in: no room asked, nothing written
+    assert.deepEqual(r.asked.map((a) => a.method), Array(Number(opens)).fill("agentOpen"), what + ": " + r.asked.map((a) => a.name + "." + a.method));
     assert.ok(r.asked.every((a) => a.name.startsWith("__agent-")), what);
   }
   // a body that is not JSON: the field readers' BadRequest (index.ts answers 400), before any room
@@ -257,7 +257,7 @@ test("a wake the key cannot confirm is off (the room not reached for it, or a re
       if (how === "not reached") h.room.museHookLook = () => { throw new Error("the room did not answer"); };
       const r = await leave(k.w, k.key, OK);
       assert.equal(r.status, 200, how + ": " + r.text);
-      assert.deepEqual([r.json.off_key, r.json.note], [false, leaveNote("Hank", "lima", "marked_wake")], how);
+      assert.deepEqual([r.json.off_key, r.json.kept, r.json.note], [false, "marked_wake", leaveNote("Hank", "lima", "marked_wake")], how);
       assert.equal(h.one("SELECT left_ts FROM inv WHERE token = ?", k.tok.lima).left_ts, r.json.left, how + ": the seat left all the same");
       const kept = (await storedOf(k.w, k.key)).rooms;
       assert.deepEqual(kept.map((e) => [e.room, e.state, e.code, (e.hooks || []).map((x) => x.link)]), [["lima", "refused", "invite_revoked", [k.link]]], how + ": marked left, its link kept");
@@ -361,7 +361,7 @@ test("the key's list changed while the room was leaving: a disconnect, a take-of
     let d = null;
     racing(k, async () => { d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) }))); });
     const r = await leave(k.w, k.key, OK);
-    assert.deepEqual([r.status, r.json.off_key, r.json.note], [200, false, leaveNote("Hank", "lima", "cut")]);
+    assert.deepEqual([r.status, r.json.off_key, r.json.kept, r.json.note], [200, false, "cut", leaveNote("Hank", "lima", "cut")]);
     assert.deepEqual(d.json, { deleted: true, rooms: ["lima", "oslo"], muse_wakes_removed: [], muse_wakes_left: [], note: dropNote([]) });
     assert.equal(await storedOf(k.w, k.key), null, "the key is gone");
   }
@@ -371,6 +371,7 @@ test("the key's list changed while the room was leaving: a disconnect, a take-of
     racing(k, async () => { assert.equal((await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })))).status, 200); });
     const r = await leave(k.w, k.key, OK);
     assert.deepEqual([r.status, r.json.off_key, r.json.note], [200, true, leaveNote("Hank", "lima", "off")]);
+    assert.ok(!("kept" in r.json), "no kept when the room is off the key");
     assert.deepEqual((await storedOf(k.w, k.key)).rooms.map((e) => e.room), ["oslo"]);
   }
   // taken off and put back with another invite
@@ -382,7 +383,7 @@ test("the key's list changed while the room was leaving: a disconnect, a take-of
       assert.equal((await read(agentRoomsRoute(k.w.rc("POST", "/api/agent/rooms", { json: { rooms: [{ room: "lima", token: other }] }, headers: auth(k.key) })))).status, 201);
     });
     const r = await leave(k.w, k.key, OK);
-    assert.deepEqual([r.status, r.json.off_key, r.json.note], [200, false, leaveNote("Hank", "lima", "other")]);
+    assert.deepEqual([r.status, r.json.off_key, r.json.kept, r.json.note], [200, false, "other", leaveNote("Hank", "lima", "other")]);
     const kept = (await storedOf(k.w, k.key)).rooms.find((e) => e.room === "lima");
     assert.deepEqual([kept.token === other, kept.state, kept.name], [true, "held", "Hank2"], "the new seat is left alone");
   }
@@ -398,7 +399,8 @@ test("the key's list changed while the room was leaving: a disconnect, a take-of
     obj.agentSwap = (...a) => swap(++n) || real(...a);
     const r = await leave(k.w, k.key, OK);
     delete obj.agentSwap;
-    assert.deepEqual([r.status, r.json.off_key, r.json.note], [200, false, leaveNote("Hank", "lima", kept)], what);
+    assert.deepEqual([r.status, r.json.off_key, r.json.kept, r.json.note], [200, false, kept, leaveNote("Hank", "lima", kept)], what);
+    assert.deepEqual(Object.keys(r.json), ["room", "name", "left", "room_deleted", "off_key", "kept", "note"], what);
     assert.deepEqual((await storedOf(k.w, k.key)).rooms.map((e) => [e.room, e.state]), [["lima", state], ["oslo", "held"]], what);
     assert.equal(k.w.harness("lima").one("SELECT left_ts FROM inv WHERE token = ?", k.tok.lima).left_ts, r.json.left, what + ": the seat left");
   }
@@ -412,4 +414,84 @@ test("the key's list changed while the room was leaving: a disconnect, a take-of
     assert.equal((await mcp(k.w, k.key, "whoami", { room: "lima" })).result.structuredContent.code, "invite_revoked");
     assert.deepEqual((await storedOf(k.w, k.key)).rooms.map((e) => [e.room, e.state, e.code]), [["lima", "refused", "invite_revoked"], ["oslo", "held", undefined]]);
   }
+});
+
+/** a request to a key route whose body arrives only when release() is called */
+function heldBody(w, key, path, json) {
+  let release = () => {};
+  const gate = new Promise((r) => { release = r; });
+  const body = new ReadableStream({ start(c) { gate.then(() => { c.enqueue(new TextEncoder().encode(JSON.stringify(json))); c.close(); }); } });
+  const rc = w.rc("POST", path, { headers: auth(key) });
+  rc.request = new Request(rc.url, { method: "POST", headers: { ...auth(key), "Content-Type": "application/json" }, body, duplex: "half" });
+  return { rc, release };
+}
+
+// A client can hold a request's body back for as long as the platform lets it. Every REST route
+// of the key that takes a body opens the key again once the body is in: a key disconnected
+// meanwhile acts nowhere, as at the key's MCP address. For each, the sequence: the request opens the
+// key and waits for its body; DELETE /api/agent disconnects the key (and answers that every seat
+// stays); the body arrives: agent_key_invalid, nothing asked of any room, nothing changed.
+test("a body held back past the key's disconnect acts nowhere, on each of the four routes of the key that take a body: agent_key_invalid, no room asked, nothing changed", async () => {
+  const routes = {
+    "POST /api/agent/rooms/leave": [agentLeaveRoute, "/api/agent/rooms/leave", () => ({ room: "lima", confirm: "lima" })],
+    "POST /api/agent/rooms/remove": [agentRemoveRoute, "/api/agent/rooms/remove", () => ({ room: "lima" })],
+    "POST /api/agent/rooms": [agentRoomsRoute, "/api/agent/rooms", (k) => ({ rooms: [{ room: "oslo", token: agentInvite(k.w.room("oslo"), "Hank") }] })],
+    "POST /api/agent/rooms/invite": [agentInviteAddRoute, "/api/agent/rooms/invite", (k) => { const h = k.w.room("rome"); h.member("Pat", "human"); return { name: "Hank", rooms: [{ room: "rome", inviter_token: "tok-Pat" }] }; }],
+  };
+  for (const [what, [route, path, body]] of Object.entries(routes)) {
+    const k = await keyed();
+    const json = body(k);
+    const rows0 = Object.fromEntries(["lima", "oslo", "rome"].filter((n) => k.w.objects.has(n)).map((n) => [n, rows(k.w.harness(n))]));
+    const { rc, release } = heldBody(k.w, k.key, path, json);
+    const p = read(route(rc));
+    await new Promise((r) => setTimeout(r, 20)); // the route has opened the key and waits for the body
+    const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
+    assert.deepEqual([d.status, d.json.note], [200, dropNote([])], what + ": the disconnect answers that every seat stays");
+    const mark = k.w.asked.length;
+    release();
+    const r = await p;
+    await Promise.all(k.w.pending.splice(0));
+    assert.deepEqual([r.status, r.json], [403, { error: AGENT_KEY_INVALID, code: "agent_key_invalid" }], what + ": " + r.text);
+    assert.deepEqual(k.w.asked.slice(mark).map((a) => a.method), ["agentOpen"], what + ": once the body is in, only the key's open, refused: " + k.w.asked.slice(mark).map((a) => a.name + "." + a.method));
+    const rows1 = Object.fromEntries(Object.keys(rows0).map((n) => [n, rows(k.w.harness(n))]));
+    assert.deepEqual(rows1, rows0, what + ": every room's invites as they were (no seat left, no invite made)");
+  }
+});
+
+// A wake the key cannot confirm is off, on an entry another call marked refused meanwhile with a
+// code of its own (the room deleted, say): the leave's mark keeps that code.
+test("the leave's mark keeps a code another call marked the entry with meanwhile", async () => {
+  const k = await keyed(["lima"], { muse: true });
+  try {
+    await stoppedAfterSet(k, { rooms: ["lima"] });
+    const h = k.w.harness("lima"), real = h.room.leave.bind(h.room);
+    const obj = identityOf(k.w, k.key), swap = obj.agentSwap.bind(obj);
+    // once the room has left, another call marks the entry room_deleted
+    h.room.leave = async (...a) => {
+      const r = await real(...a);
+      const c = agentCredential(new Request("http://localhost/", { headers: auth(k.key) }));
+      const ak = k.w.harness("__agent-" + c.id).one("SELECT ver, ring FROM ak"), slot = k.w.harness("__agent-" + c.id).one("SELECT wrapped FROM aks WHERE slot = 'key'");
+      const u = await agentUnseal(c.id, c.secret, slot.wrapped, ak.ver, ak.ring);
+      const { agentSealRing } = await import("../../worker/lib/agentkey.ts");
+      const rooms = u.rooms.map((e) => ({ ...e, state: "refused", code: "room_deleted", at: 1 }));
+      assert.deepEqual(await swap("key", await agentVerifier(c.id, c.secret), ak.ver, await agentSealRing(u.dk, c.id, ak.ver + 1, rooms)), { ok: true });
+      return r;
+    };
+    const r = await leave(k.w, k.key, OK);
+    assert.deepEqual([r.status, r.json.off_key, r.json.kept], [200, false, "marked_wake"], r.text);
+    assert.deepEqual((await storedOf(k.w, k.key)).rooms.map((e) => [e.room, e.state, e.code]), [["lima", "refused", "room_deleted"]], "its code kept, not replaced by invite_revoked");
+  } finally {
+    k.restore();
+  }
+});
+
+// What the served reference says of a leave through the key: room_not_held only once the room is
+// off the key, kept and its five values, and the key opened again once the body is in.
+import { docs } from "../../worker/agents/docs.ts";
+test("/api says a room left through the key answers room_not_held only once it is off the key, names kept's values, and that a key disconnected while a body was held back acts nowhere", () => {
+  const api = docs("https://example.test").replace(/\s+/g, " ");
+  assert.ok(api.includes("Once a room your person had you leave this way is off your key, a later call there answers room_not_held; while the key still lists it, a call there answers as in a room you left (invite_revoked)."), "room_not_held only once it is off the key");
+  for (const v of ["\"marked\"", "\"marked_wake\"", "\"listed\"", "\"cut\"", "\"other\""]) assert.ok(api.includes(v + " ("), "kept " + v);
+  assert.ok(api.includes("so a key disconnected while a request held its body back acts nowhere (403 agent_key_invalid)"));
+  assert.ok(api.includes("the key forgets the room (it does not leave it: a seat you still hold there stays)"));
 });

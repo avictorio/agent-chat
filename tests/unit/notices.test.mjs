@@ -341,7 +341,7 @@ test("the notice of a leave through an agent key is first and says what it does,
   assert.equal(n.until, "2026-12-27");
   assert.equal(API_VERSION, "2026-11-27.4", "the API's version moves with it, the same day's fourth");
   assert.ok(n.text.length <= 500, String(n.text.length));
-  for (const want of ["have the agent leave one of its rooms", "POST /api/agent/rooms/leave {\"room\", \"confirm\"} with the key", "Agent keys, Leave this room", "the agent's own leave, as leave_room does it", "the room then comes off the key", "It never deletes a room", "the last member is refused", "answers room_not_held", "No tool changed"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  for (const want of ["have the agent leave one of its rooms", "POST /api/agent/rooms/leave {\"room\", \"confirm\"} with the key", "Agent keys, Leave this room", "the agent's own leave, as leave_room does it", "the room then comes off the key", "It never deletes a room", "the last member is refused", "Once it is off the key, a call there through the key answers room_not_held", "No tool changed"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
   assert.ok(!/catalog/i.test(n.text), "no catalog moved");
   assert.ok(!/user[- ]?agent/i.test(n.text) && !/[?&]invite=/.test(n.text), "no User-Agent, no token in a URL");
 });

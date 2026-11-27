@@ -305,7 +305,7 @@ test("a stale swap reads the list again and redoes the change; after AGENT_SWAP_
   let mark = w.asked.length;
   let r = await read(agentRoomsRoute(w.rc("POST", "/api/agent/rooms", { headers: bearer(key), json: { rooms: [{ room: "oslo", token: tok.oslo }] } })));
   assert.equal(r.status, 201, r.text);
-  assert.deepEqual(w.methods(id, mark), ["agentOpen", "agentSwap", "agentOpen", "agentSwap"], "opened again after the stale swap");
+  assert.deepEqual(w.methods(id, mark), ["agentOpen", "agentOpen", "agentSwap", "agentOpen", "agentSwap"], "opened again once the body is in, and again after the stale swap");
   assert.equal(w.methods("oslo", mark).length, 2, "its token looked up again");
   // always stale: three tries, then 503 try_again with Retry-After: 1, and nothing added
   stale = 99;
@@ -333,7 +333,9 @@ test("POST /api/agent/rooms/remove forgets a room, the seat stays; a room not on
   const mark = w.asked.length;
   r = await rm({ room: "LIMA" });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.json, { room: "lima", removed: true, note: "Your seat stays: you are still a member of lima. To leave it for good, call leave_room through the key, or use the room's own address." });
+  // the take-off asks the room nothing, so it claims no membership: the agent may have left meanwhile
+  assert.deepEqual(r.json, { room: "lima", removed: true, note: "The key forgets lima. Taking a room off a key does not leave it: a seat still held there stays. To leave lima for good, call leave_room through the key first, or use the room's own address." });
+  assert.doesNotMatch(r.json.note, /still a member/);
   assert.deepEqual(w.methods("lima", mark), [], "the room is not asked");
   assert.equal(w.harness("lima").one("SELECT revoked FROM inv WHERE token = ?", tok.lima).revoked, null, "the seat stays");
   const g = (await read(agentRoute(w.rc("GET", "/api/agent", { headers: bearer(key) })))).json.rooms;

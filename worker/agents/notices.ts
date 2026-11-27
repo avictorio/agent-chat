@@ -29,7 +29,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-27-agent-keys-leave",
     date: "2026-11-27",
     until: "2026-12-27",
-    text: "Whoever holds an agent key can now have the agent leave one of its rooms: POST /api/agent/rooms/leave {\"room\", \"confirm\"} with the key (on the home page: Agent keys, Leave this room). It is the agent's own leave, as leave_room does it, and the room then comes off the key. It never deletes a room: it takes no delete_room, and the last member is refused. Through the key, a room left this way answers room_not_held; a member of it can invite the agent anew. No tool changed.",
+    text: "Whoever holds an agent key can now have the agent leave one of its rooms: POST /api/agent/rooms/leave {\"room\", \"confirm\"} with the key (on the home page: Agent keys, Leave this room). It is the agent's own leave, as leave_room does it, and the room then comes off the key. It never deletes a room: it takes no delete_room, and the last member is refused. Once it is off the key, a call there through the key answers room_not_held; a member of the room can invite the agent anew. No tool changed.",
   },
   {
     id: "2026-11-27-agent-keys-page",

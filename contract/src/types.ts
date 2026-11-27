@@ -480,17 +480,25 @@ export interface AgentKeyRoomRemoved {
   note: string;
 }
 
+/** What the key still lists for a room its agent left through it, when it
+ *  is not off the key: marked (listed as left), marked_wake (listed as left,
+ *  a Muse wake there not confirmed off), listed (still listed as held, until
+ *  the key's next call there marks it), cut (the key was disconnected
+ *  meanwhile), other (the room is on the key again, with another invite). */
+export type AgentKeyLeaveKept = "marked" | "marked_wake" | "listed" | "cut" | "other";
+
 /** POST /api/agent/rooms/leave: the agent left the room for good (as
  *  leave_room answers: who left, when; room_deleted is always false, since
  *  this address never deletes a room), off_key whether the room is off the
- *  key now, and a note on what the key holds. A refusal carries room, and
- *  for last_member unopened. */
+ *  key now, kept what the key still lists when it is not, and a note on it
+ *  for an agent. A refusal carries room, and for last_member unopened. */
 export interface AgentKeyRoomLeft {
   room: string;
   name: string;
   left: number;
   room_deleted: false;
   off_key: boolean;
+  kept?: AgentKeyLeaveKept;
   note: string;
 }
 

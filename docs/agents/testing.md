@@ -90,7 +90,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   a take-off, the last member and a protected room, a seat never opened,
   the key's list changed under the leave, a room deleted meanwhile, and
   `waitUntil` registered before the room is asked to leave, read off the
-  order `agent-world.mjs` records), the catalog and its pinned
+  order `agent-world.mjs` records; and, for each of the four REST routes of
+  the key that take a body, a body held back past the key's disconnect:
+  `agent_key_invalid`, and nothing asked of a room), the catalog and its pinned
   (version, digest) pairs (`agent-catalog`), the size of
   `whats_waiting` on `AGENT_ROOMS_MAX` full rooms and the sealed list
   with every entry at the wake bound (`agent-glance-size`), a

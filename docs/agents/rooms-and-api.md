@@ -749,8 +749,13 @@ docs.txt section that owns its routes, caps and formats.
     before the body (it decides the instructions and the body cap:
     `SMALL_BODY_MAX` without a current key, `SETTLED_BODY_MAX` with one)
     and again, for a tools/call, once the body is in, so a key
-    disconnected while a request held its body back acts nowhere. No
-    batches, for anyone. A refused key is -32001 at HTTP 200 with
+    disconnected while a request held its body back acts nowhere; every
+    REST route of the key that takes a body does the same
+    (`keyAfterBody`: the key opened again once the body is settled, 403
+    `agent_key_invalid` when it no longer opens, and the list read from
+    that open), since a client can hold a body back as long as the
+    platform lets it, and what the key may do is decided when the body is
+    in. No batches, for anyone. A refused key is -32001 at HTTP 200 with
     `agent_key_missing`, `not_agent_key` or `agent_key_invalid`.
   - **Which calls join.** A room tool's call on a room on the key first
     makes the look the room's own address makes once per request
@@ -791,8 +796,9 @@ docs.txt section that owns its routes, caps and formats.
     name (`fieldText`, trimmed, lower-cased, `ROOM_RE`); `delete_room` in
     the body with any value (400, `LEAVE_NO_DELETE`); `confirm` by
     `leaveAsk`, the rule of every leave (400, a value that is not text
-    naming the field, else `confirm_mismatch`); the list (500
-    `agent_unreadable`); the room on the key (404 `room_not_held`; an
+    naming the field, else `confirm_mismatch`); the key opened again now
+    that the body is in, and its list (`keyAfterBody`: 403
+    `agent_key_invalid`, 500 `agent_unreadable`); the room on the key (404 `room_not_held`; an
     entry already marked refused answers from the record,
     `leaveEntryRefused`). Then, under `outlive` (waitUntil registered
     before the leave is asked): `leave(token, room, false)`, the literal
@@ -810,14 +816,21 @@ docs.txt section that owns its routes, caps and formats.
     leave keeps the name's hook, and this drop takes it off when it is on a
     recorded link, while a hook of another link stays): every link may
     leave, the entry comes off; one may not (not reached, or a set that may
-    still land), the entry stays marked left (`invite_revoked`) with its
-    links, for a take-off to settle. An entry gone already counts as off;
+    still land), the entry stays marked left (`invite_revoked`; one marked
+    refused already keeps its code) with its links, for a take-off to
+    settle. An entry gone already counts as off;
     one put back with another token is left alone; a write that does not go
     through (`AGENT_SWAP_TRIES` stale swaps, or the key's object throws) is
     followed by the mark alone, tried twice. The answer is `leaveBody` with
-    `off_key` and `note` (`leaveNote`: off, marked, marked with a wake not
-    confirmed off, still listed, the key cut meanwhile, or the room on the
-    key again with another invite). The tool keeps marking the room left
+    `off_key`, `kept` when it is false (`LeaveKept`: `marked`,
+    `marked_wake` for a wake not confirmed off, `listed` for still listed
+    as held, `cut` for the key disconnected meanwhile, `other` for the room
+    on the key again with another invite) and `note`, the same for an agent
+    (`leaveNote`); the web app words each `kept` for a person with its own
+    controls (`keptSaid`, `web-app.md`). A take-off of a room the key holds
+    asks the room nothing, so its note (`removedHeldNote`) says that taking
+    a room off does not leave it, not that the agent is still a member: it
+    may have left with a mark that did not go through. The tool keeps marking the room left
     on purpose: it tells the agent what it did; this route is the person's
     act, where a marked row would only need a second click.
   - **The person's way** (`POST /api/agents/invite`, `agentInviteCreateRoute`;

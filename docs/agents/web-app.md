@@ -130,19 +130,25 @@ Front-end conventions.
   `showModal` is missing). Leave this room (`POST /api/agent/rooms/leave`,
   `leaveRoom`; `rooms-and-api.md`, Leaving through the key) is the
   agent's own leave through the key: its dialog ("Have NAME leave R?")
-  says what a leave does there and that R comes off the key, the danger
+  says what a leave does there (a Muse wake or webhook it has there off,
+  its uploads in flight ended among the rest) and that R comes off the key
+  or stays listed as left when that cannot be finished yet, the danger
   button ("Leave room") last. It shows on a seat never opened too (`GET
   /api/agent` does not say whether one was), which answers `not_joined`.
   Whatever the answer, the dialog closes, the card says it (`leaveSaid`;
   a leave in the live region: "NAME left R.", and when `off_key` is false
-  the server's note after its first sentence; a refusal as an alert:
+  what the key still lists, from the answer's `kept`, in the page's own
+  words pointing at its own controls (`keptSaid`: "Take off this key takes
+  it off" or "tries again"; never the server's note, which names API paths
+  for an agent); a refusal as an alert:
   `last_member` and `not_joined` in the page's own words, a refusal of the
   seat's token or a deleted room in the refused row's words, never the
   room's sentence to the agent, a refused key or record as the other
   controls say it, no answer as "can't tell whether NAME left R"), and the
   key is loaded again, so the rows show what it holds now. The page never
   deletes a room and sends no `delete_room`. The take-off dialog of a held
-  row points at Leave this room for taking the agent out. Membership is said only of
+  row says the agent stays a member if it still is one, and points at
+  Leave this room for taking it out. Membership is said only of
   rooms that still take the key's invite: the take-off dialog of a refused
   row says the room no longer takes it, and that the Muse wake set up with
   the key there is turned off where the row has one (else that nothing

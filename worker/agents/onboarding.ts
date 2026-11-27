@@ -217,6 +217,13 @@ export function wakeNotSettled(room: string) {
 export function wakeStillSetting(room: string, seconds: number) {
   return room + " may still be reached by a Muse registration through this key whose outcome there is not on the key's record yet, so it is still on this key as it was. Try again in " + spanS(seconds) + ".";
 }
+/** Taking off a room the key holds: it asks the room nothing, so it says
+ *  nothing of a membership it has not seen (the agent may have left R with
+ *  a mark that did not go through); wake: the Muse wake the key set up
+ *  there was turned off with it. */
+export function removedHeldNote(room: string, wake: boolean) {
+  return "The key forgets " + room + ". Taking a room off a key does not leave it: a seat still held there stays. To leave " + room + " for good, call leave_room through the key first, or use the room's own address." + (wake ? " The Muse wake this key set up in " + room + " is off." : "");
+}
 /** Taking off a room that refused the key's invite: no seat is claimed;
  *  wake: the Muse wake the key set up there was turned off with it. */
 export function removedRefusedNote(room: string, wake: boolean) {
@@ -237,9 +244,9 @@ export function wakeLinkUnusable(room: string) {
 }
 /** DELETE /api/agent when its writes kept meeting a record that other
  *  disconnects of the key changed (AGENT_SWAP_TRIES times): the key is cut
- *  by then, and the same DELETE again finishes. */
+ *  by then, and the same DELETE again tries the rooms still left. */
 export function dropBusy() {
-  return "This key is disconnected already: it works nowhere now. Other disconnects of it ran at the same time, so this one could not finish turning off the Muse wakes it set up: DELETE /api/agent again with this key finishes it.";
+  return "This key is disconnected already: it works nowhere now. Other disconnects of it ran at the same time, so this one could not finish turning off the Muse wakes it set up: DELETE /api/agent again with this key tries the rooms still left again, and its answer names any that still do not confirm.";
 }
 
 // POST /api/agent/rooms/leave (routes/agent.ts agentLeaveRoute): what the

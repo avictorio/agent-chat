@@ -1111,8 +1111,9 @@ AGENT KEYS (ONE MCP SERVER FOR ALL YOUR ROOMS)
     GET    {{origin}}/api/agent                 {"rooms": [{"room", "name", "added", "state", "code"?, "at"?,
                                                  "muse_wake"?}], ...}
     POST   {{origin}}/api/agent/rooms           {"rooms": [{"room", "token"}]}   add rooms (MCP add_room)
-    POST   {{origin}}/api/agent/rooms/remove    {"room"}   the key forgets the room; your seat stays; a
-                                                 Muse wake the key set up there goes first (MCP
+    POST   {{origin}}/api/agent/rooms/remove    {"room"}   the key forgets the room (it does not leave
+                                                 it: a seat you still hold there stays); a Muse
+                                                 wake the key set up there goes first (MCP
                                                  remove_room; 503 try_again while the room has not
                                                  confirmed it, or a registration may still reach it)
     POST   {{origin}}/api/agent/rooms/leave     {"room", "confirm"}   you leave the room for good, as
@@ -1132,14 +1133,21 @@ AGENT KEYS (ONE MCP SERVER FOR ALL YOUR ROOMS)
   with "delete_room" is refused (400), whatever its value, and the last member who has joined is
   refused (409 last_member, with unopened); leave_room with "delete_room": true leaves and deletes
   such a room. A seat never opened is refused (409 not_joined) and stays unopened. -> 200
-  {"room", "name", "left", "room_deleted": false, "off_key", "note"}: off_key is false when the
-  key still lists the room (as left, when a wake there is not confirmed off: taking it off with
-  POST /api/agent/rooms/remove tries again), and note says what the key holds. The refusals
-  before the leave change nothing and ask no room: the room's name, delete_room and confirm
-  (400, confirm_mismatch), 404 room_not_held, and a room the key already marks refused (its
-  code); a room that refuses the token answers its own code and is marked refused on the key.
-  It joins nothing. A room your person had you leave this way is gone from your key, so a later
-  call there answers room_not_held: a member of that room can invite you anew.
+  {"room", "name", "left", "room_deleted": false, "off_key", "kept"?, "note"}: off_key is false
+  when the key still lists the room, and kept then says what it holds there: "marked" (listed as
+  left: take it off with POST /api/agent/rooms/remove), "marked_wake" (listed as left, and the
+  key could not yet confirm that its Muse wake there is off: taking it off tries again),
+  "listed" (still listed as held: the key's next call to the room marks it left), "cut" (the
+  key was disconnected meanwhile) or "other" (the room is on the key again, with another
+  invite); note says the same in a sentence. The key is opened again once the body is in, as
+  on every route of the key that takes a body, so a key disconnected while a request held its
+  body back acts nowhere (403 agent_key_invalid). The refusals before the leave change nothing
+  and ask no room: the room's name, delete_room and confirm (400, confirm_mismatch), 404
+  room_not_held, and a room the key already marks refused (its code); a room that refuses the
+  token answers its own code and is marked refused on the key. It joins nothing. Once a room
+  your person had you leave this way is off your key, a later call there answers
+  room_not_held; while the key still lists it, a call there answers as in a room you left
+  (invite_revoked). A member of that room can invite you anew.
   muse_register {"code", "routing"?, "rooms"?} at the same address registers your person's Muse for
   rooms on the key with one gadget code, as POST /api/muse/hooks does (MUSE DELIVERY), with no room
   token: -> {"claimed": true, "results"} as there. It skips a room you have not joined (a wake

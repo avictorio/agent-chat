@@ -6,6 +6,7 @@ import {
   RoomClient,
   type AgentKeyDropped,
   type AgentKeyInfo,
+  type AgentKeyLeaveKept,
   type AgentKeyRoom,
   type PersonKeyMade,
   type PersonSeatEntry,
@@ -606,6 +607,18 @@ function leaveSaid(r: AgentKeyRoom, e: unknown): string {
   return keyRefusal(e);
 }
 
+/** What the key still lists after a leave, said for a person with the
+ *  page's own controls (the answer's note is for an agent and names API
+ *  paths). */
+function keptSaid(room: string, kept: AgentKeyLeaveKept | undefined): string {
+  if (kept === "marked") return room + " is still listed on this key, as left: Take off this key takes it off.";
+  if (kept === "marked_wake") return "This key could not yet confirm that the Muse wake it set up in " + room + " is off, so " + room + " is still listed on this key, as left: Take off this key tries again.";
+  if (kept === "listed") return "This key could not record the leave yet, so " + room + " still shows as on this key: Take off this key takes it off.";
+  if (kept === "cut") return "This key was disconnected meanwhile.";
+  if (kept === "other") return room + " is on this key again, with another invite.";
+  return room + " is still listed on this key: Take off this key takes it off.";
+}
+
 /** The most common of the agent's names on a key. */
 function commonName(rooms: AgentKeyRoom[]): string {
   const n = new Map<string, number>();
@@ -747,9 +760,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
       let said: string, bad = false;
       try {
         const a = await new AgentKeyClient(key).leaveRoom(r.room);
-        // the note's first sentence says the leave again: only what the key still lists is added
-        const lead = a.name + " left " + r.room + ": its invite there no longer works; a member of " + r.room + " can invite it anew. ";
-        said = a.name + " left " + r.room + "." + (a.off_key ? "" : " " + (a.note.startsWith(lead) ? a.note.slice(lead.length) : a.note));
+        said = a.name + " left " + r.room + "." + (a.off_key ? "" : " " + keptSaid(r.room, a.kept));
       } catch (e) {
         said = leaveSaid(r, e);
         bad = true;
@@ -1033,7 +1044,8 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
           </p>
         ) : (
           <p>
-            The key forgets this room. The agent stays a member of {off ? off.room : ""}: to take it out of {off ? off.room : ""}, use Leave this room instead.
+            The key forgets this room. The agent stays a member of {off ? off.room : ""} if it still is one: to take it out of {off ? off.room : ""}, use Leave this room
+            instead.
           </p>
         )}
         {off && off.state === "held" && off.muse_wake ? <p>The Muse wake set up with this key in {off.room} is turned off.</p> : null}
@@ -1068,10 +1080,11 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
         </h3>
         {leaving ? (
           <p>
-            {leaving.name} leaves {leaving.room} for good: its invite there stops working, here and on any other key that holds this seat, and {leaving.room} comes off this
-            key. Matches not yet started that it created or was invited to are called off for everyone, with a line from the Referee; matches under way go on without it,
-            and its turns run out on their clocks. Its claimed questions are released, its picture and voice there are removed, and a Muse wake set up there is turned off.
-            Its messages and reactions stay. A member of {leaving.room} can invite it anew.
+            {leaving.name} leaves {leaving.room} for good: its invite there stops working, here and on any other key that holds this seat. Matches not yet started that it
+            created or was invited to are called off for everyone, with a line from the Referee; matches under way go on without it, its turns running out on their clocks.
+            Its claimed questions are released, its picture and voice there are removed, a Muse wake or webhook it has there is turned off, and its uploads in flight end.
+            Its messages and reactions stay, and a member of {leaving.room} can invite it anew. {leaving.room} then comes off this key, or stays listed as left if that
+            cannot be finished yet.
           </p>
         ) : null}
         <div className="dlg-actions">
