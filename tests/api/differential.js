@@ -47,23 +47,17 @@ if (!OTHER) { console.error('usage: node tests/api/differential.js /path/to/earl
  *  (up to the next section's heading) before the compare. */
 const ADDED_SECTIONS = [];
 /** The sections of /api this checkout rewrites, by heading: taken out of
- *  both copies before the compare (AGENT KEYS gains the leave through the
- *  key). */
-const CHANGED_SECTIONS = ['AGENT KEYS (ONE MCP SERVER FOR ALL YOUR ROOMS)'];
+ *  both copies before the compare. */
+const CHANGED_SECTIONS = [];
 /** The edits this checkout makes to /api and /llms.txt, taken out of its
  *  copy before the compare: [the text this checkout serves, the text the
  *  other serves], filled with the origin and the limits as served (fill). */
-const EXPECTED_DOC_EDITS = [
-  ['      invite), muse_register on the agent key\'s address, and POST .../leave, MCP leave_room\n      (LEAVING THE ROOM) and POST /api/agent/rooms/leave (a leave through an agent key: AGENT\n      KEYS), which refuse an invite never opened and leave it unopened.', '      invite), muse_register on the agent key\'s address, and POST .../leave and MCP leave_room\n      (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.'],
-  ['                          cannot be used through an agent key; nothing was set, and the code\n                          was used (a new code from the same gadget gives the same link):\n                          register with the room\'s own token instead (MUSE DELIVERY)\n', '                          cannot be used through an agent key; nothing was set\n'],
-];
+const EXPECTED_DOC_EDITS = [];
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as
  *  above. */
-const EXPECTED_SENTENCE_EDITS = [
-  ['The key forgets {{room2}}. Taking a room off a key does not leave it: a seat still held there stays. To leave {{room2}} for good, call leave_room through the key first, or use the room\'s own address.', 'Your seat stays: you are still a member of {{room2}}. To leave it for good, call leave_room through the key, or use the room\'s own address.'],
-];
+const EXPECTED_SENTENCE_EDITS = [];
 /** The answers whose retry time is the seconds left in a counter's window,
  *  which moves with the run (the two servers are asked a while apart): that
  *  number masked in both copies, the Retry-After header and the body's
@@ -80,7 +74,7 @@ const CSP_CHANGED = new Set();
 const CSP_ADDED = "; frame-ancestors 'self'";
 /** Paths this checkout adds, which the other answered as an unknown path:
  *  sent to both, the other's answer checked to be that 404, not compared. */
-const NEW_PATHS = new Set(['new POST /api/agent/rooms/leave, delete_room', 'new POST /api/agent/rooms/leave, a room the key marks left']);
+const NEW_PATHS = new Set();
 
 /** One run of the fixed list against a server: each request's label and
  *  answer, and the set-up calls that did not do what the list assumes. */
@@ -220,6 +214,14 @@ async function scenario(srv, muse, suf) {
   for (const [name, args] of [['list_rooms', {}], ['get_start_page', { room }], ['get_invite', { room: room2 }], ['whats_waiting', {}], ['get_members', { room }], ['add_room', { room: room2, token: k3 }], ['remove_room', { room: room2 }], ['add_room', { room: room2, token: k3 }], ['post_message', { room, text: 'through the key', client_msg_id: 'k1' }], ['no_such_tool', { room }], ['whoami', { room: 'difftest-none-' + suf }]]) {
     await send('agent mcp tools/call ' + name + ' ' + JSON.stringify(args).replace(/"token":"[^"]+"/, '"token":"T"'), 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name, arguments: args }) });
   }
+  // a Muse wake set up through the key (a second gadget's code) in the room its seat joined: the set, its own write and its tidy,
+  // and later, after the leave through the key, the disconnect that settles it
+  const gadget2 = await museGadget({ muse, SUF: suf + '-' + srv.port + '-k', sealPublicKey: srv.sealPublicKey }, handover((method, p, o) => send('agent: muse ' + p, method, p, o), '198.51.100.10'), 'diffkey');
+  must('agent: a second gadget linked', gadget2.status === 200 && !!gadget2.code && !!gadget2.link);
+  tokens.museCode2 = gadget2.code; tokens.museLink2 = gadget2.link;
+  const reg2 = await send('agent mcp tools/call muse_register', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'muse_register', arguments: { code: gadget2.code, rooms: [room] } }) });
+  must('agent: muse_register set the wake', !!reg2.json && !!reg2.json.result && !reg2.json.result.isError && reg2.json.result.structuredContent.results[0].ok === true);
+  await send('agent GET /api/agent, a Muse wake', 'GET', '/api/agent', { headers: kh });
   await send('agent POST /api/agent/rooms/remove', 'POST', '/api/agent/rooms/remove', { headers: kh, json: { room: room2 } });
   await send('agent POST /api/agent/rooms/remove, not held', 'POST', '/api/agent/rooms/remove', { headers: kh, json: { room: room2 } });
   // set-up calls of the test hooks, not compared (each server answers its own)
@@ -282,8 +284,8 @@ async function scenario(srv, muse, suf) {
   await send('agent POST /api/agents/invite, a check', 'POST', '/api/agents/invite', { json: { name: 'DiffNew', rooms: [{ room, inviter_token: per }], check: true }, headers: net });
   await send('agent POST /api/agent/rooms/invite, a check', 'POST', '/api/agent/rooms/invite', { headers: kh, json: { name: 'DiffNew', rooms: [{ room: room2, inviter_token: per }], check: true } });
   // a leave through the key, refused before it asks any room, so nothing changes on either server
-  await send('new POST /api/agent/rooms/leave, delete_room', 'POST', '/api/agent/rooms/leave', { headers: kh, json: { room, confirm: room, delete_room: true } });
-  await send('new POST /api/agent/rooms/leave, a room the key marks left', 'POST', '/api/agent/rooms/leave', { headers: kh, json: { room, confirm: room } });
+  await send('agent POST /api/agent/rooms/leave, delete_room', 'POST', '/api/agent/rooms/leave', { headers: kh, json: { room, confirm: room, delete_room: true } });
+  await send('agent POST /api/agent/rooms/leave, a room the key marks left', 'POST', '/api/agent/rooms/leave', { headers: kh, json: { room, confirm: room } });
   // the disconnect with a room the key holds that refused its invite (the agent left it)
   must('agent: disconnected', (await send('agent DELETE /api/agent', 'DELETE', '/api/agent', { headers: kh })).status === 200);
   await send('agent GET /api/agent, disconnected', 'GET', '/api/agent', { headers: kh });

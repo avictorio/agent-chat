@@ -1144,7 +1144,50 @@ docs.txt section that owns its routes, caps and formats.
   invite's name folds the same, so in an older room holding "Scout" beside
   "scout" a wake set through the key outlives its seat; and
   `museHookLook(token)`, which answers the Muse link the hook filed under
-  the seat's name is on, for the same seats, and writes nothing. None opens an invite or marks anyone seen: in the whole Room
+  the seat's name is on, for the same seats, and writes nothing.
+  **The holders.** Beside each member's Muse hook the room keeps who set
+  it up on its link (`mhh`, schema step 10, `MhhRow`): a holder is a
+  random tag per identity and room (16 bytes, base64url), `self` (the
+  room's own registration, `museSetHook`) or `pre` (a set that sent no
+  tag, or a hook from before the step: who set it is unknown); no tag can
+  spell the last two. Every writer of a Muse hook applies one rule in the
+  same step as its write: on the same link the holders stay (a hook with
+  no row first gets the `pre` it is held by) and the new holder joins
+  (`INSERT OR IGNORE`); on another link, over a webhook or nothing, they
+  are cleared first (`museHold`). `museSetHookLook` takes an optional
+  `tag` (`pre` without one; a tag that is not one is 400 `bad_holder`
+  before anything is written), `museSetHook` holds by `self`,
+  `webhookSet` and `museDrop` (a removal, a revoke of a name's last
+  invite, revoke everyone) clear the rows, and `museUpdate`,
+  `webhookRotate` and the delivery loop, which change a hook in place,
+  keep them. A hook is held by holders H when it is a Muse hook with a row
+  in H, or with no row at all and `pre` in H (every writer gives one, so
+  a hook with none is one older code wrote). An identity looks at and
+  lets go of its own hold: `museHolderLook(tag, token, legacy)` and
+  `museHolderDrop(tag, link, token, legacy)` find the member by the tag's
+  rows, else by the token's seat (a mismatch, or a tag under two members,
+  is 409 `holder_mismatch`, logged `room.holder_mismatch`), and count the
+  tag, or with `legacy` the tag and `LEGACY_HOLDS`, as the caller's; a
+  drop deletes those rows and removes the hook (`museLetGo`: `museDrop`,
+  the bridge told, the members notified) only when no holder is left,
+  otherwise nothing anyone can see changes. `museHookLook` and
+  `museDropLook` are an untagged entry's look and drop: they count
+  `LEGACY_HOLDS` (`pre` and `self`) as its own, so while no tag is made
+  every Muse hook is held by them, and they answer and write as before
+  holders were kept. The four answer `on` beside `link`: the link the hook
+  is on whoever holds it. A key's entry may carry a `tag` (and `pre`:
+  its looks and drops also count the untagged holds); the Worker passes a
+  tag on to the set (`museRegister`, from the list its recording write
+  wrote), observes by it (`observe`) and keeps it on every write
+  (`tagsKept`, beside `keepsWakes`), and makes none, so a key's entries
+  are looked at and dropped as before. With tags, a hook goes only when
+  its last holder lets go, so two identities on one seat never turn off
+  each other's wake; a set sent with a tag to a room that keeps no
+  holders would be held as `pre` once the room starts on newer code, which
+  is why every room keeps holders before any tag is made (the model,
+  `tests/unit/holders-model.mjs`, variant `oldroom`). A hook has one
+  routing, the last set's: a holder letting go changes no routing.
+  None opens an invite or marks anyone seen: in the whole Room
   class `inv.used` and `inv.seen` are written only by `Room.access` (`grep
   -rn "UPDATE inv" worker/room/` lists every write of `inv`: those two,
   the avatar pointers, `kind`, `revoked`, `left_ts` and `posted`), and
@@ -1511,6 +1554,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `gm` | game matches, one row per match of any game in `GAME_ENGINES`: status, creator, card message id, and the whole match state as one JSON row |
 | `gr` | ended matches' results, one row per finished or called-off match (`GrRow`): type, status, `ended`, winner, winners, draw, places, seats, the seat pair and the games-list entry (`pub`). What the games list's history, the record, the ladder and Duel's head-to-head read (`games.md`, The match lifecycle). Schema step 6, backfilled from `gm` in SQL; `pub` is null on a backfilled row until the list first shows it. |
 | `mh` | Muse delivery hooks, one row per member with a hook, keyed by the folded name (`MhRow`, `room/muse.ts`): the link id, routing, on/muted, the delivered cursor, the next wake's time, the refusals in a row. Schema step 7. |
+| `mhh` | The holders of each member's Muse hook (`MhhRow`, `room/muse.ts`): the folded name, a holder (a tag, `self` or `pre`) and when it was written; one row per holder. Schema step 10, whose backfill gives `pre` only to a Muse hook with no row. |
 | `mq` | items waiting for a Muse hook (`MqRow`): a number from one room-wide counter (the hook's cursor follows it), the kind, and the frame's data. At most `MUSE_QUEUE_MAX` per hook. Schema step 7. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |

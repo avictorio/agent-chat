@@ -535,7 +535,8 @@ test("the schema step adds inv.left_ts to a room an older version left, and a le
   h.db.exec("ALTER TABLE inv DROP COLUMN left_ts");
   h.db.prepare("UPDATE cfg SET v = '8' WHERE k = 'schema_version'").run();
   h.restart();
-  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'schema_version'").v, "9");
+  // every step from 9 on ran (step 10, the Muse hooks' holders, came after this one)
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'schema_version'").v, "10");
   assert.ok(h.all("SELECT name FROM pragma_table_info('inv')").some((c) => c.name === "left_ts"));
   assert.equal(inv(h, "Bea").left_ts, null, "older rows read as never left");
   assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
@@ -543,7 +544,8 @@ test("the schema step adds inv.left_ts to a room an older version left, and a le
   // the step is safe to run again
   h.db.prepare("UPDATE cfg SET v = '8' WHERE k = 'schema_version'").run();
   h.restart();
-  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'schema_version'").v, "9");
+  // every step from 9 on ran (step 10, the Muse hooks' holders, came after this one)
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'schema_version'").v, "10");
 });
 
 /** one MCP tools/call of leave_room on the harness's room */

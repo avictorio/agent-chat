@@ -44,33 +44,9 @@ function localBuildId() {
   return require('crypto').createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
-// The config a local server runs: wrangler.toml with its v2 migration,
-// which transfers the Muse bridge's classes from the muse-bridge Worker
-// (where their live data is), turned into one that creates them with
-// new_sqlite_classes. wrangler dev gives a class SQLite storage only from
-// new_sqlite_classes, and a transferred class came up without it, so the
-// bridge's first query failed. Written in ROOT (its paths are relative to
-// it) and removed with the run; a wrangler.toml this cannot rewrite fails
-// the start rather than run the bridge without its storage.
-let configs = 0;
-function testConfig() {
-  const text = fs.readFileSync(path.join(ROOT, 'wrangler.toml'), 'utf8');
-  const v2 = /^\[\[migrations\]\]\s*\ntag = "v2"\s*\n((?:[ \t]*\[\[migrations\.transferred_classes\]\]\s*\n(?:[ \t]*(?:from|from_script|to)\s*=\s*"[^"]*"\s*\n)+)+)/m.exec(text);
-  const classes = v2 ? [...v2[1].matchAll(/^[ \t]*to\s*=\s*"([^"]+)"/gm)].map((m) => m[1]) : [];
-  if (!v2 || classes.length !== 2) throw new Error('tests/api/server.js: wrangler.toml\'s v2 migration is not the transfer of the Muse bridge\'s two classes it knows how to run locally');
-  const file = path.join(ROOT, '.apitest-wrangler-' + process.pid + '-' + (++configs) + '.toml');
-  fs.writeFileSync(file, text.replace(v2[0], '[[migrations]]\ntag = "v2"\nnew_sqlite_classes = ' + JSON.stringify(classes) + '\n'));
-  return file;
-}
-
-/** A Muse seal key of the run's own: the raw X25519 private key as base64
- *  (what MUSE_SEAL_KEY holds) and its public key, as GET /api/muse/seal-key
- *  serves it. */
-function sealKey() {
-  const { privateKey, publicKey } = require('crypto').generateKeyPairSync('x25519');
-  const raw = (k, part) => Buffer.from(k.export({ format: 'jwk' })[part], 'base64url').toString('base64');
-  return { privateKey: raw(privateKey, 'd'), publicKey: raw(publicKey, 'x') };
-}
+// The config (wrangler.toml with the Muse bridge's classes created rather
+// than transferred) and the seal key: tests/api/local-config.mjs, which the
+// schema upgrade test uses too.
 
 /** Starts wrangler dev and waits until its own child answers.
  *  @param opts {port?: number, museOrigin?: string} - port's default: API_PORT from the environment, else a free port;
@@ -84,7 +60,8 @@ async function start(opts) {
   const port = opts.port || Number(process.env.API_PORT) || await freePort();
   const inspector = await freePort();
   const build = localBuildId();
-  const config = testConfig();
+  const { testConfig, sealKey } = await import('./local-config.mjs');
+  const config = testConfig(ROOT);
   const seal = sealKey();
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apitest-state-'));
   const aside = fs.existsSync(DEV_VARS) ? DEV_VARS + '.aside-' + process.pid : null;

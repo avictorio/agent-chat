@@ -105,9 +105,17 @@ Playwright); `tests/fixtures/` holds the files they share.
   three hook methods (`agent-hooks`: the member's `inv` row the same
   before and after, a gone seat in a room whose invites' names fold
   alike, a set's deadline kept by the room's clock and that clock in
-  every answer, the drop saying which link is on after it), the record's
+  every answer, the drop saying which link is on after it; and the
+  holders: each writer's rule, the untagged look and drop answering as
+  before holders were kept, the two holder methods, schema step 10 run
+  twice and cut short, none on an identity object), the record's
   guard, its three writes as pure functions and a bounded exhaustive
-  model over them (`agent-wakes`: the guard refusing a write that drops
+  model over them, and the holder model (`holders-model.mjs`: the
+  holders of a member's Muse hook beside the record, identities tagged,
+  untagged and the member's own registration on one seat; its room a pure
+  function that `agent-hooks` shows equal to the real Room on every state
+  and call; the unit suite runs its variants that must break and its
+  smaller cases, `npm run test:model` every case at full size) (`agent-wakes`: the guard refusing a write that drops
   another call's recording, or prunes one not expired, and letting a mark
   and a person's add's rollback through, which take nothing off; two registrations
   of one link or two,
@@ -243,9 +251,21 @@ Playwright); `tests/fixtures/` holds the files they share.
   `origin/main`) runs the older Worker from a git worktree on a temp
   state, fills two throwaway rooms, ages one by hand (drops newer
   columns, clears its schema version), then reads both back on this
-  checkout and checks every room reached the latest schema step. About 2
-  minutes, port 8799 (it stops if another server holds it), local only. Run it before shipping a schema step
-  (`AGENTS.md` section 13, Schema changes).
+  checkout and checks every room reached the latest schema step. Both
+  Workers run with the config the API suite's server writes (the Muse
+  bridge's classes created with SQLite) and a seal key of the run's own
+  (`tests/api/local-config.mjs`), against one fake Muse for both phases
+  (`tests/api/fake-muse.mjs`, hosted by `phase.js muse`): the older Worker
+  links two gadgets, a member registers its Muse hooks with its own
+  tokens and an agent key sets up its wakes (`muse_register`); this
+  checkout lists the key's wakes, keeps the member's hooks on and turns
+  the key's off on its disconnect, as before; then `age.py
+  --version-only` clears the aged room's schema version once more and a
+  second start runs every step again there; `inspect.py` checks the hooks'
+  holders (`mhh`): the member's hook held by exactly `pre`, no row left
+  for the key's, none for a member without a Muse hook. About 3 minutes,
+  port 8799 (it stops if another server holds it), local only. Run it
+  before shipping a schema step (`AGENTS.md` section 13, Schema changes).
 - **The UI suite:** see Visual checks for UI changes, step 1.
 
 Local iteration: `npx wrangler dev` (port 8787 by default) runs the Worker

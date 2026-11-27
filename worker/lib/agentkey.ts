@@ -112,8 +112,37 @@ export async function agentDataKey(id: string, secret: Uint8Array<ArrayBuffer>):
  *  added, and whether the room has refused the token since (state refused,
  *  the room's code and when). hooks are the Muse wakes the key set up in
  *  that room (muse_register), sealed with the rest and in no answer: a link
- *  id is a bearer secret at the bridge. */
-export type AgentEntry = { room: string, token: string, name: string, added: number, state: "held" | "refused", code?: string, at?: number, hooks?: AgentWake[] };
+ *  id is a bearer secret at the bridge. tag, when the entry has one, is the
+ *  holder its sets are held by in the room (room/muse.ts, mhh), and what its
+ *  looks and drops go by (museHolderLook, museHolderDrop); pre: its looks
+ *  and drops also count the room's untagged holds as its own (its wakes were
+ *  set before it had a tag). This Worker passes both on and keeps them, and
+ *  makes neither: an entry without a tag is looked at and dropped as before
+ *  holders were kept. */
+export type AgentEntry = { room: string, token: string, name: string, added: number, state: "held" | "refused", code?: string, at?: number, hooks?: AgentWake[], tag?: string, pre?: true };
+
+/** The check beside keepsWakes (lib/wakes.ts) on every write of a key's
+ *  list: an entry's holder tag is what its holds in the room are found by,
+ *  so an entry of after (matched by room and token) that recorded a Muse
+ *  wake in before keeps how its holds are found: its tag, if it had one; no
+ *  tag gained without pre while it records a link; pre not lost while it
+ *  records a link. Otherwise the room's hold would no longer be its own to
+ *  look at, a link would leave on an observation that its holder holds
+ *  nothing while the hook stays on, and keepsWakes, which matches entries by
+ *  room and token, cannot see it. An entry that recorded no link may change
+ *  freely, and one that leaves the list is keepsWakes' to check. It throws,
+ *  and nothing is written. */
+export function tagsKept(before: AgentEntry[], after: AgentEntry[]): void {
+  for (const e of before) {
+    if (!(e.hooks && e.hooks.length)) continue;
+    const a = after.find((x) => x.room === e.room && x.token === e.token);
+    if (!a) continue;
+    const records = !!(a.hooks && a.hooks.length);
+    if (e.tag !== undefined && a.tag !== e.tag) throw new Error("an entry's holder tag would change while it records a Muse wake");
+    if (e.tag === undefined && a.tag !== undefined && a.pre !== true && records) throw new Error("an entry would gain a holder tag without its pre hold while it records a Muse wake");
+    if (e.pre === true && a.pre !== true && records) throw new Error("an entry's pre hold would go while it records a Muse wake");
+  }
+}
 
 /** A Muse wake recorded on an entry (worker/lib/wakes.ts): its link id,
  *  present while a hook of that link may be on in the room, and its

@@ -1,7 +1,11 @@
 # The schema upgrade test (run.sh): every room in the local state reached the
 # latest schema version, with the columns (the mdel and pcid tables, dg.updated, inv.left_ts) the aged room had lost, the
 # retired inv.avatar gone, inv.posted backfilled and the results table (gr,
-# step 6) holding one row for each ended match.
+# step 6) holding one row for each ended match; and the holders of its Muse
+# hooks (mhh, step 10): WakeA's hook, which the older code set, held by
+# exactly "pre" (in the aged room after step 10 ran a second time too), no
+# row left for WakeB, whose hook the key's disconnect turned off, and no row
+# for a member without a Muse hook.
 import sqlite3, glob, sys, re, os
 ROOM_TS = os.path.join(os.path.dirname(__file__), '..', '..', 'worker', 'room', 'Room.ts')
 # the latest version is the number of entries in SCHEMA_STEPS
@@ -26,5 +30,10 @@ for f in glob.glob(state + '/**/*.sqlite', recursive=True):
     results = c.execute("SELECT COUNT(*) FROM gr").fetchone()[0] if 'id' in cols['gr'] else None
     print(room, 'schema_version', ver[0][0] if ver else None, 'missing', missing, 'inv.avatar', avatar, 'posted', posted, 'ended matches', ended, 'results', results)
     if not ver or ver[0][0] != LATEST or missing or avatar or any(p is None for _, p in posted) or results != ended: bad += 1
+    has_mhh = bool(c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mhh'").fetchall())
+    holders = sorted(c.execute("SELECT member, holder FROM mhh").fetchall()) if has_mhh else None
+    orphans = c.execute("SELECT COUNT(*) FROM mhh WHERE member NOT IN (SELECT member FROM mh WHERE kind = 'muse')").fetchone()[0] if has_mhh else None
+    print(room, 'mhh', has_mhh, 'holders', holders, 'rows of no Muse hook', orphans)
+    if not has_mhh or holders != [('wakea', 'pre')] or orphans != 0: bad += 1
 print('INSPECT: latest version', LATEST, '-', 'ok' if not bad else str(bad) + ' room(s) wrong')
 sys.exit(1 if bad else 0)

@@ -10,6 +10,7 @@
     "test": "npm --prefix web test",
     "test:api": "node tests/api/api.test.js",
     "test:unit": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/unit/register.mjs --test \"tests/unit/*.test.mjs\" \"tests/bridge/*.test.mjs\"",
+    "test:model": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/unit/register.mjs tests/unit/holders-model.mjs --full",
     "test:bridge-interop": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/unit/register.mjs --test \"tests/bridge/interop/*.test.mjs\"",
     "bridge:keygen": "node --import ./tests/unit/register.mjs scripts/bridge/keygen.mjs",
     "bridge:seal": "node --import ./tests/unit/register.mjs scripts/bridge/seal.mjs"

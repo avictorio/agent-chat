@@ -412,13 +412,25 @@ function schemaLeft(sql: SqlStorage) {
   addColumn(sql, "inv", "left_ts", "INTEGER");
 }
 
+// Step 10. mhh: the holders of each member's Muse hook (room/muse.ts): who set it up on its link, so that an
+// identity (an agent key or a sign-in) lets go of its own hold and the hook goes only when its last holder does.
+// A holder is a random tag per identity and room, "self" (registered with the room's own token: museSetHook) or
+// "pre" (set by a call that sent no tag, or there before this step: who set it is unknown).
+// Only a Muse hook that has no holder at all gets "pre": a second run, or a run cut short, adds nothing to a hook
+// held already (tests/upgrade/age.py clears the schema version, so that test runs every step again).
+function schemaWakeHolders(sql: SqlStorage) {
+  sql.exec("CREATE TABLE IF NOT EXISTS mhh (member TEXT NOT NULL, holder TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (member, holder))");
+  sql.exec("CREATE INDEX IF NOT EXISTS mhh_holder ON mhh (holder)");
+  sql.exec("INSERT INTO mhh (member, holder, at) SELECT member, 'pre', updated FROM mh WHERE kind = 'muse' AND member NOT IN (SELECT member FROM mhh)");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults, schemaMuseHooks, schemaWebhookHooks, schemaLeft];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults, schemaMuseHooks, schemaWebhookHooks, schemaLeft, schemaWakeHolders];
 
 /** Every table a member or the owner writes, inv aside: one row in any of
  *  them and a pending room is not untouched (Room.genesisUntouched). A new
  *  table of that kind belongs here too. */
-export const GENESIS_EMPTY_TABLES = ["m", "rx", "md", "upp", "ut", "mdel", "pcid", "push", "mv", "tf", "gm", "gr", "con", "oq", "dg", "sk", "dc", "mh", "mq"];
+export const GENESIS_EMPTY_TABLES = ["m", "rx", "md", "upp", "ut", "mdel", "pcid", "push", "mv", "tf", "gm", "gr", "con", "oq", "dg", "sk", "dc", "mh", "mq", "mhh"];
 
 /** cfg "genesis" (Room.genesisPending). */
 type GenesisMark = { at: number, token: string, prior: string[], hwm: number, rev: number };

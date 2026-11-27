@@ -29,6 +29,18 @@
 // report is logged and changes nothing here. A hook the room turns off on a
 // 410 is not reported: the link is gone already.
 //
+// Beside each member's Muse hook the room keeps who set it up on its link
+// (mhh, schema step 10): its holders, each a random tag per identity and
+// room (an agent key's, or a sign-in's), "self" (registered with the room's
+// own token, museSetHook) or "pre" (set by a call that sent no tag, or there
+// before holders were kept). A set on the hook's own link adds its holder
+// beside the others; a set on another link, a webhook or a removal clears
+// them. An identity looks at and lets go of its own hold (museHolderLook,
+// museHolderDrop), and the hook goes only when its last holder lets go, so
+// two identities on one seat never turn off each other's wake. An entry of a
+// key with no tag counts LEGACY_HOLDS as its own (museHookLook,
+// museDropLook).
+//
 // A hook can instead wake an HTTPS URL (kind "webhook", routes/webhook.ts,
 // lib/webhook.ts), for agents that are not on Muse: the same queue, cursor,
 // grouping, retries and switches, with the wake POSTed to the URL, signed
@@ -62,6 +74,22 @@ export type MhRow = { member: string, name: string, room: string, link: string, 
 
 /** What a hook wakes: a Muse (through the bridge) or an HTTPS URL. */
 export type HookKind = "muse" | "webhook";
+/** mhh: one holder of a member's Muse hook (schema step 10): member the
+ *  folded name, as mh files the hook; holder a tag (HOLDER_TAG_RE), "self"
+ *  or "pre", which no tag can spell; at the room's clock when the row was
+ *  written, for reading only. */
+export type MhhRow = { member: string, holder: string, at: number };
+
+/** The holds an entry of a key with no tag counts as its own: "pre" (set by
+ *  a call that sent no tag, or there before holders were kept) and "self"
+ *  (registered with the room's own token). While no tag is made anywhere,
+ *  every Muse hook is held by these, so the looks and the drop for such an
+ *  entry answer and write as they did before holders were kept. */
+export const LEGACY_HOLDS = ["pre", "self"];
+/** A holder tag: 16 random bytes, base64url (22 characters). */
+const HOLDER_TAG_RE = /^[A-Za-z0-9_-]{22}$/;
+/** A tag this room does not keep: only a Worker fault sends one. */
+const BAD_HOLDER = "This holder tag is not one this room keeps.";
 /** mq: one item waiting for a hook: its number (the cursor's line), the
  *  kind of frame, when it was queued, and the frame's data as JSON. */
 export type MqRow = { n: number, member: string, kind: string, at: number, data: string };
@@ -213,6 +241,7 @@ export const MuseMethods = {
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
     const old = this.museRow(member);
     this.museWrite(member, who.name, room, "muse", link, routing, null, null, old, now);
+    this.museHold(member, old, link, "self", now);
     this.roomName = room;
     // moved to another link: the old one loses this room (the new one is told by the caller)
     if (old && old.kind === "muse" && old.link !== link) this.museReportGone([{ link: old.link, room: old.room }]);
@@ -220,26 +249,30 @@ export const MuseMethods = {
     return { ok: true, name: who.name, hook: this.museView(this.museRow(member) as MhRow) };
   },
 
-  // The three hook methods an agent key calls (muse_register, and the key's
-  // disconnect or a room taken off it: routes/agent.ts). Each finds the
-  // member by the token with lookupInvite alone, never with access() or
-  // museMember (which runs it): neither opens an invite, stamps used or seen,
-  // or confirms a genesis. In the whole class inv.used and inv.seen are
-  // written only by Room.access; these read inv, and the first two write mh
-  // and mq, as museSetHook and museDrop do (museHookLook writes nothing).
+  // The hook methods an agent key calls (muse_register, and the key's
+  // disconnect or a room taken off it: routes/agent.ts): museSetHookLook,
+  // and an entry's look and drop, museHookLook and museDropLook for one
+  // with no holder tag, museHolderLook and museHolderDrop for one with. Each
+  // finds the member by the token with lookupInvite alone (museSeatName), or
+  // by a holder row, never with access() or museMember (which runs it):
+  // none opens an invite, stamps used or seen, or confirms a genesis. In the
+  // whole class inv.used and inv.seen are written only by Room.access; these
+  // read inv, and the set and the drops write mh, mq and mhh, as museSetHook
+  // and museDrop do (the looks write nothing).
   // The room's own registration joins (museSetHook opens the invite), so a
   // hook through a key never stands in for that join: an invite never
   // opened is refused, and the agent joins first with any call that joins.
   //
-  // Every answer of the three, a refusal included, carries the room's clock
-  // (now, museNow), and the look's and the drop's carry the Muse link the
-  // hook is on: an observation, on which the key's record (lib/wakes.ts)
+  // Every answer of these, a refusal included, carries the room's clock
+  // (now, museNow), and the looks' and the drops' carry the Muse link the
+  // entry's holds hold (link) and the one the hook is on whoever holds it
+  // (on): an observation, on which the key's record (lib/wakes.ts)
   // takes a link off only when each of its outstanding recordings has a
   // deadline that clock has passed (by AGENT_WAKE_SKEW_MS); museSetHookLook
   // refuses, by that same clock, a set that reaches the room after its
   // deadline, so no set of the link can arrive after such an observation.
 
-  /** The room's clock, as the three hook methods an agent key calls read it. */
+  /** The room's clock, as the hook methods an agent key calls read it. */
   museNow(): number {
     return Date.now();
   },
@@ -249,10 +282,13 @@ export const MuseMethods = {
    *  waiting items), without opening the invite: an invite never opened is
    *  refused (not_joined) and stays unopened. A set that reaches the room
    *  after its deadline (notAfter, by the room's clock) is refused
-   *  (too_late) and sets nothing. */
-  museSetHookLook(token: string, link: string, routing: string, room: string, notAfter: number): ({ ok: true, name: string, hook: MuseHookView } | Refusal) & { now: number } {
+   *  (too_late) and sets nothing. The set's holder is its tag, or "pre"
+   *  when it sends none; a tag that is not one is refused (bad_holder)
+   *  before anything is written. */
+  museSetHookLook(token: string, link: string, routing: string, room: string, notAfter: number, tag?: string): ({ ok: true, name: string, hook: MuseHookView } | Refusal) & { now: number } {
     const now = this.museNow();
     if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };
+    if (tag !== undefined && tag !== null && !HOLDER_TAG_RE.test(String(tag))) return { ok: false, status: 400, code: "bad_holder", error: BAD_HOLDER, now };
     if (!(now <= Number(notAfter))) return { ok: false, status: 409, code: "too_late", error: "This registration reached the room after its time, so nothing was set.", now };
     const l = this.lookupInvite(token);
     if (!l.ok) return { ...l, now };
@@ -262,6 +298,7 @@ export const MuseMethods = {
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
     const old = this.museRow(member);
     this.museWrite(member, name, String(room), "muse", String(link), String(routing), null, null, old, now);
+    this.museHold(member, old, String(link), tag !== undefined && tag !== null ? String(tag) : "pre", now);
     this.roomName = room;
     // moved to another link: the old one loses this room (the new one is told by the caller)
     if (old && old.kind === "muse" && old.link !== link) this.museReportGone([{ link: old.link, room: old.room }]);
@@ -278,21 +315,18 @@ export const MuseMethods = {
    *  hooks are filed by the folded name, so in an older room holding both
    *  "Scout" and "scout" a wake the key set up outlives its seat. A token
    *  the room has no row for is refused (invite_invalid), as by
-   *  lookupInvite. It says nothing of the seat but whether a hook went and
-   *  the Muse link the hook filed under that name is on after the call
-   *  (null: none, or a webhook), as museHookLook says it. */
-  museDropLook(token: string, link: string): ({ ok: true, removed: boolean, link: string | null } | Refusal) & { now: number } {
+   *  lookupInvite. It is the drop of an entry with no tag: it lets go of
+   *  LEGACY_HOLDS (museLetGo), and the hook goes once no holder is left. It
+   *  says nothing of the seat but whether a hook went, the Muse link
+   *  LEGACY_HOLDS hold after the call (link: null when they hold none) and
+   *  the one the hook is on, whoever holds it (on: null for none, or a
+   *  webhook), as museHookLook says them. */
+  museDropLook(token: string, link: string): ({ ok: true, removed: boolean, link: string | null, on: string | null } | Refusal) & { now: number } {
     const now = this.museNow();
     if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };
     const s = this.museSeatName(token);
     if (!s.ok) return { ...s, now };
-    const member = nameFold(s.name);
-    const h = this.museRow(member);
-    if (!h || h.kind !== "muse" || h.link !== String(link)) return { ok: true, removed: false, link: h && h.kind === "muse" ? h.link : null, now };
-    this.museDrop(s.name);
-    this.notifyMembers(s.name);
-    const after = this.museRow(member);
-    return { ok: true, removed: true, link: after && after.kind === "muse" ? after.link : null, now };
+    return { ok: true, ...this.museLetGoIfHeld(nameFold(s.name), s.name, String(link), LEGACY_HOLDS), now };
   },
 
   /** The Muse link of the hook filed under the token's member's name (null:
@@ -300,14 +334,148 @@ export const MuseMethods = {
    *  room has a row for, as museDropLook answers: the observation on which
    *  the key's record (lib/wakes.ts) settles the links it holds for this
    *  room, at muse_register's bound and after it, and before a take-off, a
-   *  replaced entry or a disconnect turns any wake off. */
-  museHookLook(token: string): ({ ok: true, link: string | null } | Refusal) & { now: number } {
+   *  replaced entry or a disconnect turns any wake off. It is the look of
+   *  an entry with no tag: link is the hook's Muse link when LEGACY_HOLDS
+   *  hold it, and on the one it is on whoever holds it. */
+  museHookLook(token: string): ({ ok: true, link: string | null, on: string | null } | Refusal) & { now: number } {
     const now = this.museNow();
     if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };
     const s = this.museSeatName(token);
     if (!s.ok) return { ...s, now };
-    const h = this.museRow(nameFold(s.name));
-    return { ok: true, link: h && h.kind === "muse" ? h.link : null, now };
+    const member = nameFold(s.name);
+    return { ok: true, link: this.museHeldLink(member, LEGACY_HOLDS), on: this.museOnLink(member), now };
+  },
+
+  /** An identity's look at its own hold (a key's entry with a tag): the
+   *  member is the one the tag's rows are under, else, when token is given,
+   *  the token's seat (museSeatName), else none. link is the member's Muse
+   *  link when the tag holds the hook, or with legacy the tag or
+   *  LEGACY_HOLDS; on the link the hook is on, whoever holds it (present
+   *  when a member was found). A tag held nowhere, with no token, answers
+   *  that this holder holds nothing. Refused: room_missing; bad_holder (not
+   *  a tag); the seat's refusal only when the tag has no row (a row finds
+   *  the seat by itself); holder_mismatch when the tag's rows and the
+   *  token's seat are different members, or the tag has rows under two.
+   *  Writes nothing, and opens nothing. */
+  museHolderLook(tag: string, token: string | null, legacy: boolean): ({ ok: true, link: string | null, on?: string | null } | Refusal) & { now: number } {
+    const now = this.museNow();
+    const f = this.museHolderOf(tag, token);
+    if (!f.ok) return { ...f, now };
+    if (f.member === null) return { ok: true, link: null, now };
+    return { ok: true, link: this.museHeldLink(f.member, this.museHoldsOf(String(tag), legacy)), on: this.museOnLink(f.member), now };
+  },
+
+  /** An identity's drop of its own hold on link: the member and the
+   *  refusals as museHolderLook. When the member's hook is a Muse hook on
+   *  link held by the tag (or with legacy, the tag or LEGACY_HOLDS), those
+   *  holds go (museLetGo), and the hook only once no holder is left.
+   *  Answers whether the hook went, the link those holds hold after the
+   *  call and the one the hook is on, as museDropLook. */
+  museHolderDrop(tag: string, link: string, token: string | null, legacy: boolean): ({ ok: true, removed: boolean, link: string | null, on?: string | null } | Refusal) & { now: number } {
+    const now = this.museNow();
+    const f = this.museHolderOf(tag, token);
+    if (!f.ok) return { ...f, now };
+    if (f.member === null) return { ok: true, removed: false, link: null, now };
+    return { ok: true, ...this.museLetGoIfHeld(f.member, f.name, String(link), this.museHoldsOf(String(tag), legacy)), now };
+  },
+
+  /** The member a holder tag's look or drop is about (see museHolderLook):
+   *  null when neither the tag nor a token finds one; name the seat's name
+   *  when the token found the seat (null otherwise). */
+  museHolderOf(tag: string, token: string | null): { ok: true, member: string | null, name: string | null } | Refusal {
+    if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name" };
+    if (!HOLDER_TAG_RE.test(String(tag))) return { ok: false, status: 400, code: "bad_holder", error: BAD_HOLDER };
+    const rows = this.sql.exec<Pick<MhhRow, "member">>("SELECT DISTINCT member FROM mhh WHERE holder = ?", String(tag)).toArray().map((r) => r.member);
+    const mismatch = (): Refusal => {
+      warn("room.holder_mismatch", null, { room: this.roomName });
+      return { ok: false, status: 409, code: "holder_mismatch", error: "This holder tag belongs to another seat in this room." };
+    };
+    if (rows.length > 1) return mismatch();
+    if (rows.length === 1) {
+      let name: string | null = null;
+      if (token !== null && token !== undefined) {
+        const s = this.museSeatName(String(token));
+        if (s.ok && nameFold(s.name) !== rows[0]) return mismatch();
+        if (s.ok) name = s.name;
+      }
+      return { ok: true, member: rows[0]!, name };
+    }
+    if (token === null || token === undefined) return { ok: true, member: null, name: null };
+    const s = this.museSeatName(String(token));
+    if (!s.ok) return s;
+    return { ok: true, member: nameFold(s.name), name: s.name };
+  },
+
+  /** The holds a tag's look or drop counts as its own. */
+  museHoldsOf(tag: string, legacy: boolean): string[] {
+    return legacy ? [tag].concat(LEGACY_HOLDS) : [tag];
+  },
+
+  /** The member's holder rows. */
+  museHolders(member: string): string[] {
+    return this.sql.exec<Pick<MhhRow, "holder">>("SELECT holder FROM mhh WHERE member = ?", member).toArray().map((r) => r.holder);
+  },
+
+  /** Whether the member's hook is a Muse hook held by one of holders: a
+   *  row of one of them, or no row at all and holders take in "pre" (every
+   *  writer gives a hook a row, so a hook with none is one older code wrote:
+   *  who set it is unknown). */
+  museHeld(member: string, holders: string[]): boolean {
+    const h = this.museRow(member);
+    if (!h || h.kind !== "muse") return false;
+    const rows = this.museHolders(member);
+    return rows.length ? rows.some((r) => holders.indexOf(r) >= 0) : holders.indexOf("pre") >= 0;
+  },
+
+  /** The member's Muse link when holders hold the hook, else null. */
+  museHeldLink(member: string, holders: string[]): string | null {
+    return this.museHeld(member, holders) ? (this.museRow(member) as MhRow).link : null;
+  },
+
+  /** The Muse link the member's hook is on, whoever holds it (null: no
+   *  hook, or a webhook). */
+  museOnLink(member: string): string | null {
+    const h = this.museRow(member);
+    return h && h.kind === "muse" ? h.link : null;
+  },
+
+  /** The holder rule of every set of a Muse hook, in the same step as its
+   *  write (old: the hook it replaced): on the same link the holders stay,
+   *  a hook with no row first getting the "pre" it is held by (so the new
+   *  holder's row does not hide that hold); on another link, or over a
+   *  webhook or nothing, they are cleared. Then the new holder's row. */
+  museHold(member: string, old: MhRow | null, link: string, holder: string, now: number) {
+    if (old && old.kind === "muse" && old.link === link) {
+      if (!this.museHolders(member).length) this.sql.exec("INSERT OR IGNORE INTO mhh (member, holder, at) VALUES (?, 'pre', ?)", member, now);
+    } else {
+      this.sql.exec("DELETE FROM mhh WHERE member = ?", member);
+    }
+    this.sql.exec("INSERT OR IGNORE INTO mhh (member, holder, at) VALUES (?, ?, ?)", member, holder, now);
+  },
+
+  /** holders let go of the member's Muse hook on link, when they hold it
+   *  (museLetGo, the members told of it under name: the seat's name as the
+   *  caller found it, else the hook's); what the drop answers: whether the
+   *  hook went, the link holders hold after the call, and the one the hook
+   *  is on. */
+  museLetGoIfHeld(member: string, name: string | null, link: string, holders: string[]): { removed: boolean, link: string | null, on: string | null } {
+    const h = this.museRow(member);
+    let removed = false;
+    if (h && h.kind === "muse" && h.link === link && this.museHeld(member, holders)) removed = this.museLetGo(member, name === null ? h.name : name, link, holders);
+    return { removed, link: this.museHeldLink(member, holders), on: this.museOnLink(member) };
+  },
+
+  /** holders' rows of the member go; when none is left the hook goes too
+   *  (museDrop, which tells the bridge the link lost this room) and the
+   *  members hear of it. When another holder is left the hook stays and
+   *  nothing anyone can see changed. Whether the hook went. */
+  museLetGo(member: string, name: string, link: string, holders: string[]): boolean {
+    for (const x of holders) this.sql.exec("DELETE FROM mhh WHERE member = ? AND holder = ?", member, x);
+    // the hook goes only from the link it was held on, and only once no holder is left
+    if (this.museHolders(member).length || this.museOnLink(member) !== link) return false;
+    this.museDrop(name);
+    this.notifyMembers(name);
+    return true;
   },
 
   /** The name of the seat a token is for, as lookupInvite finds it, or, for
@@ -338,6 +506,8 @@ export const MuseMethods = {
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
     const old = this.museRow(member);
     this.museWrite(member, who.name, room, "webhook", "", "", url, secret, old, now);
+    // a webhook has no holders: whoever set the Muse hook it replaces holds nothing now
+    this.sql.exec("DELETE FROM mhh WHERE member = ?", member);
     this.roomName = room;
     // was a Muse hook: its link loses this room
     if (old && old.kind === "muse") this.museReportGone([{ link: old.link, room: old.room }]);
@@ -396,12 +566,13 @@ export const MuseMethods = {
     return { ok: true, name: who.name, removed: had };
   },
 
-  /** A member's hook and its queue go (their last invite was revoked, or they removed it). */
+  /** A member's hook, its queue and its holders go (their last invite was revoked, or they removed it). */
   museDrop(name: string | null) {
     if (name === null) {
       const all = this.sql.exec<Pick<MhRow, "link" | "room">>("SELECT link, room FROM mh WHERE kind = 'muse'").toArray();
       this.sql.exec("DELETE FROM mh");
       this.sql.exec("DELETE FROM mq");
+      this.sql.exec("DELETE FROM mhh");
       this.museReportGone(all);
       return;
     }
@@ -409,6 +580,7 @@ export const MuseMethods = {
     const h = this.museRow(member);
     this.sql.exec("DELETE FROM mh WHERE member = ?", member);
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
+    this.sql.exec("DELETE FROM mhh WHERE member = ?", member);
     if (h && h.kind === "muse") this.museReportGone([{ link: h.link, room: h.room }]);
   },
 

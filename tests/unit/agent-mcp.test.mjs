@@ -1731,3 +1731,153 @@ test("a disconnect's write on its last try that finds the record gone answers th
     }
   }
 });
+
+// ---- A key's entry with a holder tag (worker/lib/agentkey.ts AgentEntry.tag, pre) ----
+// This Worker makes no tag, and understands one: it looks and drops by it,
+// passes on the tag of the list its recording write wrote, drops by it when
+// cut meanwhile, and keeps it on every write (tagsKept beside keepsWakes).
+// The tests write a tag into a key's stored list by hand, as a Worker that
+// makes them would.
+import { agentSealRing } from "../../worker/lib/agentkey.ts";
+import { tagsKept } from "../../worker/lib/agentkey.ts";
+const TAG = "tttttttttttttttttttttT";
+/** the key's stored list changed by f, sealed at the next version, as another call's write would leave it */
+async function editStored(w, key, f) {
+  const c = agentCredential(new Request("http://localhost/", { headers: auth(key) }));
+  const h = w.harness("__agent-" + c.id);
+  const a = h.one("SELECT ver, ring FROM ak"), slot = h.one("SELECT wrapped FROM aks WHERE slot = 'key'");
+  const u = await agentUnseal(c.id, c.secret, slot.wrapped, a.ver, a.ring);
+  h.db.prepare("UPDATE ak SET ver = ?, ring = ? WHERE k = 1").run(a.ver + 1, await agentSealRing(u.dk, c.id, a.ver + 1, f(u.rooms)));
+}
+const holdersIn = (w, room) => w.harness(room).all("SELECT holder FROM mhh ORDER BY holder").map((r) => r.holder);
+
+test("tagsKept: an entry recording a Muse wake keeps its tag, gains none without pre and keeps its pre; an entry recording none may change; one that leaves is keepsWakes' to check", () => {
+  const e = (x = {}) => ({ room: "lima", token: "tok", name: "Hank", added: 1, state: "held", ...x });
+  const W = [{ link: "L", recs: [] }];
+  assert.throws(() => tagsKept([e({ hooks: W, tag: TAG })], [e({ hooks: W, tag: "uuuuuuuuuuuuuuuuuuuuuU" })]), /holder tag would change/);
+  assert.throws(() => tagsKept([e({ hooks: W, tag: TAG })], [e({ hooks: W })]), /holder tag would change/);
+  assert.throws(() => tagsKept([e({ hooks: W, tag: TAG })], [e({ tag: "uuuuuuuuuuuuuuuuuuuuuU" })]), /holder tag would change/, "while it recorded one, even if this write settles it");
+  assert.throws(() => tagsKept([e({ hooks: W })], [e({ hooks: W, tag: TAG })]), /gain a holder tag without its pre/);
+  assert.doesNotThrow(() => tagsKept([e({ hooks: W })], [e({ hooks: W, tag: TAG, pre: true })]));
+  assert.throws(() => tagsKept([e({ hooks: W, tag: TAG, pre: true })], [e({ hooks: W, tag: TAG })]), /pre hold would go/);
+  assert.doesNotThrow(() => tagsKept([e({ hooks: W, tag: TAG, pre: true })], [e({ tag: TAG })]), "pre may go with its last link");
+  assert.doesNotThrow(() => tagsKept([e({ tag: TAG })], [e({ tag: "uuuuuuuuuuuuuuuuuuuuuU" })]), "an entry recording no link may change");
+  assert.doesNotThrow(() => tagsKept([e({ hooks: W, tag: TAG })], []), "one that leaves the list");
+  assert.doesNotThrow(() => tagsKept([e({ hooks: W, tag: TAG })], [e({ hooks: W, tag: TAG, token: "other" })]), "another token is another entry");
+  assert.doesNotThrow(() => tagsKept([e({ hooks: W })], [e({ hooks: W })]), "with no tag anywhere, nothing is refused");
+});
+
+test("an entry with a tag is looked at and dropped by its own hold (museHolderLook, museHolderDrop, with its token, legacy as its pre); one without, as before", async () => {
+  for (const pre of [false, true]) {
+    const k = await museKeyed(["lima"]);
+    try {
+      k.w.harness("lima").room.access(k.tok.lima, false);
+      assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
+      assert.deepEqual(holdersIn(k.w, "lima"), ["pre"], "set with no tag: held by pre");
+      // a tag on the entry, and its hold in the room, as a Worker that makes tags leaves them
+      await editStored(k.w, k.key, (rooms) => rooms.map((e) => ({ ...e, tag: TAG, ...(pre ? { pre: true } : {}) })));
+      k.w.harness("lima").db.prepare("INSERT INTO mhh (member, holder, at) VALUES ('hank', ?, 1)").run(TAG);
+      pastDeadlines(k.w, "lima");
+      const mark = k.w.asked.length;
+      const r = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
+      assert.equal(r.status, 200, r.text);
+      const asked = k.w.asked.slice(mark).filter((a) => a.name === "lima");
+      assert.deepEqual(asked.map((a) => a.method), ["museHolderLook", "museHolderDrop"], "pre " + pre);
+      assert.deepEqual(asked[0].args, [TAG, k.tok.lima, pre]);
+      assert.deepEqual(asked[1].args, [TAG, k.link, k.tok.lima, pre]);
+      // the tag's hold went; with pre, the untagged one too, and with it the hook
+      assert.deepEqual(holdersIn(k.w, "lima"), pre ? [] : ["pre"]);
+      assert.equal(hookIn(k.w, "lima") === null, pre);
+    } finally {
+      k.b.restore();
+    }
+  }
+});
+
+test("muse_register: the set carries the tag of the entry as its recording write wrote it, not as first read; cut meanwhile, it drops only that hold, by the tag", async () => {
+  {
+    const k = await museKeyed(["lima"]);
+    try {
+      const h = k.w.harness("lima");
+      h.room.access(k.tok.lima, false);
+      // the entry is tagged by another write between this call's first read and its recording write
+      const obj = k.w.harness(k.id).room, swap = obj.agentSwap.bind(obj);
+      let once = true;
+      obj.agentSwap = async (...a) => { if (once) { once = false; await editStored(k.w, k.key, (rooms) => rooms.map((e) => ({ ...e, tag: TAG }))); } return swap(...a); };
+      const mark = k.w.asked.length;
+      const out = result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key)));
+      delete obj.agentSwap;
+      assert.equal(k.w.asked.slice(mark).filter((a) => a.method === "agentSwap").length >= 2, true, "the recording write met the tagged list and wrote again");
+      assert.equal(out.structuredContent.results[0].ok, true, JSON.stringify(out));
+      const set = k.w.asked.slice(mark).find((a) => a.method === "museSetHookLook");
+      assert.equal(set.args[5], TAG, "the set carries the tag");
+      assert.deepEqual(holdersIn(k.w, "lima"), [TAG], "held by the tag, not by pre");
+      assert.equal((await storedOf(k.w, k.key)).rooms[0].tag, TAG, "and the tag kept on the entry, beside its link");
+      assert.deepEqual(links(await k.peek(), "lima"), [k.link]);
+    } finally {
+      k.b.restore();
+    }
+  }
+  {
+    const k = await museKeyed(["lima"]);
+    try {
+      const h = k.w.harness("lima");
+      h.room.access(k.tok.lima, false);
+      await editStored(k.w, k.key, (rooms) => rooms.map((e) => ({ ...e, tag: TAG })));
+      // another identity holds the same hook on that link: only this call's hold goes
+      const set = h.room.museSetHookLook.bind(h.room);
+      const obj = k.w.harness(k.id).room;
+      h.room.museSetHookLook = (...a) => {
+        const r = set(...a);
+        h.db.prepare("INSERT INTO mhh (member, holder, at) VALUES ('hank', 'uuuuuuuuuuuuuuuuuuuuuU', 1)").run();
+        return r;
+      };
+      // the key is cut after the set, before this call's own write
+      const swap = obj.agentSwap.bind(obj);
+      let swaps = 0;
+      obj.agentSwap = async (...a) => { if (++swaps === 2) { const c = agentCredential(new Request("http://localhost/", { headers: auth(k.key) })); obj.agentCut("key", await agentVerifier(c.id, c.secret)); } return swap(...a); };
+      const mark = k.w.asked.length;
+      const r = await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key));
+      delete obj.agentSwap;
+      delete h.room.museSetHookLook;
+      assert.equal(r.json.error.data.code, "agent_key_invalid");
+      const drop = k.w.asked.slice(mark).find((a) => a.method === "museHolderDrop" || a.method === "museDropLook");
+      assert.deepEqual([drop.method, drop.args], ["museHolderDrop", [TAG, k.link, k.tok.lima, false]]);
+      assert.deepEqual(holdersIn(k.w, "lima"), ["uuuuuuuuuuuuuuuuuuuuuU"], "only this call's hold went");
+      assert.equal(hookIn(k.w, "lima").link, k.link, "the hook stays for the other holder");
+    } finally {
+      k.b.restore();
+    }
+  }
+});
+
+test("a tag and pre on an entry recording a Muse wake survive every write of the list: the own write, a mark, the leave's mark", async () => {
+  const k = await museKeyed(["lima", "oslo"]);
+  try {
+    for (const n of ["lima", "oslo"]) k.w.harness(n).room.access(k.tok[n], false);
+    await editStored(k.w, k.key, (rooms) => rooms.map((e) => ({ ...e, tag: e.room === "lima" ? TAG : "uuuuuuuuuuuuuuuuuuuuuU", pre: true })));
+    assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results.every((x) => x.ok), true);
+    const tagsOf = async () => (await storedOf(k.w, k.key)).rooms.map((e) => [e.room, e.tag, e.pre, (e.hooks || []).length, e.state]);
+    assert.deepEqual(await tagsOf(), [["lima", TAG, true, 1, "held"], ["oslo", "uuuuuuuuuuuuuuuuuuuuuU", true, 1, "held"]]);
+    // a mark: oslo revoked by the owner
+    k.w.harness("oslo").room.revoke(k.tok.oslo);
+    await mcp(k.w, call("whoami", { room: "oslo" }), auth(k.key));
+    assert.deepEqual((await tagsOf())[1], ["oslo", "uuuuuuuuuuuuuuuuuuuuuU", true, 1, "refused"]);
+    assert.deepEqual((await tagsOf())[0], ["lima", TAG, true, 1, "held"]);
+  } finally {
+    k.b.restore();
+  }
+});
+
+// No write of a key's list in this Worker changes a tag, so no behaviour
+// shows tagsKept missing from one: every write that keepsWakes checks
+// (rewrite, the disconnect's remainder; its deletion leaves no entry) also
+// goes through tagsKept, on the same two lists, read off the source.
+import { readFileSync } from "node:fs";
+test("every write of a key's list that keepsWakes checks goes through tagsKept too, on the same lists", () => {
+  const src = readFileSync(new URL("../../worker/routes/agent.ts", import.meta.url), "utf8");
+  const calls = [...src.matchAll(/^\s*keepsWakes\(([^,]+), ([^,]+), ([^,]+), [^\n]*\);\n\s*(.*)$/gm)];
+  const writes = calls.filter((m) => m[3] !== "[]");
+  assert.ok(writes.length >= 2, "found the checked writes: " + calls.length);
+  for (const m of writes) assert.equal(m[4], "tagsKept(" + m[2] + ", " + m[3] + ");", "after keepsWakes(" + m[1] + ", " + m[2] + ", " + m[3] + ", ...)");
+});

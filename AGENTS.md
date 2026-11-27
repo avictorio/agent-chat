@@ -391,6 +391,11 @@ Before pushing:
      API.
    - `npm run test:unit`: the pure game logic and Worker helpers, and
      the Muse bridge's own tests (`tests/bridge/`), in seconds.
+   - `npm run test:model`, for a change to `worker/lib/wakes.ts`, the
+     holders of the Muse hooks (`worker/room/muse.ts`), `tagsKept` or
+     `observe` (`worker/routes/agent.ts`): the holder model in full
+     (`tests/unit/holders-model.mjs --full`), every case at its bounds, with
+     each case's states and time (the unit suite runs its smaller cases).
    - `npm run test:api`: the server, against a local `wrangler dev` that
      serves the build as static assets (once before it:
      `npm ci --prefix tests/mcp-clients`, the MCP client libraries it
@@ -512,7 +517,13 @@ undo it. Never revert or roll back past the deploy that applied the `v2`
 migration (commit `9055f81`, 2026-11-25): the Muse bridge's classes and
 every link now live in this script, and an older version has no code for
 them. Fix forward, with Muse wakes paused meanwhile
-(`MUSE_DELIVER_PAUSED`).
+(`MUSE_DELIVER_PAUSED`). Nor past the deploy that added the holders of
+the members' Muse hooks (schema step 10, `mhh`): a room's code before it
+keeps no holders, so a hook set or removed meanwhile would leave `mhh` out
+of step with `mh`, and step 10 does not run again on a room that ran it
+(the room counts a Muse hook with no holder row as held by `pre`, but a
+holder row left behind for a hook replaced meanwhile could not be undone).
+Fix forward.
 
 ---
 
@@ -638,9 +649,14 @@ native-only features. The Android app is retired (section 8).
   (`worker/room/Room.ts`): a function of `sql` that makes the change once
   (`addColumn` / `dropColumn` read the table's columns first, so a step is
   safe to repeat), with its row type next to the others. Never edit a step
-  that has shipped: a room that ran it will not run it again. Before
-  deploying, run `tests/upgrade/run.sh` (`docs/agents/testing.md`), and
-  give its `age.py` the columns your step adds if they matter.
+  that has shipped: a room that ran it will not run it again. A backfill
+  must be safe to repeat too: `age.py` clears the schema version, and a
+  start cut short runs the step again. Step 10 is the example: it gives
+  `pre` only to a Muse hook with no holder row at all (`... AND member NOT
+  IN (SELECT member FROM mhh)`), so a second run adds nothing to a hook
+  held already. Before deploying, run `tests/upgrade/run.sh`
+  (`docs/agents/testing.md`), and give its `age.py` the columns your step
+  adds if they matter.
 - **Adding a message field:** add it to both list SELECTs in
   `worker/room/messages.ts`, the row `publishMessage` builds, `withKinds`,
   the SSE frame (`sseFrame` in `worker/lib/http.ts`), the contract's
@@ -663,7 +679,8 @@ native-only features. The Android app is retired (section 8).
   agent invites with an invite the room stores as a person's, through the
   room's `invite()` as its holder could, and put them on the key without
   answering them; `muse_register` sets hooks with the room's look-only
-  methods (`museSetHookLook`, `museDropLook`, `museHookLook`), never
+  methods (`museSetHookLook`, `museDropLook`, `museHookLook`, and for an
+  entry with a holder tag `museHolderLook`, `museHolderDrop`), never
   `access()`.
 - **Served numbers:** every number a served text quotes comes from
   `worker/limits.ts` (the `docs.txt` placeholders), not a literal.
