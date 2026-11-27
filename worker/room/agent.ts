@@ -11,13 +11,15 @@
 //
 // An identity stores what the Worker sealed (lib/agentkey.ts): table ak, one
 // row (when it was made, the list's version, the sealed list), and table aks,
-// one row per credential (a slot: its verifier, and the data key wrapped
-// under it). The object compares verifiers and swaps the list on its
-// version, and never sees a secret, a data key or a token. Probing writes
-// nothing: only agentMake creates tables, and every other method looks in
-// sqlite_master first (as lookupInvite does for inv) and refuses without a
-// write where there is no identity. No alarm runs here (Room.alarm returns
-// on an object with no room).
+// one row, the key's slot (its verifier, and the data key wrapped under it);
+// the columns ak.client and aks.expires, used, bind and next are unused
+// (NULL): an agent key neither expires nor is used once. The object compares
+// verifiers and swaps the list on its version, and never sees a secret, a
+// data key or a token. Probing writes nothing: only agentMake creates
+// tables, every other method looks in sqlite_master first (as lookupInvite
+// does for inv) and refuses without a write where there is no identity, and
+// an open only reads. No alarm runs here (Room.alarm returns on an object
+// with no room).
 
 import type { AkRow, AksRow, AqRow, Room } from "./Room.js";
 
@@ -40,9 +42,23 @@ function sameText(a: string, b: string): boolean {
   return d === 0;
 }
 
-/** One creation counter of agentReserve: its key (the window in it), the
- *  window it counts in, its cap, and when that window ends (ms). */
-export type AgentCap = { k: string, w: string, max: number, ends: number };
+/** One creation counter of agentReserve: what it counts (a key without its
+ *  window), its cap, and how long its window is: seconds, or the UTC day.
+ *  The object puts it in its window by its own clock. */
+export type AgentCap = { k: string, max: number, per: number | "day" };
+
+/** A counter's window at now, as the object's own clock places it: its
+ *  name (a UTC day, or the time its window starts to the minute) and when
+ *  it ends (ms). */
+function windowOf(per: number | "day", now: number): { w: string, ends: number } {
+  if (per === "day") {
+    const d = new Date(now);
+    return { w: d.toISOString().slice(0, 10), ends: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) };
+  }
+  const ms = Math.max(1, Number(per)) * 1000;
+  const start = Math.floor(now / ms) * ms;
+  return { w: new Date(start).toISOString().slice(0, 16), ends: start + ms };
+}
 
 /** Whether a slot's verifier matches, on an object that holds an identity
  *  and no room; nothing is written either way. */
@@ -67,7 +83,8 @@ export const AgentMethods = {
     if (hasTable(this.sql, "m")) return { ok: false, code: "not_identity" };
     if (hasTable(this.sql, "ak")) return { ok: false, code: "exists" };
     const created = Date.now();
-    // client and the slots' expires, used, bind and next stay empty for a key
+    // ak.client and aks.expires, used, bind and next are left NULL: unused,
+    // as an agent key neither expires nor is used once
     this.sql.exec("CREATE TABLE IF NOT EXISTS ak (k INTEGER PRIMARY KEY CHECK (k = 1), created INTEGER NOT NULL, ver INTEGER NOT NULL, client TEXT, ring TEXT NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS aks (slot TEXT PRIMARY KEY, kind TEXT NOT NULL, verifier TEXT NOT NULL, wrapped TEXT, created INTEGER NOT NULL, expires INTEGER, used INTEGER, bind TEXT, next TEXT)");
     this.sql.exec("INSERT INTO ak (k, created, ver, client, ring) VALUES (1, ?, 1, NULL, ?)", created, String(ring));
@@ -75,14 +92,13 @@ export const AgentMethods = {
     return { ok: true, created };
   },
 
-  /** Opens the identity for a credential: expired slots dropped, then the
-   *  slot's verifier compared; the wrapped data key, the list's version,
-   *  the sealed list and when the identity was made. Refused with no write
-   *  where there is no identity, or the slot or verifier does not match. */
+  /** Opens the identity for a credential: the slot's verifier compared;
+   *  the wrapped data key, the list's version, the sealed list and when the
+   *  identity was made. It only reads: a good open, a wrong one and one on
+   *  an object that holds no identity all write nothing. Refused where there
+   *  is no identity, or the slot or verifier does not match. */
   agentOpen(slot: string, verifier: string): { ok: true, wrapped: string | null, ver: number, ring: string, created: number } | { ok: false } {
     if (hasTable(this.sql, "m") || !hasTable(this.sql, "ak")) return { ok: false };
-    // (no slot of an agent key expires)
-    this.sql.exec("DELETE FROM aks WHERE expires IS NOT NULL AND expires < ?", Date.now());
     const s = this.sql.exec<Pick<AksRow, "verifier" | "wrapped">>("SELECT verifier, wrapped FROM aks WHERE slot = ?", String(slot)).toArray()[0];
     if (!s || !sameText(s.verifier, String(verifier))) return { ok: false };
     const a = this.sql.exec<Pick<AkRow, "created" | "ver" | "ring">>("SELECT created, ver, ring FROM ak WHERE k = 1").toArray()[0];
@@ -124,28 +140,34 @@ export const AgentMethods = {
   // ---- The creation counters, on the AGENT_QUOTA_ROOM object only ----
   // Every cap of one creation is checked and its place taken in this one
   // call, so a burst arriving together cannot all pass, as createReserve
-  // does for rooms. A place is taken once the first room's token has been
+  // does for rooms. A place is taken once every room's token has been
   // looked up and given back (agentRelease) when the creation then makes
-  // nothing. Rows of past windows go as the next creation comes in: they
-  // are counters, nothing else, keyed by hashes.
-  /** @returns true when a place was taken in every counter; else the
-   *  seconds until the first full counter's window ends; false on an object
-   *  that holds a room or an identity */
-  agentReserve(caps: AgentCap[]): true | number | false {
+  // nothing. Each counter is put in its window here, by this object's own
+  // clock, so a request that set out just before an hour or a day turned
+  // cannot count in, or clear, a window other than the current one. Rows of
+  // past windows go as the next creation comes in: they are counters,
+  // nothing else, keyed by hashes.
+  /** @returns the keys of the places taken (each with its window), for
+   *  agentRelease; else the seconds until the first full counter's window
+   *  ends; false on an object that holds a room or an identity */
+  agentReserve(caps: AgentCap[]): string[] | number | false {
     if (hasTable(this.sql, "m") || hasTable(this.sql, "ak")) return false;
     this.sql.exec("CREATE TABLE IF NOT EXISTS aq (k TEXT PRIMARY KEY, w TEXT NOT NULL, n INTEGER NOT NULL)");
-    const windows = Array.from(new Set(caps.map((c) => String(c.w))));
-    if (windows.length) this.sql.exec("DELETE FROM aq WHERE w NOT IN (" + windows.map(() => "?").join(", ") + ")", ...windows);
+    const now = Date.now();
+    const placed = caps.map((c) => { const win = windowOf(c.per, now); return { k: String(c.k) + ":" + win.w, w: win.w, ends: win.ends, max: Number(c.max) }; });
+    // a row of a window that has ended: every window here is the current one of its length
+    const current = Array.from(new Set(placed.map((p) => p.w)));
+    if (current.length) this.sql.exec("DELETE FROM aq WHERE w NOT IN (" + current.map(() => "?").join(", ") + ")", ...current);
     const lower = this.env && this.env.TEST_HOOKS ? this.agentTestLimits() : {};
-    for (const c of caps) {
-      const r = this.sql.exec<Pick<AqRow, "n">>("SELECT n FROM aq WHERE k = ?", String(c.k)).toArray()[0];
-      if ((r ? r.n : 0) >= capOf(String(c.k), Number(c.max), lower)) return Math.max(1, Math.ceil((Number(c.ends) - Date.now()) / 1000));
+    for (const p of placed) {
+      const r = this.sql.exec<Pick<AqRow, "n">>("SELECT n FROM aq WHERE k = ?", p.k).toArray()[0];
+      if ((r ? r.n : 0) >= capOf(p.k, p.max, lower)) return Math.max(1, Math.ceil((p.ends - now) / 1000));
     }
-    for (const c of caps) this.sql.exec("INSERT INTO aq (k, w, n) VALUES (?, ?, 1) ON CONFLICT(k) DO UPDATE SET n = n + 1", String(c.k), String(c.w));
-    return true;
+    for (const p of placed) this.sql.exec("INSERT INTO aq (k, w, n) VALUES (?, ?, 1) ON CONFLICT(k) DO UPDATE SET n = n + 1", p.k, p.w);
+    return placed.map((p) => p.k);
   },
 
-  /** Gives back the places agentReserve took, for a creation that made nothing. */
+  /** Gives back the places agentReserve took (its keys), for a creation that made nothing. */
   agentRelease(keys: string[]): void {
     if (hasTable(this.sql, "m") || hasTable(this.sql, "ak") || !hasTable(this.sql, "aq")) return;
     for (const k of keys) this.sql.exec("UPDATE aq SET n = MAX(0, n - 1) WHERE k = ?", String(k));

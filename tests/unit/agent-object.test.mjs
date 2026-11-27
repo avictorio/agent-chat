@@ -4,7 +4,8 @@
 // swapped on its version, dropped whole; nothing written by a probe of an
 // object that holds no identity; every method refusing on a room, and a
 // room's create() and createGenesis() refusing on an identity; the
-// counters' caps, windows and release. Run with `npm run test:unit`.
+// counters' caps, their windows by the object's own clock (an hour's and a
+// day's turn included) and release. Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
@@ -28,13 +29,25 @@ test("agentMake makes the identity once; a second is refused exists", () => {
   assert.equal(h.one("SELECT verifier FROM aks").verifier, V, "the first stays");
 });
 
-test("agentOpen answers the right verifier only, and a wrong one writes nothing", () => {
+/** every row of every table of the object, as it is stored */
+const rows = (h) => tables(h).map((t) => [t, h.all("SELECT * FROM \"" + t + "\" ORDER BY rowid")]);
+
+test("agentOpen answers the right verifier only, and an open, good or wrong, writes nothing at all", () => {
   const h = makeRoom({ bare: true });
   const made = h.room.agentMake(V, "wrapped-dk", "sealed-ring");
-  assert.deepEqual(h.room.agentOpen("key", V), { ok: true, wrapped: "wrapped-dk", ver: 1, ring: "sealed-ring", created: made.created });
+  const stored = JSON.stringify(rows(h));
   const before = changes(h);
+  assert.deepEqual(h.room.agentOpen("key", V), { ok: true, wrapped: "wrapped-dk", ver: 1, ring: "sealed-ring", created: made.created });
+  assert.equal(changes(h), before, "a good open writes nothing");
   for (const [slot, verifier] of [["key", W], ["key", V.slice(1)], ["key", ""], ["access", V], ["", V]]) assert.deepEqual(h.room.agentOpen(slot, verifier), { ok: false }, slot + " " + verifier.slice(0, 4));
   assert.equal(changes(h), before, "no write");
+  assert.equal(JSON.stringify(rows(h)), stored, "the object's rows byte for byte as they were");
+  // a slot with an expires set is no different: nothing here drops rows
+  h.db.prepare("UPDATE aks SET expires = 1").run();
+  const stale = JSON.stringify(rows(h)), n = changes(h);
+  assert.equal(h.room.agentOpen("key", V).ok, true);
+  assert.equal(changes(h), n);
+  assert.equal(JSON.stringify(rows(h)), stale);
 });
 
 test("an open, a swap or a drop on an object never made leaves no table and writes nothing", async () => {
@@ -89,7 +102,7 @@ test("every agent method refuses on a room, and writes nothing there", async () 
   assert.deepEqual(h.room.agentOpen("key", V), { ok: false });
   assert.deepEqual(h.room.agentSwap("key", V, 1, "r"), { ok: false });
   assert.deepEqual(await h.room.agentDrop("key", V), { ok: false });
-  assert.equal(h.room.agentReserve([{ k: "all:2026-11-27", w: "2026-11-27", max: 10, ends: Date.now() + 1000 }]), false);
+  assert.equal(h.room.agentReserve([{ k: "all", max: 10, per: "day" }]), false);
   h.room.agentRelease(["all:2026-11-27"]);
   assert.deepEqual(tables(h), before, "no table made");
   assert.equal(changes(h), n, "no write");
@@ -110,33 +123,51 @@ test("create() and createGenesis() refuse on an identity, which stays as it was"
   assert.deepEqual(r.room.agentMake(V, "w", "r"), { ok: false, code: "not_identity" });
 });
 
-test("agentReserve checks every cap and takes a place in each; a full one answers the seconds left; release gives back", () => {
+/** runs fn with Date.now() reading at (ms) */
+function at(ms, fn) {
+  const real = Date.now;
+  Date.now = () => ms;
+  try { return fn(); } finally { Date.now = real; }
+}
+const T = Date.UTC(2026, 10, 27, 5, 30);
+const caps = (room) => [{ k: "net:abc", max: 3, per: 3600 }, { k: "all", max: 100, per: "day" }, { k: "room:" + room, max: 2, per: "day" }];
+
+test("agentReserve checks every cap and takes a place in each, in the window its own clock gives; a full one answers the seconds left; release gives back", () => {
   const h = makeRoom({ bare: true });
-  const now = Date.now();
   const hour = "2026-11-27T05:00", day = "2026-11-27";
-  const caps = (room) => [{ k: "net:abc:" + hour, w: hour, max: 3, ends: now + 120000 }, { k: "all:" + day, w: day, max: 100, ends: now + 3600000 }, { k: "room:" + room + ":" + day, w: day, max: 2, ends: now + 3600000 }];
-  assert.equal(h.room.agentReserve(caps("r1")), true);
-  assert.equal(h.room.agentReserve(caps("r1")), true);
-  const wait = h.room.agentReserve(caps("r1"));
-  assert.ok(typeof wait === "number" && wait > 3500 && wait <= 3600, "the room's day is full: its window's seconds, " + wait);
-  assert.deepEqual(h.all("SELECT k, n FROM aq ORDER BY k").map((r) => [r.k, r.n]), [["all:" + day, 2], ["net:abc:" + hour, 2], ["room:r1:" + day, 2]], "a refused call took no place");
-  assert.equal(h.room.agentReserve(caps("r2")), true, "another room");
-  const full = h.room.agentReserve(caps("r3"));
-  assert.ok(typeof full === "number" && full > 100 && full <= 120, "the network's window is full: " + full);
-  h.room.agentRelease(caps("r2").map((c) => c.k));
+  assert.deepEqual(at(T, () => h.room.agentReserve(caps("r1"))), ["net:abc:" + hour, "all:" + day, "room:r1:" + day], "the keys of the places taken");
+  assert.ok(Array.isArray(at(T, () => h.room.agentReserve(caps("r1")))));
+  const wait = at(T, () => h.room.agentReserve(caps("r1")));
+  assert.equal(wait, 18.5 * 3600, "the room's day is full: the seconds to midnight");
+  assert.deepEqual(h.all("SELECT k, w, n FROM aq ORDER BY k").map((r) => [r.k, r.w, r.n]), [["all:" + day, day, 2], ["net:abc:" + hour, hour, 2], ["room:r1:" + day, day, 2]], "a refused call took no place");
+  const r2 = at(T, () => h.room.agentReserve(caps("r2")));
+  assert.ok(Array.isArray(r2), "another room");
+  assert.equal(at(T, () => h.room.agentReserve(caps("r3"))), 30 * 60, "the network's window is full: the seconds to its end");
+  h.room.agentRelease(r2);
   assert.equal(h.one("SELECT n FROM aq WHERE k = ?", "net:abc:" + hour).n, 2);
   assert.equal(h.one("SELECT n FROM aq WHERE k = ?", "room:r2:" + day).n, 0);
-  h.room.agentRelease(caps("r2").map((c) => c.k));
+  h.room.agentRelease(r2);
   assert.equal(h.one("SELECT n FROM aq WHERE k = ?", "room:r2:" + day).n, 0, "never below 0");
-  // a later window drops the rows of the past ones
-  const nextHour = "2026-11-27T06:00", nextDay = "2026-11-28";
-  assert.equal(h.room.agentReserve([{ k: "net:abc:" + nextHour, w: nextHour, max: 3, ends: now + 1000 }, { k: "all:" + nextDay, w: nextDay, max: 100, ends: now + 1000 }]), true);
-  assert.deepEqual(h.all("SELECT k FROM aq ORDER BY k").map((r) => r.k), ["all:" + nextDay, "net:abc:" + nextHour]);
   // the counters' object is no identity, and agentReserve refuses on one
   const id = makeRoom({ bare: true });
   id.room.agentMake(V, "w", "r");
   assert.equal(id.room.agentReserve(caps("r1")), false);
   assert.deepEqual(tables(id), ["ak", "aks"]);
+});
+
+test("at an hour's and a day's turn, the counters count in the new windows and drop only the ended ones", () => {
+  const h = makeRoom({ bare: true });
+  const before = Date.UTC(2026, 10, 27, 23, 59, 59, 999), after = Date.UTC(2026, 10, 28, 0, 0, 0, 1);
+  assert.ok(Array.isArray(at(before, () => h.room.agentReserve(caps("r1")))));
+  assert.deepEqual(h.all("SELECT w FROM aq ORDER BY w").map((r) => r.w), ["2026-11-27", "2026-11-27", "2026-11-27T23:00"]);
+  // the first creation after the turn: the old windows' rows go, the new ones are counted from 1
+  assert.ok(Array.isArray(at(after, () => h.room.agentReserve(caps("r1")))));
+  assert.deepEqual(h.all("SELECT k, n FROM aq ORDER BY k").map((r) => [r.k, r.n]), [["all:2026-11-28", 1], ["net:abc:2026-11-28T00:00", 1], ["room:r1:2026-11-28", 1]]);
+  // a second one just after: the new rows are kept and counted on (the route sends no window, so a request
+  // that set out before the turn cannot clear what the new windows hold)
+  assert.ok(Array.isArray(at(after + 5, () => h.room.agentReserve(caps("r1")))));
+  assert.deepEqual(h.all("SELECT k, n FROM aq ORDER BY k").map((r) => [r.k, r.n]), [["all:2026-11-28", 2], ["net:abc:2026-11-28T00:00", 2], ["room:r1:2026-11-28", 2]]);
+  assert.equal(at(after + 10, () => h.room.agentReserve(caps("r1"))), Math.ceil((Date.UTC(2026, 10, 29) - after - 10) / 1000), "the room's new day is full");
 });
 
 test("the test hook lowers the caps only under TEST_HOOKS", () => {
@@ -145,10 +176,9 @@ test("the test hook lowers the caps only under TEST_HOOKS", () => {
   assert.deepEqual(tables(live), []);
   const t = makeRoom({ bare: true, env: { TEST_HOOKS: "1" } });
   assert.deepEqual(t.room.setTestAgentLimits({ per_ip: 1, glance_gap_ms: 5 }), { agent_limits: { glance_gap_ms: 5, per_ip: 1 } });
-  const hour = "2026-11-27T05:00";
-  const cap = [{ k: "net:abc:" + hour, w: hour, max: 10, ends: Date.now() + 1000 }];
-  assert.equal(t.room.agentReserve(cap), true);
+  const cap = [{ k: "net:abc", max: 10, per: 3600 }];
+  assert.ok(Array.isArray(t.room.agentReserve(cap)));
   assert.equal(typeof t.room.agentReserve(cap), "number", "lowered to 1");
   assert.deepEqual(t.room.setTestAgentLimits(null), { agent_limits: {} });
-  assert.equal(t.room.agentReserve(cap), true, "back to the constant");
+  assert.ok(Array.isArray(t.room.agentReserve(cap)), "back to the constant");
 });

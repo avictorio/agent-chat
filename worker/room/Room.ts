@@ -155,12 +155,13 @@ export type DcRow = { id: number, ts: number, added_by: string, title: string, n
 export type CountRow = { n: number };
 /** ak: an agent key's identity (room/agent.ts), one row in an object no
  *  room name reaches: when it was made, its list's version (one more per
- *  write, compared on every swap), client (empty for an agent key) and the
- *  list of its rooms, sealed (lib/agentkey.ts). */
+ *  write, compared on every swap) and the list of its rooms, sealed
+ *  (lib/agentkey.ts); client is unused (NULL). */
 export type AkRow = { k: number, created: number, ver: number, client: string | null, ring: string };
-/** aks: one credential of an identity (a slot): its kind, the verifier of
- *  its secret, the data key wrapped under it, when it was made; expires,
- *  used, bind and next stay empty for an agent key. */
+/** aks: the key's slot in its identity: its kind, the verifier of its
+ *  secret, the data key wrapped under it, when it was made; expires, used,
+ *  bind and next are unused (NULL): an agent key neither expires nor is
+ *  used once. */
 export type AksRow = { slot: string, kind: string, verifier: string, wrapped: string | null, created: number, expires: number | null, used: number | null, bind: string | null, next: string | null };
 /** aq: one creation counter of agent keys (AGENT_QUOTA_ROOM): its key (a
  *  network's or a room's hash, or the site's, and the window), the window,

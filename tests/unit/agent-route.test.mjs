@@ -1,9 +1,9 @@
 // The agent key's REST routes (worker/routes/agent.ts) against a Room
 // namespace whose every object is the real Room class on node:sqlite,
 // reached through stubs that record each method asked (agent-world.mjs):
-// creation's order (the shapes before any object, the first room's look
-// before the caps, a refused later room giving the places back), the caps'
-// keys, the key check of every /api/agent* route, adding rooms (held,
+// creation's order (the shapes before any object, every room's look before
+// the caps, so a refused room counts nothing anywhere and a caller learns
+// no other room's count), the caps' keys and windows, the key check of every /api/agent* route, adding rooms (held,
 // over the most, a refused one replaced, stale swaps read again), removing
 // one and disconnecting. Keys and tokens are made here. Run with
 // `npm run test:unit`.
@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { makeWorld, read, agentInvite } from "./agent-world.mjs";
 import { agentCreateRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
 import { AGENT_KEY_INVALID, AGENT_KEY_MISSING, NOT_AGENT_KEY, agentKeyNote } from "../../worker/agents/onboarding.ts";
-import { AGENT_KEYS_PER_DAY, AGENT_KEYS_PER_IP, AGENT_KEYS_PER_ROOM_DAY, AGENT_QUOTA_ROOM, AGENT_ROOMS_MAX } from "../../worker/limits.ts";
+import { AGENT_KEYS_PER_DAY, AGENT_KEYS_PER_IP, AGENT_KEYS_PER_ROOM_DAY, AGENT_KEYS_WINDOW_S, AGENT_QUOTA_ROOM, AGENT_ROOMS_MAX } from "../../worker/limits.ts";
 import { hashKey, networkKey } from "../../worker/lib/address.ts";
 import { newAgentKey } from "../../worker/lib/agentkey.ts";
 
@@ -86,7 +86,7 @@ test("creation's shape checks run for every entry before any object call", async
   assert.ok(!w.objects.has(AGENT_QUOTA_ROOM), "nothing counted");
 });
 
-test("the first room is looked up before the caps; its refusal counts nothing and writes nothing", async () => {
+test("every room is looked up before the caps; a refusal counts nothing and writes nothing", async () => {
   const { w, tok, pat } = rooms(["lima", "oslo"]);
   w.harness("lima").room.revoke(tok.lima);
   const cases = [
@@ -100,7 +100,7 @@ test("the first room is looked up before the caps; its refusal counts nothing an
     const r = await create(w, { rooms: [entry, entry.room === "oslo" ? { room: "lima", token: tok.lima } : { room: "oslo", token: tok.oslo }] });
     assert.equal(r.status, status, entry.room);
     assert.deepEqual(r.json, want);
-    assert.deepEqual(w.asked.slice(mark).map((a) => a.name + "." + a.method), [entry.room + ".lookupInvite"], "the one look, then the answer");
+    assert.deepEqual(w.asked.slice(mark).map((a) => a.name + "." + a.method), [entry.room + ".lookupInvite"], "the first look refused: the answer, with nothing else asked");
   }
   // an unknown room's look wrote nothing: the object has no table
   assert.equal(w.harness("nowhere").db.prepare("SELECT COUNT(*) AS n FROM sqlite_master").get().n, 0);
@@ -108,32 +108,65 @@ test("the first room is looked up before the caps; its refusal counts nothing an
   assert.ok(!w.objects.has(AGENT_QUOTA_ROOM), "no place taken");
 });
 
-test("a refused later room gives the places back and makes nothing", async () => {
+test("a refused later room is the answer before anything is counted, and makes nothing", async () => {
   const { w, tok } = rooms(["lima", "oslo", "rome"]);
+  // one key made first, so the counters' object holds rows to compare
+  await keyFor(w, tok, ["lima"]);
+  const before = w.harness(AGENT_QUOTA_ROOM).all("SELECT k, w, n FROM aq ORDER BY k");
   const mark = w.asked.length;
   const r = await create(w, { rooms: [{ room: "lima", token: tok.lima }, { room: "oslo", token: tok.oslo }, { room: "rome", token: "tok-not-rome-s-0123456789" }] });
   assert.equal(r.status, 403);
   assert.deepEqual(r.json, { error: "Room \"rome\": This invite link isn't valid for this room.", code: "invite_invalid", room: "rome" });
-  assert.deepEqual(w.asked.slice(mark).map((a) => a.name + "." + a.method), ["lima.lookupInvite", AGENT_QUOTA_ROOM + ".agentReserve", "oslo.lookupInvite", "rome.lookupInvite", AGENT_QUOTA_ROOM + ".agentRelease"]);
-  assert.deepEqual(w.harness(AGENT_QUOTA_ROOM).all("SELECT n FROM aq").map((x) => x.n), [0, 0, 0, 0, 0], "every place given back");
-  assert.equal(w.identities().length, 0);
+  assert.deepEqual(w.asked.slice(mark).map((a) => a.name + "." + a.method), ["lima.lookupInvite", "oslo.lookupInvite", "rome.lookupInvite"], "every look in order, the counters never asked");
+  assert.deepEqual(w.harness(AGENT_QUOTA_ROOM).all("SELECT k, w, n FROM aq ORDER BY k"), before, "aq as it was");
+  assert.equal(w.identities().length, 1, "only the first key");
 });
 
-test("the caps: one per network and window, one for the site's day, one per distinct room's day, as hashes", async () => {
+test("an outsider naming a room at its cap gets that room's refusal of its token, never 429, and leaves no row for it", async () => {
+  const { w, tok } = rooms(["victim", "mine"]);
+  // the victim room's day is used up by its own agent's keys
+  for (let i = 0; i < AGENT_KEYS_PER_ROOM_DAY; i++) assert.equal((await create(w, { rooms: [{ room: "victim", token: tok.victim }] }, "10.6.0." + i)).status, 201);
+  const victimRow = "room:" + (await hashKey("victim")) + ":" + new Date().toISOString().slice(0, 10);
+  const before = w.harness(AGENT_QUOTA_ROOM).all("SELECT k, w, n FROM aq ORDER BY k");
+  assert.ok(before.some((x) => x.k === victimRow && x.n === AGENT_KEYS_PER_ROOM_DAY));
+  // an outsider holding a good invite to its own room and a guess at the victim's
+  for (const guess of ["not-the-victims-token-xx", tok.mine]) {
+    const r = await create(w, { rooms: [{ room: "mine", token: tok.mine }, { room: "victim", token: guess }] }, "10.6.9.9");
+    assert.equal(r.status, 403, guess.slice(0, 6));
+    assert.equal(r.json.code, "invite_invalid");
+    assert.equal(r.json.room, "victim");
+    assert.notEqual(r.status, 429);
+  }
+  // and rooms that do not exist: their own 404, no row
+  const r = await create(w, { rooms: [{ room: "mine", token: tok.mine }, ...Array.from({ length: 5 }, (_, i) => ({ room: "ghost-" + i, token: "tok-ghost-0123456789abcd" }))] }, "10.6.9.9");
+  assert.equal(r.status, 404);
+  assert.equal(r.json.room, "ghost-0");
+  const after = w.harness(AGENT_QUOTA_ROOM).all("SELECT k, w, n FROM aq ORDER BY k");
+  assert.deepEqual(after, before, "no row added or moved: not the victim's, not the outsider's network's, not a ghost's");
+  // the victim's own agent, holding its token, is the one told its room is full
+  assert.equal((await create(w, { rooms: [{ room: "victim", token: tok.victim }] }, "10.6.1.1")).status, 429);
+});
+
+test("the caps: one per network, one for the site, one per distinct room, as hashes, each put in its window by the counters' object", async () => {
   const { w, tok } = rooms(["lima", "oslo"]);
   const mark = w.asked.length;
   await keyFor(w, tok, ["lima", "oslo"]);
   const reserve = w.asked.slice(mark).find((a) => a.method === "agentReserve");
-  const now = new Date();
-  const day = now.toISOString().slice(0, 10), hour = now.toISOString().slice(0, 13) + ":00";
   const [caps] = reserve.args;
-  assert.deepEqual(caps.map((c) => [c.k, c.w, c.max]), [
-    ["net:" + (await hashKey(networkKey(IP))) + ":" + hour, hour, AGENT_KEYS_PER_IP],
-    ["all:" + day, day, AGENT_KEYS_PER_DAY],
-    ["room:" + (await hashKey("lima")) + ":" + day, day, AGENT_KEYS_PER_ROOM_DAY],
-    ["room:" + (await hashKey("oslo")) + ":" + day, day, AGENT_KEYS_PER_ROOM_DAY],
-  ]);
-  for (const c of caps) assert.ok(c.ends > Date.now() && c.ends <= Date.now() + 86400e3, c.k);
+  assert.deepEqual(caps, [
+    { k: "net:" + (await hashKey(networkKey(IP))), max: AGENT_KEYS_PER_IP, per: AGENT_KEYS_WINDOW_S },
+    { k: "all", max: AGENT_KEYS_PER_DAY, per: "day" },
+    { k: "room:" + (await hashKey("lima")), max: AGENT_KEYS_PER_ROOM_DAY, per: "day" },
+    { k: "room:" + (await hashKey("oslo")), max: AGENT_KEYS_PER_ROOM_DAY, per: "day" },
+  ], "what to count, and how long its window is: no window from the route");
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10), hour = new Date(Math.floor(now.getTime() / (AGENT_KEYS_WINDOW_S * 1000)) * AGENT_KEYS_WINDOW_S * 1000).toISOString().slice(0, 16);
+  assert.deepEqual(w.harness(AGENT_QUOTA_ROOM).all("SELECT k, w, n FROM aq ORDER BY k").map((x) => [x.k, x.w, x.n]), [
+    ["all:" + day, day, 1],
+    ["net:" + (await hashKey(networkKey(IP))) + ":" + hour, hour, 1],
+    ["room:" + (await hashKey("lima")) + ":" + day, day, 1],
+    ["room:" + (await hashKey("oslo")) + ":" + day, day, 1],
+  ].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
   assert.ok(!JSON.stringify(w.harness(AGENT_QUOTA_ROOM).all("SELECT * FROM aq")).match(/lima|oslo|10\.1\.2\.3/), "no room name or address stored");
 });
 
@@ -312,7 +345,7 @@ test("DELETE /api/agent disconnects everywhere: the key works nowhere, every sea
   const mark = w.asked.length;
   const r = await read(agentRoute(w.rc("DELETE", "/api/agent", { headers: bearer(key) })));
   assert.equal(r.status, 200);
-  assert.deepEqual(r.json, { deleted: true, rooms: ["lima", "oslo"], note: "This key works nowhere now. Every seat stays: you are still a member of these rooms, and any room token you kept still works." });
+  assert.deepEqual(r.json, { deleted: true, rooms: ["lima", "oslo"], note: "This key works nowhere now. Every seat stays: you are still a member of these rooms, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire." });
   assert.deepEqual(w.methods("lima", mark).concat(w.methods("oslo", mark)), [], "no room asked");
   assert.equal(w.harness(id).db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get().n, 0, "the identity is gone");
   for (const n of ["lima", "oslo"]) assert.equal(w.harness(n).one("SELECT revoked FROM inv WHERE token = ?", tok[n]).revoked, null, n + ": the seat stays");

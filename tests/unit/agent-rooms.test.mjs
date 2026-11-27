@@ -143,3 +143,74 @@ test("get_members through the key carries no invite link and no note in any row,
   assert.deepEqual(await look(), ["Ada", "Hank", "Pat"], "a person's invite: still no row's link");
   assert.ok(tok.lima);
 });
+
+test("whats_waiting names every room once: a room whose call throws as unavailable, not marked; a room marked refused before, not asked again", async () => {
+  const { w, tok, tool } = await setup(["lima", "oslo", "rome"]);
+  await tool("add_room", { room: "oslo", token: tok.oslo });
+  await tool("add_room", { room: "rome", token: tok.rome });
+  // rome refuses its token and is marked at the next call; oslo's object throws (a room on older code, say)
+  w.harness("rome").room.revoke(tok.rome);
+  await tool("whoami", { room: "rome" });
+  const marked = await entry(tool, "rome");
+  assert.equal(marked.state, "refused");
+  w.harness("oslo").room.startView = () => { throw new Error("RPC receiver does not implement the method \"startView\""); };
+  const mark = w.asked.length;
+  const g = (await tool("whats_waiting", {})).structuredContent;
+  assert.deepEqual(g.rooms.map((x) => x.room), ["lima"], "the other room answered");
+  assert.deepEqual(g.refused, [{ room: "oslo", code: "unavailable" }, { room: "rome", code: "invite_revoked", at: marked.at }], "every room on the key once, in its order");
+  assert.deepEqual(w.methods("rome", mark), [], "a room marked refused is not asked again");
+  assert.deepEqual(w.methods("oslo", mark), ["startView"]);
+  assert.equal((await entry(tool, "oslo")).state, "held", "an unavailable room is not marked");
+});
+
+test("the start page through a key opens with its line; at the room's own address it does not", async () => {
+  const { w, tok, tool } = await setup(["lima"]);
+  const line = "You reached this page through your agent key. At http://localhost/api/mcp every tool below takes \"room\": \"lima\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out.";
+  const via = (await tool("get_start_page", { room: "lima" })).content[0].text;
+  assert.ok(via.split("\n").slice(0, 4).includes(line), via.slice(0, 300));
+  const { mcpRoute } = await import("../../worker/routes/agents.ts");
+  const own = (await read(mcpRoute(w.rc("POST", "/api/rooms/lima/mcp", { json: call("get_start_page", {}), headers: { "X-Invite-Token": tok.lima } }), ["", "lima"]))).json.result.content[0].text;
+  assert.ok(!own.includes("through your agent key"), own.slice(0, 300));
+  assert.equal(via.replace(line + "\n\n", ""), own, "the rest of the page is the same");
+});
+
+test("add_room's refusals: a sentence that starts with a room's name keeps it as typed; a fixed sentence is capitalised", async () => {
+  const { tok, tool } = await setup(["r0"]);
+  let r = await tool("add_room", { room: "r0", token: tok.r0 });
+  assert.equal(r.content[0].text, "r0 is already on this key");
+  assert.deepEqual(r.structuredContent, { code: "room_held", room: "r0" });
+  r = await tool("add_room", { room: "r1", token: ".ac1.something" });
+  assert.equal(r.content[0].text, "That is an agent key, not a room invite token");
+  r = await tool("add_room", { room: "r1" });
+  assert.equal(r.content[0].text, "\"token\" is required: your agent invite token for r1");
+  r = await tool("add_room", { room: "Not A Room", token: "t" });
+  assert.equal(r.content[0].text, "Room names are 1-64 lowercase letters, digits, - or _");
+});
+
+test("a mark that cannot be written leaves the room tool's answer as it was", async () => {
+  for (const how of ["throws", "stays stale"]) {
+    const { w, tok, tool } = await setup(["lima", "oslo"]);
+    await tool("add_room", { room: "oslo", token: tok.oslo });
+    // oslo: Pat has joined, so Hank's leave is not the last member's
+    w.harness("oslo").room.access(agentInvite(w.harness("oslo"), "Pat", "human"), false);
+    await tool("whoami", { room: "oslo" });
+    const id = w.harness(w.identities()[0]).room;
+    id.agentSwap = how === "throws" ? () => { throw new Error("the identity is unreachable"); } : () => ({ ok: false, code: "stale" });
+    w.harness("lima").room.revoke(tok.lima);
+    const warnWas = console.warn;
+    console.warn = () => {};
+    try {
+      let r = await tool("whoami", { room: "lima" });
+      assert.deepEqual(r.structuredContent, { code: "invite_revoked", room: "lima" }, how + ": the refusal goes out as it was");
+      assert.equal(r.content[0].text, "Room \"lima\": This invite link has been revoked. Ask whoever gave it to you for a new one.");
+      r = await tool("leave_room", { room: "oslo", confirm: "oslo" });
+      assert.ok(!r.isError, how + ": the leave's own answer: " + JSON.stringify(r).slice(0, 200));
+      assert.equal(r.structuredContent.name, "Hank");
+      assert.ok(!("key" in r.structuredContent), how + ": no line saying the room was marked, since it was not");
+      w.harness(w.identities()[0]).room.agentGlanceAt = 0;
+      const g = await tool("whats_waiting", {});
+      assert.ok(!g.isError && g.structuredContent.refused.some((x) => x.room === "lima" && x.code === "invite_revoked"), how + ": whats_waiting answers too");
+    } finally { console.warn = warnWas; }
+    assert.equal((await entry(tool, "lima")).state, "held", how + ": not marked, as the write failed");
+  }
+});

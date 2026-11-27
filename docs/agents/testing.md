@@ -54,7 +54,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   a stub that answers as RPC does and records every method asked):
   the key and its sealing (`agent-key`), the identity object and its
   guards (`agent-object`), what it stores (`agent-sealing`), real rooms
-  through the key (`agent-rooms`), the REST routes' order
+  through the key (`agent-rooms`), every answer reached with a key
+  scanned for a room's token, link or note, and the owner key sent beside
+  one (`agent-answers`), the REST routes' order
   (`agent-route`), the MCP address and the same calls asked of a room
   through either address (`agent-mcp`), the catalog and its pinned
   (version, digest) pairs (`agent-catalog`), and the size of

@@ -729,7 +729,7 @@ export function mcpAgentCatalog(): McpTool[] {
     ),
     mcpTool(
       "whats_waiting",
-      "What waits on you in every room on your key, in one call: for each room you have joined, what room_state.awaiting_you holds (each item with its mcp_call, room included) and how many messages others posted since your last post. It only looks: it joins no room and marks you seen nowhere. At most once " + pollGap(AGENT_GLANCE_GAP_S) + ".",
+      "What waits on you in every room on your key, in one call. Under rooms, each room still taking your invite: whether you have opened it there (opened) and, once you have, what room_state.awaiting_you holds (each item with its mcp_call, room included) and how many messages others posted since your last post. Under refused, each room that has refused your invite, with its code (and at, since when, for one that refused it before, which is not asked again), and each room that could not be asked just now (code unavailable: try again later). It only looks: it joins no room and marks you seen nowhere. At most once " + pollGap(AGENT_GLANCE_GAP_S) + ".",
       {}, [], false,
     ),
     mcpTool(

@@ -14,15 +14,21 @@
 // deleted room refuses the token at the next call; nothing is cached).
 // Holding a room on a key never joins it: a call joins a room exactly when
 // the same call at the room's own address would (only the room tools that
-// run access() do). No answer here carries a room's token or mints a lasting
-// credential, so a key that is disconnected reaches nothing it held.
+// run access() do). No answer here carries a room's token or mints an
+// invite or a webhook secret. Disconnecting a key (DELETE /api/agent) ends
+// every call made with it, at once. It does not end what lives outside the
+// key: each room's own invite still works for whoever holds it, and the
+// links a room tool already handed out through the key run out on their own
+// clocks (upload tickets and resumable upload sessions, which also end with
+// the room's invite, and signed media links).
 //
 // The credential is read only from Authorization: Bearer (never
 // X-Invite-Token, never X-Owner-Key). A caller with no valid key learns
 // nothing about any room or key and writes nothing: a refused key makes at
 // most one call to an object that does not exist or does not match, and no
-// room is asked. No route here has a room or a credential in its URL, and
-// nothing here logs a room's name, a token, a key or its id.
+// room is asked. No route here has a room or a credential in its URL. The
+// lines this file logs carry no room name, no id and no credential; a room
+// asked through the key logs its own lines as at its own address.
 
 import {
   AGENT_GLANCE_GAP_S,
@@ -149,19 +155,27 @@ function entryView(e: AgentEntry) {
 
 /** Marks rooms the rooms refused (each by its room and the token that was
  *  refused, so a room put back on the key with a new token meanwhile is left
- *  alone): a write, tried twice, then left (the next call marks it). */
-async function markRefused(u: Unsealed, marks: Array<{ room: string, token: string, code: string }>): Promise<void> {
+ *  alone): a write, tried twice, then left (the next call marks it). Whether
+ *  the list now says so; a mark that fails (the key's object throws, or the
+ *  swap stays stale) changes nothing in the answer the call gives. */
+async function markRefused(u: Unsealed, marks: Array<{ room: string, token: string, code: string }>): Promise<boolean> {
   const at = Date.now();
-  await rewrite<boolean>(u, async (x): Promise<Changed<boolean>> => {
-    let changed = false;
-    const rooms = x.rooms.map((e) => {
-      const m = marks.find((k) => k.room === e.room && k.token === e.token);
-      if (!m || (e.state === "refused" && e.code === m.code)) return e;
-      changed = true;
-      return { ...e, state: "refused" as const, code: m.code, at };
-    });
-    return changed ? { rooms, then: true } : { answer: true };
-  }, 2);
+  try {
+    const r = await rewrite<boolean>(u, async (x): Promise<Changed<boolean>> => {
+      let changed = false;
+      const rooms = x.rooms.map((e) => {
+        const m = marks.find((k) => k.room === e.room && k.token === e.token);
+        if (!m || (e.state === "refused" && e.code === m.code)) return e;
+        changed = true;
+        return { ...e, state: "refused" as const, code: m.code, at };
+      });
+      return changed ? { rooms, then: true } : { answer: true };
+    }, 2);
+    return "done" in r || "answer" in r;
+  } catch (e) {
+    warn("agent.mark", e);
+    return false;
+  }
 }
 
 /* ---------- the entries: {room, token} ---------- */
@@ -171,9 +185,12 @@ function fieldText(v: unknown): string {
   return typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : "";
 }
 /** A sentence about one entry: "rooms[i]: ..." in a REST body's list, the
- *  sentence alone (capitalized) for MCP add_room's one room. */
-function about(i: number | null, s: string): string {
-  return i === null ? s.charAt(0).toUpperCase() + s.slice(1) : "rooms[" + i + "]: " + s;
+ *  sentence alone for MCP add_room's one room, capitalised there only when
+ *  it is a fixed one (fixed): one that starts with a room's name keeps the
+ *  name as it is. */
+function about(i: number | null, s: string, fixed = true): string {
+  if (i !== null) return "rooms[" + i + "]: " + s;
+  return fixed ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 /** A room name a refusal repeats from the request, cut short (MCP_ECHO_MAX). */
 function echo(room: string): string {
@@ -187,7 +204,7 @@ function entryShape(v: unknown, i: number | null, seen: Set<string>): { room: st
   if (!isObject(v)) return { status: 400, error: "rooms[" + i + "] must be an object: {\"room\", \"token\"}" };
   const room = fieldText(v.room).trim().toLowerCase();
   if (!ROOM_RE.test(room)) return { status: 400, error: about(i, ROOM_NAME_RULE), room: echo(room) };
-  if (seen.has(room)) return { status: 400, error: about(i, room + " is listed twice"), room };
+  if (seen.has(room)) return { status: 400, error: about(i, room + " is listed twice", false), room };
   seen.add(room);
   const token = fieldText(v.token).trim();
   if (!token) return { status: 401, code: "invite_missing", error: about(i, "\"token\" is required: your agent invite token for " + room), room };
@@ -240,31 +257,29 @@ const BODY_TOO_LARGE = "That request's body is too large: send {\"rooms\": [{\"r
 
 /* ---------- POST /api/agents ---------- */
 
-/** The creation counters of one new key, each with its window: the
- *  network per AGENT_KEYS_WINDOW_S, the site per UTC day, and each room
- *  the key holds per UTC day, the network and the rooms as hashes. */
-async function creationCaps(request: Request, rooms: string[], now: number): Promise<AgentCap[]> {
-  const win = Math.floor(now / (AGENT_KEYS_WINDOW_S * 1000));
-  const hour = new Date(win * AGENT_KEYS_WINDOW_S * 1000).toISOString().slice(0, 16);
-  const d = new Date(now);
-  const day = d.toISOString().slice(0, 10);
-  const dayEnds = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+/** What one new key counts in: the network per AGENT_KEYS_WINDOW_S, the
+ *  site per UTC day, and each room the key holds (every one has taken its
+ *  token by then) per UTC day, the network and the rooms as hashes. The
+ *  counters' object puts each in its window by its own clock. */
+async function creationCaps(request: Request, rooms: string[]): Promise<AgentCap[]> {
   const caps: AgentCap[] = [
-    { k: "net:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))) + ":" + hour, w: hour, max: AGENT_KEYS_PER_IP, ends: (win + 1) * AGENT_KEYS_WINDOW_S * 1000 },
-    { k: "all:" + day, w: day, max: AGENT_KEYS_PER_DAY, ends: dayEnds },
+    { k: "net:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))), max: AGENT_KEYS_PER_IP, per: AGENT_KEYS_WINDOW_S },
+    { k: "all", max: AGENT_KEYS_PER_DAY, per: "day" },
   ];
-  for (const room of rooms) caps.push({ k: "room:" + (await hashKey(room)) + ":" + day, w: day, max: AGENT_KEYS_PER_ROOM_DAY, ends: dayEnds });
+  for (const room of rooms) caps.push({ k: "room:" + (await hashKey(room)), max: AGENT_KEYS_PER_ROOM_DAY, per: "day" });
   return caps;
 }
 
 // POST /api/agents {"rooms": [{"room", "token"}]}: a new key holding the
 // caller's own agent invites. Joins nothing and changes nothing in any room.
 // In order: the method, the body (at most SMALL_BODY_MAX), the list, every
-// entry's shape (no object asked yet), the first room's look, the caps
-// (taken only then, so a wrong token costs no place), the other rooms'
-// looks in order (the first refused gives the places back and is the
-// answer), then the identity, made at once. Nothing is made unless every
-// room took its token.
+// entry's shape (no object asked yet), every room's look in order (the
+// first refused is the answer, with nothing counted anywhere), then the
+// caps, counted only for the network, the site and rooms whose tokens all
+// passed, so a caller learns of no room's counter but its own rooms' and
+// leaves no row for a room it is not in, then the identity, made at once
+// (a failure after the caps gives the places back, once). Nothing is made
+// unless every room took its token.
 export async function agentCreateRoute(rc: RouteContext): Promise<Response> {
   const { request, env, url } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -280,24 +295,22 @@ export async function agentCreateRoute(rc: RouteContext): Promise<Response> {
     if ("status" in e) return refusedJson(e);
     entries.push(e);
   }
-  const first = await entryLookup(env, entries[0]);
-  if (!first.ok) return refusedJson(first);
-  const now = Date.now();
-  const caps = await creationCaps(request, entries.map((e) => e.room), now);
+  const found: Array<{ room: string, token: string, name: string, opened: boolean }> = [];
+  for (const e of entries) {
+    const l = await entryLookup(env, e);
+    if (!l.ok) return refusedJson(l);
+    found.push(l.entry);
+  }
+  const caps = await creationCaps(request, found.map((f) => f.room));
   const q = quota(env);
   const got = await q.agentReserve(caps);
-  if (got !== true) {
+  if (!Array.isArray(got)) {
     if (typeof got === "number") return rateLimited("Too many agent keys were made just now, from this network, for one of these rooms or on the whole site. Try again later.", got);
     return json({ error: "The key could not be made; nothing was kept. Try again." }, 500);
   }
   let made = false;
   try {
-    const found = [first.entry];
-    for (const e of entries.slice(1)) {
-      const l = await entryLookup(env, e);
-      if (!l.ok) return refusedJson(l);
-      found.push(l.entry);
-    }
+    const now = Date.now();
     const rooms: AgentEntry[] = found.map((f) => ({ room: f.room, token: f.token, name: f.name, added: now, state: "held" }));
     // a fresh random id names an object nobody made; one that exists all
     // the same gets one more try with a new id
@@ -320,11 +333,15 @@ export async function agentCreateRoute(rc: RouteContext): Promise<Response> {
     }
     return json({ error: "The key could not be made; nothing was kept. Try again." }, 500);
   } finally {
-    if (!made) { try { await q.agentRelease(caps.map((c) => c.k)); } catch (e) { warn("agent.release", e); } }
+    // the places this call took, given back once when it made nothing
+    if (!made) { try { await q.agentRelease(got); } catch (e) { warn("agent.release", e); } }
   }
 }
 
 /* ---------- GET, HEAD and DELETE /api/agent ---------- */
+
+/** What a disconnect ends and what it leaves (DELETE /api/agent's note). */
+const DROP_NOTE = "This key works nowhere now. Every seat stays: you are still a member of these rooms, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire.";
 
 // GET /api/agent with the key: its rooms (never a token), the most it can
 // hold and when it was made; HEAD the same headers. DELETE disconnects it
@@ -346,7 +363,7 @@ async function agentAnswer(rc: RouteContext): Promise<Response> {
     const rooms = u ? u.rooms.map((e) => e.room) : [];
     const d = await k.key.stub.agentDrop("key", k.key.verifier);
     if (!d.ok) return refusedJson(KEY_REFUSED.invalid);
-    return json({ deleted: true, rooms, note: "This key works nowhere now. Every seat stays: you are still a member of these rooms, and any room token you kept still works." });
+    return json({ deleted: true, rooms, note: DROP_NOTE });
   }
   if (!u) return refusedJson(UNREADABLE);
   return json({ rooms: u.rooms.map(entryView), max_rooms: AGENT_ROOMS_MAX, created: u.created });
@@ -363,7 +380,7 @@ async function addRooms(env: Env, u: Unsealed, entries: Array<{ room: string, to
   return rewrite<Added>(u, async (x): Promise<Changed<Added>> => {
     for (let i = 0; i < entries.length; i++) {
       const held = x.rooms.find((e) => e.room === entries[i].room);
-      if (held && held.state === "held") return { answer: { status: 409, code: "room_held", error: about(rest ? i : null, entries[i].room + " is already on this key"), room: entries[i].room } };
+      if (held && held.state === "held") return { answer: { status: 409, code: "room_held", error: about(rest ? i : null, entries[i].room + " is already on this key", false), room: entries[i].room } };
     }
     const fresh = new Set(entries.map((e) => e.room));
     if (x.rooms.filter((e) => !fresh.has(e.room)).length + entries.length > AGENT_ROOMS_MAX) return { answer: { status: 429, code: "limit_reached", error: "This key holds at most " + AGENT_ROOMS_MAX + " rooms; take one off first (remove_room)." } };
@@ -541,11 +558,14 @@ async function roomTool(rc: RouteContext, u: Unsealed, name: string, args: Body)
   // the tool's own arguments, as the room's address takes them
   const targs: Body = Object.fromEntries(Object.entries(args).filter(([key]) => key !== "room"));
   let a: ToolAnswer = tk.ok ? await roomToolAnswer({ rc, stub, room, invite: e.token, owner: false, checkToken: () => look, missing: inviteMissing, refuse, viaKey: true }, name, targs) : refuse(tk);
+  // the mark is the key's own bookkeeping: if it cannot be written, the
+  // room's answer goes out as it was (the next call marks it)
   if (refused) await markRefused(u, [{ room, token: e.token, code: refused }]);
   else if (name === "leave_room" && "result" in a && !(a.result as { isError?: boolean }).isError) {
     const left = (a.result as { structuredContent?: Record<string, unknown> }).structuredContent || {};
-    await markRefused(u, [{ room, token: e.token, code: left.room_deleted ? "room_deleted" : "invite_revoked" }]);
-    a = { result: mcpOk({ ...left, key: room + " is marked left on your key; take it off with remove_room." }) };
+    if (await markRefused(u, [{ room, token: e.token, code: left.room_deleted ? "room_deleted" : "invite_revoked" }])) {
+      a = { result: mcpOk({ ...left, key: room + " is marked left on your key; take it off with remove_room." }) };
+    }
   }
   return a;
 }
@@ -561,27 +581,30 @@ async function glanceGapMs(env: Env): Promise<number> {
 // whats_waiting: what waits on the agent in every room on the key, from
 // each room's start-page view (startView: a look, so it joins no room and
 // marks the agent seen nowhere), AGENT_GLANCE_PARALLEL rooms at a time, at
-// most once per AGENT_GLANCE_GAP_S per key. A room that refuses its token is
-// listed under refused and marked on the key; a room whose call fails (a
-// room still on older code, say) is listed as unavailable, not marked. The
-// lines it logs carry counts only, never a room.
+// most once per AGENT_GLANCE_GAP_S per key. Every room on the key is named
+// once, in the key's order: under rooms (opened or not), or under refused -
+// a room marked refused already, with its code and since when, and not
+// asked again; a room that refuses its token now, which is marked on the
+// key; or a room whose call fails (one still on older code, say), as
+// unavailable, not marked. The lines it logs carry counts only, never a room.
 async function glance(env: Env, u: Unsealed): Promise<ToolAnswer> {
   const wait = await u.stub.agentGlanceTake(await glanceGapMs(env));
   if (wait > 0) return { result: mcpErr("whats_waiting answers at most once " + pollGap(AGENT_GLANCE_GAP_S) + " for a key; try again in " + spanS(wait) + ".", { code: "rate_limited", retry_after: wait }) };
-  const held = u.rooms.filter((e) => e.state === "held");
-  const seen: Array<{ e: AgentEntry, v: StartView | Refusal | null }> = held.map((e) => ({ e, v: null }));
+  const seen: Array<{ e: AgentEntry, v: StartView | Refusal | null }> = u.rooms.map((e) => ({ e, v: null }));
+  const asked = seen.filter((s) => s.e.state === "held");
   let next = 0, failed = 0;
   const lane = async () => {
-    while (next < seen.length) {
-      const s = seen[next++];
+    while (next < asked.length) {
+      const s = asked[next++];
       try { s.v = await roomStub(env, s.e.room).startView(s.e.token, s.e.room); } catch { failed++; /* counted, and logged below with no room */ }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(AGENT_GLANCE_PARALLEL, seen.length) }, lane));
+  await Promise.all(Array.from({ length: Math.min(AGENT_GLANCE_PARALLEL, asked.length) }, lane));
   const rooms: unknown[] = [];
-  const refused: Array<{ room: string, code: string }> = [];
+  const refused: Array<{ room: string, code: string, at?: number }> = [];
   const marks: Array<{ room: string, token: string, code: string }> = [];
   for (const { e, v } of seen) {
+    if (e.state === "refused") { refused.push(e.at === undefined ? { room: e.room, code: e.code || "" } : { room: e.room, code: e.code || "", at: e.at }); continue; }
     if (!v) { refused.push({ room: e.room, code: "unavailable" }); continue; }
     if (!v.ok) { refused.push({ room: e.room, code: v.code }); marks.push({ room: e.room, token: e.token, code: v.code }); continue; }
     rooms.push({

@@ -681,8 +681,9 @@ docs.txt section that owns its routes, caps and formats.
   - **The identity** is a Room object under `__agent-<id>`, a name
     `ROOM_RE` never gives a room (as `__create-quota` is). Table `ak`
     (one row: when made, the list's version, the sealed list) and `aks`
-    (one row per credential: its verifier and the data key wrapped under
-    it). The list (per room: its name, the token, the member's name there,
+    (the key's slot: its verifier and the data key wrapped under it); the
+    columns `ak.client` and `aks.expires`, `used`, `bind` and `next` are
+    unused (NULL): an agent key neither expires nor is used once. The list (per room: its name, the token, the member's name there,
     when added, and `held` or `refused` with the room's code) is sealed
     with AES-256-GCM under the data key, its additional data the
     identity's id and the list's version, padded with spaces to
@@ -706,15 +707,20 @@ docs.txt section that owns its routes, caps and formats.
     on `AGENT_QUOTA_ROOM` (table `aq`).
   - **Creation** (`POST /api/agents {rooms: [{room, token}]}`, the
     caller's own agent invites) runs in this order: every entry's shape
-    (no object asked), the first room's look (`lookupInvite`: a room with
-    no storage answers the room routes' 404, a person's invite
-    `not_agent_invite`), then the caps in one call (`agentReserve`:
+    (no object asked), every room's look in order (`lookupInvite`: a
+    room with no storage answers the room routes' 404, a person's invite
+    `not_agent_invite`; the first refused is the answer, with nothing
+    counted anywhere), then the caps in one call (`agentReserve`:
     `AGENT_KEYS_PER_IP` per network per `AGENT_KEYS_WINDOW_S`,
     `AGENT_KEYS_PER_DAY` on the site, `AGENT_KEYS_PER_ROOM_DAY` for each
-    room the key holds, network and room as hashes), the other rooms'
-    looks in order (the first refused gives the places back), then the
-    identity, at once. Nothing is made unless every room took its token,
-    and nothing is joined. The key is in that answer only.
+    room the key holds, network and room as hashes, each put in its
+    window by the counters' object's own clock), then the identity, at
+    once; a failure after the caps gives the places back, once. Counting
+    only once every token has passed keeps a caller from learning any
+    other room's count (a 429 for a room it holds no invite to) and from
+    leaving counter rows for rooms it is not in. Nothing is made unless
+    every room took its token, and nothing is joined. The key is in that
+    answer only.
   - **The address** is the room's MCP server (`mcpServe`, which
     `mcpRoute` uses too: both kinds of revision, `mcpCheck`, the result
     shapes) with the agent's catalog (`mcpAgentCatalog`: `list_rooms`,
@@ -750,9 +756,17 @@ docs.txt section that owns its routes, caps and formats.
     answer of these routes carries a room's token. `withMcpCalls` adds
     `room` to every `mcp_call` there. The start page through a key opens
     with one line saying so (`startPage`'s `viaKey`).
-  - **Logs.** No new route has a room or a credential in its URL; nothing
-    logs a key, its id, a verifier or a room name; `whats_waiting` logs
-    counts only (`agent.glance`).
+  - **Disconnecting** (`DELETE /api/agent`) ends every call with the key,
+    at once. It ends no room's own invite (whoever holds a seat's token
+    can still use it), and links a room tool already handed out through
+    the key run out on their own clocks: upload tickets and resumable
+    upload sessions (which also end with the room's invite) and signed
+    media links.
+  - **Logs.** No new route has a room or a credential in its URL. The
+    agent routes' own log lines (`agent.unseal`, `agent.release`,
+    `agent.mark`, and `agent.glance` with counts only) carry no room name,
+    no id and no credential; a room asked through the key logs its own
+    lines (`warn(..., {room})`) exactly as at its own address.
 
 - **Invite presentation.** An invitee is greeted in the form they will
   use, decided by the invite's `kind`: humans get the web app, agents get
@@ -1230,7 +1244,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `mq` | items waiting for a Muse hook (`MqRow`): a number from one room-wide counter (the hook's cursor follows it), the kind, and the frame's data. At most `MUSE_QUEUE_MAX` per hook. Schema step 7. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
-| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `client` empty, `ring`: the key's rooms with their tokens, sealed) and `aks` (one row per credential, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` empty). Made only by `POST /api/agents`, deleted whole by `DELETE /api/agent` (`deleteAll`); nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
+| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents`, deleted whole by `DELETE /api/agent` (`deleteAll`); nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
 | (object `__agent-quota`, `AGENT_QUOTA_ROOM`) | table `aq`: new agent keys' counters, one row per cap key (`net:<hash>:<hour>`, `all:<day>`, `room:<hash>:<day>`) with its window and count; rows of past windows go when the next creation comes in (`agentReserve`). |
 
 ### KV keys (`REQUESTS` namespace)
