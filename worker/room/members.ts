@@ -310,14 +310,18 @@ export const MemberMethods = {
   // A member takes itself out (POST .../leave, MCP leave_room): what a
   // revoke of its own invite does (revoke), and also the time it left on
   // that invite (left_ts), its claimed questions released (the unclaim
-  // action), the lobbies waiting for its accept declined (gameDecline: the
-  // match is called off and the Referee says so) and, when this was the
-  // name's last active invite, its picture and its voice: the rows here,
-  // the objects just after, the clone at Cartesia by the route. Its
-  // messages, board writes and signatures stay, and running matches are
-  // left to their clocks. The checks and every row change are one step with
-  // no await, so no other call sees half a leave; storage's deletes come
-  // after it, and a failure there is logged and undoes nothing.
+  // action), every match still in its lobby that it created or holds a
+  // seat in called off (lobbiesOf: a seat's declined, gameDecline; one it
+  // created without a seat cancelled as its creator's, gameCancel; the
+  // Referee says each is off) and, when this was the name's last active
+  // invite, its picture and its voice: the rows here, the objects just
+  // after, the clone at Cartesia by the route. Left open, a lobby with its
+  // seat could start with a player who is gone, who loses every turn on the
+  // clock, and one it created would lose the member who set it up and could
+  // cancel it. Its messages, board writes and signatures stay, and running
+  // matches are left to their clocks. The checks and every row change are
+  // one step with no await, so no other call sees half a leave; storage's
+  // deletes come after it, and a failure there is logged and undoes nothing.
   // A room may still hold a second active invite for the same name (an
   // older one the name rules once let through: "Ada" beside "ada", or two
   // names that lower-case alike and fold apart): then the claims, the
@@ -356,21 +360,26 @@ export const MemberMethods = {
     // the name's claims, lobbies, picture and voice are its own only when no
     // other active invite still holds the name (see above)
     const shared = this.nameHeld(name, null);
-    let declined: Array<Promise<unknown>> = [];
+    let calledOff: Array<Promise<unknown>> = [];
     const objects: string[] = [];
     let clone: string | null = null, voiced = false;
     if (!shared) {
       for (const q of this.sql.exec<Pick<OqRow, "id" | "claimed_by">>("SELECT id, claimed_by FROM oq WHERE status = 'claimed'").toArray()) {
         if (sameName(q.claimed_by, name)) this.updateQuestion(q.id, "unclaim", name, null);
       }
-      // gameDecline's own step runs as it is called; its alarm re-arm waits below
-      declined = this.lobbiesAwaiting(name).map((id) => this.gameDecline(id, name, room).catch((e) => warn("leave.decline", e, { room, id })));
+      // every lobby it holds a seat in is declined, every one it created
+      // without a seat cancelled as its creator's, with the Referee's line.
+      // Each path settles the lobby's clock first (advanceLobby: one past its
+      // deadline is called off as expired, and the path then changes
+      // nothing) and runs its own step as it is called; its alarm re-arm
+      // waits below.
+      calledOff = this.lobbiesOf(name).map((lb) => (lb.seat ? this.gameDecline(lb.id, name, room) : this.gameCancel(lb.id, name, false, room, false, true)).catch((e) => warn("leave.lobby", e, { room, id: lb.id })));
       objects.push(...(this.avatarDrop(name) || []));
       const v = this.voiceDrop(name);
       if (v) { voiced = true; clone = v.clone; if (v.sample_key) objects.push(v.sample_key); }
     }
     // ---- after it: storage, which lets other calls run ----
-    await Promise.all(declined);
+    await Promise.all(calledOff);
     await this.mediaDelete(objects);
     // rows are written only in the room this call began in: deleted
     // meanwhile (its last member left with it, say), its tables are gone or

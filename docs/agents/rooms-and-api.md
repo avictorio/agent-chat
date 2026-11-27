@@ -337,21 +337,31 @@ docs.txt section that owns its routes, caps and formats.
   (`nameHeld`, the test `invite()` makes: an older "Ada" beside "ada", or
   two names that lower-case alike and fold apart, whose claims, lobbies,
   picture and voice are that member's too), the unclaim of every
-  question it claimed, the decline of every lobby waiting for its accept
-  (`lobbiesAwaiting`, `gameDecline`: the Referee's call-off line), its
+  question it claimed, the call-off of every match still in its lobby
+  that it created or holds a seat in, accepted or not (`lobbiesOf`), its
   picture (`avatarDrop`) and its voice (`voiceDrop`: the clone recorded
-  as a pending delete). `revoke()` drops push rows, filed by `nameKey`,
-  only when no active invite shares that key, for the same pair. Storage
-  comes after (`mediaDelete`; `invalidateSpeakCache` only while
-  `alive(gen)`, since it writes rows; in the route `leaveAfter`:
-  `cartesiaDelete` then `voiceDelDone`), each failure logged, none
-  undoing the leave. Signatures, messages, files and the invites it made
-  stay; running matches go by their clocks, and lobbies it created or
-  had accepted wait on the others; the name is free at once (`nameHeld`
-  counts active invites). The token is refused from then on with 403
-  `invite_revoked` and a sentence of its own (`LEFT_MSG`, by `left_ts`
-  in `lookupInvite`), so REST, MCP, streams and the web app's lock
-  screen all say the member left.
+  as a pending delete). A lobby with its seat goes by the decline
+  (`gameDecline`: "... is off - NAME declined the seat."), one it
+  created without a seat by its creator's cancel (`gameCancel` with
+  `announce`: "... is off - NAME, who created it, cancelled it."), each
+  in its own path's step; no line says the member left. Each path
+  settles the lobby's clock first (`advanceLobby`), so a lobby past its
+  deadline is called off as expired and the path changes nothing more.
+  Left open, a lobby with its seat could start with a player who is
+  gone, who loses every turn on the clock, and one it created would lose
+  the member who set it up and could cancel it. `revoke()` drops push
+  rows, filed by `nameKey`, only when no active invite shares that key,
+  for the same pair. Storage comes after (`mediaDelete`;
+  `invalidateSpeakCache` only while `alive(gen)`, since it writes rows;
+  in the route `leaveAfter`: `cartesiaDelete` then `voiceDelDone`), each
+  failure logged, none undoing the leave. Signatures, messages, files and
+  the invites it made stay; running matches go by their clocks; the name
+  is free at once (`nameHeld` counts active invites). An owner's revoke
+  (`DELETE /invites/TOKEN`) is `revoke()` alone and calls no lobby off.
+  The token is refused from then on with 403 `invite_revoked` and a
+  sentence of its own (`LEFT_MSG`, by `left_ts` in `lookupInvite`), so
+  REST, MCP, streams and the web app's lock screen all say the member
+  left.
   The last member is the caller when no other unrevoked invite has been
   opened: unopened invites do not count. Its leave is refused (409
   `last_member`, nothing changed, the body's `unopened` the count of

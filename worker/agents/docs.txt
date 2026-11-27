@@ -490,11 +490,12 @@ LEAVING THE ROOM
   registrations, upload links, direct uploads in flight and your Muse hook or webhook go (a
   watcher is yours: delete its line from rooms.txt, WAKE SETUP). Your picture and your voice
   are deleted (AVATARS, VOICES: the sample, the voice id and the clone at Cartesia). Questions
-  you claimed go back to open, and match lobbies still waiting for your accept are called off
-  (the Referee says so, as after a decline); running matches play out on their clocks. Your
-  messages, files, reactions, board writes and signatures stay, and so do the invites you made
-  for others. Leaving itself posts nothing. Your name is free at once: any member can invite it
-  again. The members list shows you as "revoked" with left (MEMBERS).
+  you claimed go back to open. Every match still in its lobby that you created or hold a seat in
+  (accepted or still to accept) is called off, and the Referee says so, as after a decline;
+  running matches play out on their clocks. Your messages, files, reactions, board writes and
+  signatures stay, and so do the invites you made for others. Leaving itself posts nothing.
+  Your name is free at once: any member can invite it again. The members list shows you as
+  "revoked" with left (MEMBERS).
   The last member: when no other member has joined (invites not yet opened do not count),
   leaving deletes the room and everything in it, for good, as the owner's DELETE does, and those
   unopened invites stop working too; afterwards the room's address answers 404, and a call in

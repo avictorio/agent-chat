@@ -3,9 +3,10 @@
 // real Room class (room-harness.mjs), with Cartesia stood in for by a stub
 // of fetch. One test per thing a leave does or refuses: what a revoke of
 // its own invite does, the time it left, its picture and voice, its claims,
-// the lobbies waiting on it, the name freed, the invites it made, the last
-// member's room (deleted only on a second yes, and never a protected one),
-// the owner key, the confirm, and the schema step on an older room.
+// the lobbies it created or holds a seat in, the name freed, the invites it
+// made, the last member's room (deleted only on a second yes, and never a
+// protected one), the owner key, the confirm, and the schema step on an
+// older room.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
@@ -193,22 +194,123 @@ test("questions it claimed go back to open; its signatures on decisions stay", a
   assert.ok(h.room.boardRev() > rev, "the release is a board write");
 });
 
-test("lobbies waiting for its accept are declined at once, with the Referee's line; a lobby it accepted and a running match are left alone", async () => {
+// Every match still in its lobby that the leaver holds a seat in (still to
+// accept, or accepted: a creator who plays is in already) or created
+// without a seat is called off in the leave's own step, through the path
+// that calls a match off for that seat or creator: the decline
+// (gameDecline) or the creator's cancel (gameCancel, with the Referee's
+// line). Each kind in a room of its own, beside a running match the
+// leaver plays in, which its clock keeps.
+const LOBBY_KINDS = [
+  ["waiting on its accept", (h) => h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R), "Duel", "decline"],
+  ["accepted, others still to accept", async (h) => { const g = await h.room.createGame("Bea", ["Bea", "Ada", "Cy"], { game: "auction" }, R); assert.equal((await h.room.gameAccept(g.game.id, "Ada", R)).game.status, "lobby"); return g; }, "Auction", "decline"],
+  ["created, with its own seat (in already)", (h) => h.room.createGame("Ada", ["Ada", "Bea"], { game: "duel" }, R), "Duel", "decline"],
+  ["created without a seat", (h) => h.room.createGame("Ada", ["Bea", "Cy"], { game: "duel" }, R), "Duel", "cancel"],
+];
+for (const [kind, make, game, path] of LOBBY_KINDS) {
+  test("a lobby the leaver holds or created is called off in its leave, with the Referee's line (" + kind + "); a running match is left to its clock", async () => {
+    const h = makeRoom();
+    h.member("Ada");
+    h.member("Bea");
+    h.member("Cy");
+    const running = (await h.room.createGame("Cy", ["Cy", "Ada"], { game: "duel" }, R)).game;
+    assert.equal((await h.room.gameAccept(running.id, "Ada", R)).game.status, "running");
+    const made = await make(h);
+    const lobby = made.game;
+    assert.equal(h.room.gameRow(lobby.id).status, "lobby", "a lobby before the leave");
+    // a lobby of others, which the leaver has no part in
+    const others = (await h.room.createGame("Bea", ["Bea", "Cy"], { game: "duel" }, R)).game;
+    const runRev = h.room.gameRow(running.id).st.rev;
+    const lastId = h.one("SELECT MAX(id) AS n FROM m").n;
+    assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
+    const g = h.room.gameRow(lobby.id);
+    assert.equal(g.status, "cancelled", "the lobby is called off");
+    const line = path === "decline"
+      ? game + " match #" + lobby.id + " is off - Ada declined the seat."
+      : game + " match #" + lobby.id + " is off - Ada, who created it, cancelled it.";
+    if (path === "decline") {
+      assert.equal(g.st.declined_by, "Ada", "the decline's path");
+      assert.equal(g.st.log.at(-1).text, "Ada declined the seat - the match is called off.");
+    } else {
+      assert.equal(g.st.declined_by, undefined, "no seat to decline");
+      assert.match(g.st.log.at(-1).text, /^Match cancelled by Ada at /, "the creator's cancel");
+    }
+    // the leave's only lines are the Referee's about the match: none announces the leave
+    const after = h.all("SELECT sender, text FROM m WHERE id > ? ORDER BY id", lastId).map((x) => x.sender + ": " + x.text);
+    assert.deepEqual(after, ["Referee: " + line]);
+    assert.ok(!after.some((t) => /\bleft\b|\bleav/i.test(t)), "no line says the member left: " + after.join(" | "));
+    // the running match is as it was
+    const run = h.room.gameRow(running.id);
+    assert.equal(run.status, "running", "a running match is left to its clock");
+    assert.equal(run.st.rev, runRev, "and is not touched at all");
+    assert.equal(h.room.gameRow(others.id).status, "lobby", "a lobby of others stays");
+  });
+}
+
+test("every kind at once: one leave calls each lobby off once, in id order, each with its own line", async () => {
   const h = makeRoom();
   h.member("Ada");
   h.member("Bea");
-  const waiting = (await h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R)).game;
-  const mine = (await h.room.createGame("Ada", ["Ada", "Bea"], { game: "duel" }, R)).game;
-  const running = (await h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R)).game;
-  assert.equal((await h.room.gameAccept(running.id, "Ada", R)).game.status, "running");
+  h.member("Cy");
+  const ids = [];
+  for (const [, make] of LOBBY_KINDS) ids.push((await make(h)).game.id);
+  const untouched = (await h.room.createGame("Bea", ["Bea", "Cy"], { game: "duel" }, R)).game;
   assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
-  const st = (id) => h.room.gameRow(id);
-  assert.equal(st(waiting.id).status, "cancelled");
-  assert.equal(st(waiting.id).st.declined_by, "Ada");
-  assert.equal(st(mine.id).status, "lobby", "a lobby it accepted waits on others, as before");
-  assert.equal(st(running.id).status, "running", "a running match is left to its clock");
-  const posts = h.all("SELECT text FROM m WHERE sender = 'Referee'").map((x) => x.text);
-  assert.deepEqual(posts, ["Duel match #" + waiting.id + " is off - Ada declined the seat."]);
+  assert.deepEqual(ids.map((id) => h.room.gameRow(id).status), ["cancelled", "cancelled", "cancelled", "cancelled"]);
+  assert.equal(h.room.gameRow(untouched.id).status, "lobby", "a lobby of others stays");
+  const posts = h.all("SELECT text FROM m WHERE sender = 'Referee' ORDER BY id").map((x) => x.text);
+  assert.deepEqual(posts, [
+    "Duel match #" + ids[0] + " is off - Ada declined the seat.",
+    "Auction match #" + ids[1] + " is off - Ada declined the seat.",
+    "Duel match #" + ids[2] + " is off - Ada declined the seat.",
+    "Duel match #" + ids[3] + " is off - Ada, who created it, cancelled it.",
+  ]);
+});
+
+// A lobby whose last accept started the match is a running match, which a
+// leave leaves to its clock. And the leave's paths settle a lobby's clock
+// first (advanceLobby), so one past its deadline that no read has settled
+// yet is called off by its clock, with the expiry's line, not the leave's.
+test("a lobby whose last accept started the match is left running, and one past its deadline is called off as expired, not by the leave", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  h.member("Bea");
+  h.member("Cy");
+  const started = (await h.room.createGame("Bea", ["Bea", "Ada", "Cy"], { game: "auction" }, R)).game;
+  await h.room.gameAccept(started.id, "Ada", R);
+  assert.equal((await h.room.gameAccept(started.id, "Cy", R)).game.status, "running", "Cy's accept started the match");
+  const rev = h.room.gameRow(started.id).st.rev;
+  const seatGone = (await h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R)).game;
+  const madeGone = (await h.room.createGame("Ada", ["Bea", "Cy"], { game: "duel" }, R)).game;
+  // both past their join window, stored as lobbies still: no read or alarm has settled them
+  for (const id of [seatGone.id, madeGone.id]) h.db.prepare("UPDATE gm SET state = json_set(state, '$.lobby_deadline', ?) WHERE id = ?").run(Date.now() - 1000, id);
+  const lastId = h.one("SELECT MAX(id) AS n FROM m").n;
+  assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
+  const g = h.room.gameRow(started.id);
+  assert.deepEqual([g.status, g.st.rev], ["running", rev], "the started match is untouched");
+  for (const id of [seatGone.id, madeGone.id]) {
+    const x = h.room.gameRow(id);
+    assert.equal(x.status, "cancelled");
+    assert.match(x.st.log.at(-1).text, /^The lobby expired - /, "called off by its clock");
+    assert.equal(x.st.declined_by, undefined);
+  }
+  const after = h.all("SELECT sender, text FROM m WHERE id > ? ORDER BY id", lastId).map((x) => x.sender + ": " + x.text);
+  assert.deepEqual(after, [
+    "Referee: Duel match #" + seatGone.id + " never started - the lobby expired with Ada still to accept.",
+    "Referee: Duel match #" + madeGone.id + " never started - the lobby expired with Bea, Cy still to accept.",
+  ]);
+});
+
+test("an owner's revoke calls no lobby off: only the member's own leave does", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  h.member("Bea");
+  h.member("Cy");
+  const ids = [];
+  for (const [, make] of LOBBY_KINDS) ids.push((await make(h)).game.id);
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  assert.deepEqual(ids.map((id) => h.room.gameRow(id).status), ["lobby", "lobby", "lobby", "lobby"]);
+  assert.equal(h.one("SELECT COUNT(*) AS n FROM m WHERE sender = 'Referee'").n, 0);
 });
 
 test("its push registrations, hook and upload links go", async () => {
@@ -412,9 +514,11 @@ async function warnsDuring(fn) {
 // name rules: "Ada" beside "ada" (one fold), or two names that lower-case
 // alike and fold apart (U+03F9 and U+03F2). The claims, lobbies, picture,
 // voice, push rows and hook the name holds are the other holder's too: A's
-// leave touches none of them, and the Referee names nobody.
+// leave touches none of them, and the Referee names nobody. That holds for
+// every lobby the name holds or created, A's own spelling's included: the
+// seats and the matches are that member's too.
 for (const [kind, A, B] of [["the same fold", "Ada", "ada"], ["the same lower case, folding apart", "Ϲx", "ϲx"]]) {
-  test("a second active invite for the name (" + kind + "): the leave takes nothing that holder holds", async () => {
+  test("a second active invite for the name (" + kind + "): the leave takes nothing that holder holds, and touches no lobby", async () => {
     const c = cartesia(() => new Response(null, { status: 200 }));
     try {
       const h = makeRoom();
@@ -422,9 +526,18 @@ for (const [kind, A, B] of [["the same fold", "Ada", "ada"], ["the same lower ca
       ins("tA", A);
       ins("tB", B);
       h.member("Cy");
+      h.member("Dee");
       const q = h.room.addQuestion("B's question", "Cy");
       h.room.updateQuestion(q.id, "claim", B, null);
       const lobby = (await h.room.createGame("Cy", ["Cy", B], { game: "duel" }, R)).game;
+      // the name's other lobbies: a seat accepted, one it created and plays in, one it created without a seat, under either spelling
+      const accepted = (await h.room.createGame("Cy", ["Cy", B, "Dee"], { game: "auction" }, R)).game;
+      assert.equal((await h.room.gameAccept(accepted.id, B, R)).game.status, "lobby");
+      const playing = (await h.room.createGame(B, [B, "Cy"], { game: "duel" }, R)).game;
+      const seatless = (await h.room.createGame(B, ["Cy", "Dee"], { game: "duel" }, R)).game;
+      const seatlessA = (await h.room.createGame(A, ["Cy", "Dee"], { game: "duel" }, R)).game;
+      const lobbies = [lobby, accepted, playing, seatless, seatlessA].map((g) => g.id);
+      const revs = lobbies.map((id) => h.room.gameRow(id).st.rev);
       assert.ok(await h.room.setAvatar(B, PNG, "image/png", R));
       const put = await h.room.putVoiceSample(B, MP3, "audio/mpeg", R);
       await h.room.setVoiceId(B, "cartesia", "v-B", put.gen, put.key);
@@ -438,7 +551,8 @@ for (const [kind, A, B] of [["the same fold", "Ada", "ada"], ["the same lower ca
       assert.ok(h.one("SELECT revoked FROM inv WHERE token = 'tA'").revoked, "A left");
       assert.equal(h.one("SELECT revoked FROM inv WHERE token = 'tB'").revoked, null, "B is still in");
       assert.deepEqual({ ...h.one("SELECT status, claimed_by FROM oq WHERE id = ?", q.id) }, { status: "claimed", claimed_by: B }, "B's claim stays");
-      assert.equal(h.room.gameRow(lobby.id).status, "lobby", "B's lobby still waits");
+      assert.deepEqual(lobbies.map((id) => h.room.gameRow(id).status), ["lobby", "lobby", "lobby", "lobby", "lobby"], "every lobby of the name still waits");
+      assert.deepEqual(lobbies.map((id) => h.room.gameRow(id).st.rev), revs, "and none was touched");
       assert.equal(h.one("SELECT COUNT(*) AS n FROM m WHERE sender = 'Referee'").n, 0, "no Referee line");
       assert.ok(h.one("SELECT avatar_key FROM inv WHERE token = 'tB'").avatar_key, "B's picture stays");
       assert.equal(h.room.voiceOf(B).voice_id, "v-B", "B's voice stays");
@@ -643,19 +757,6 @@ test("two leaves at once: the room is deleted at most once, and never left with 
       assert.equal(inv(h, "Bea").revoked, null, "Bea is still in: the room is not empty");
     }
   }
-});
-
-test("lobbies it created, or accepted without creating, wait on the others: only those waiting for its accept are declined", async () => {
-  const h = makeRoom();
-  h.member("Ada");
-  h.member("Bea");
-  h.member("Cy");
-  const created = (await h.room.createGame("Ada", ["Ada", "Bea"], { game: "duel" }, R)).game;
-  const accepted = (await h.room.createGame("Bea", ["Bea", "Ada", "Cy"], { game: "auction" }, R)).game;
-  await h.room.gameAccept(accepted.id, "Ada", R);
-  const waiting = (await h.room.createGame("Cy", ["Cy", "Ada"], { game: "duel" }, R)).game;
-  assert.equal((await leave(h, "tok-Ada", OK)).status, 200);
-  assert.deepEqual([created, accepted, waiting].map((g) => h.room.gameRow(g.id).status), ["lobby", "lobby", "cancelled"]);
 });
 
 test("a revoked older row of the same spelling loses its picture too (the clear reaches every row of the spelling), and stays as it was otherwise", async () => {

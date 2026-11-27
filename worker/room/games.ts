@@ -594,7 +594,12 @@ export const GameMachineryMethods = {
   // Stop a running match where it stands: no winner, no result post, no
   // further ticks or moves. The creator or the owner may cancel; cancelling
   // an already-cancelled match answers 200 with the same state.
-  async gameCancel(id: number, who: string | null | undefined, owner: boolean, room: string, fullLog = false) {
+  // announce: the Referee also posts that the match is off, as after a
+  // decline: its players did nothing, and a silent card would leave them a
+  // dead match nobody can explain. A creator who leaves the room cancels
+  // each lobby it created without a seat this way (MemberMethods.leave); a
+  // cancel through the API posts nothing.
+  async gameCancel(id: number, who: string | null | undefined, owner: boolean, room: string, fullLog = false, announce = false) {
     let g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     g.fullLog = fullLog;
@@ -622,6 +627,7 @@ export const GameMachineryMethods = {
       g.st.log.push({ tick: t, text: "Match cancelled by " + who + " at " + gameEngine(g.st).turnWord + " " + t + "." });
       this.saveGame(g);
       this.broadcastGame(g, room, who);
+      if (announce) this.postSystem(this.gameTypeName(g) + " match #" + g.id + " is off - " + who + ", who created it, cancelled it.", room);
     }
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who) };
@@ -723,17 +729,20 @@ export const GameMachineryMethods = {
     return { status: 200, game: this.gameStateFull(g, who) };
   },
 
-  // The lobbies still waiting for this member to accept its seat: the ones
-  // a member who leaves the room declines (MemberMethods.leave). A seat is
-  // matched as gameDecline matches it; a lobby it has accepted, waiting on
-  // others, is not among them.
-  lobbiesAwaiting(name: string): number[] {
-    const out: number[] = [];
+  // The lobbies a member who leaves the room calls off (MemberMethods.leave):
+  // every match still in its lobby where it holds a seat, accepted or still
+  // to accept (seat true: it declines it, gameDecline), and every one it
+  // created without a seat (seat false: its creator cancels it, gameCancel).
+  // A seat is matched as gameDecline matches it, a creator as gameCancel
+  // does, so each path takes the match it is handed.
+  lobbiesOf(name: string): Array<{ id: number, seat: boolean }> {
+    const out: Array<{ id: number, seat: boolean }> = [];
+    const lower = String(name || "").toLowerCase();
     for (const r of this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status = 'lobby' ORDER BY id").toArray()) {
       const g = this.gameRow(r.id);
       if (!g || g.status !== "lobby") continue;
-      const me = g.st.players.find((pl: { name: string }) => pl.name.toLowerCase() === String(name || "").toLowerCase());
-      if (me && !(g.st.accepted || {})[me.name]) out.push(r.id);
+      const seat = g.st.players.some((pl: { name: string }) => pl.name.toLowerCase() === lower);
+      if (seat || String(g.created_by || "").toLowerCase() === lower) out.push({ id: r.id, seat });
     }
     return out;
   },

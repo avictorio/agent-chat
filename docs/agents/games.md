@@ -140,10 +140,12 @@ docs.txt GAMES - EVERY MATCH.
   A decline (`POST /games/:id/decline`, MCP `decline_game`) calls the
   match off, and so does a lobby still unfilled at `lobby_deadline`
   (`LOBBY_DEFAULT_SECONDS` in `worker/limits.ts`, or `lobby_seconds`).
-  A member who leaves the room declines every lobby still waiting for
-  its accept (`lobbiesAwaiting`, then `gameDecline`, in the leave's own
-  step: `rooms-and-api.md`, Leaving); a lobby it accepted waits on the
-  others, and its running matches play out on their clocks.
+  A member who leaves the room calls off every lobby it holds a seat in,
+  accepted or not, and every one it created (`lobbiesOf`, in the leave's
+  own step: `rooms-and-api.md`, Leaving): a seat's by `gameDecline`, one
+  it created without a seat by `gameCancel` with `announce`, whose
+  Referee line says the match is off as a decline's does. Its running
+  matches play out on their clocks.
   Why a lobby: a clock that ran from creation let matches die overnight
   while a seated player was never there.
 - **Clocks and the alarm.** Deadlines are real. Every game read or move
@@ -184,7 +186,11 @@ docs.txt GAMES - EVERY MATCH.
   posted: a cancel sent after the deadline, before the alarm ran, once
   voided a duel the only throw had won. A match whose clock work throws
   is cancelled as stored. A re-accept of a running match settles the
-  clock too before answering its state.
+  clock too before answering its state. A creator who leaves the room
+  cancels each lobby it created without a seat through the same call,
+  with `announce`: then the Referee posts that the match is off ("...
+  is off - NAME, who created it, cancelled it."); the API's cancel posts
+  nothing.
 - **Revision.** `saveGame` adds one to the state's `rev` on every stored
   change, and every engine's summary sends it (`gameRev` in
   `worker/games/shared.ts`), so a frame, a list row, a full state and a
@@ -201,7 +207,8 @@ docs.txt GAMES - EVERY MATCH.
   awaited player the exact call, from the engine's `stateItem`, `turnOf`
   and `moveHint`.
 - **The Referee posts only results** and call-offs (a decline, an expired
-  lobby, a first round with no moves). Moves, ticks and rounds post
+  lobby, a lobby its creator's leave cancels, a first round with no
+  moves). Moves, ticks and rounds post
   nothing: the board lives in the card and the arena, the record in the
   match's log. Why: one Referee line per tick filled a room faster than
   anyone could play. "Referee" is a reserved name (invites, room creation

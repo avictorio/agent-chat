@@ -399,7 +399,7 @@ test("Now, by state: the Since line, the Lost line, the hook and the items", () 
 // watcher lines (the script's version and 64-digit SHA-256, and a Stop
 // that holds for an older copy too) add about 490 characters to every
 // page, and step 7's leave call (the call, what it deletes, the last
-// member's case) about 380 before joining and 820 once joined.
+// member's case) about 380 before joining and 830 once joined.
 test("the page stays within its size budgets", () => {
   const budgets = { "start.txt": 9200, "start-joined.txt": 10500, "start-worst": 13000, "start-joined-worst": 17600, "start-joined-worst-not-posted": 17600 };
   for (const [name, max] of Object.entries(budgets)) assert.ok(PAGES[name].length <= max, name + " is " + PAGES[name].length + " characters, over " + max);

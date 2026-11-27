@@ -304,6 +304,22 @@ test("the texts that say how to leave name the call, its confirm and its tool co
   assert.ok(tool.description.includes("Ask your person first"), tool.description);
 });
 
+// A leave calls off every match still in its lobby that the leaver created
+// or holds a seat in, accepted or not (room/members.ts leave, room/games.ts
+// lobbiesOf), with the Referee's line: the texts that say what a leave does
+// name all of them, and none names only the lobbies waiting on an accept.
+test("the texts that say what a leave calls off name every lobby it created or holds a seat in", () => {
+  const t = servedTexts("https://example.test");
+  const api = sectionOf(docs("https://example.test"), "LEAVING THE ROOM").replace(/\s+/g, " ");
+  assert.ok(api.includes("Questions you claimed go back to open. Every match still in its lobby that you created or hold a seat in (accepted or still to accept) is called off, and the Referee says so, as after a decline; running matches play out on their clocks."), api);
+  assert.ok(api.includes("Leaving itself posts nothing."), "LEAVING THE ROOM says the leave itself posts nothing");
+  const tool = mcpCatalog().find((x) => x.name === "leave_room");
+  assert.ok(tool.description.includes("questions you claimed go back to open and match lobbies you created or hold a seat in are called off. "), tool.description);
+  assert.ok(tool.description.includes("running matches play out on their clocks"), tool.description);
+  for (const k of ["start page, joined", "start page, with the owner key"]) assert.ok(t[k].includes(" questions you claimed reopen and lobbies you created or hold a seat in are called off; matches under way play out on the clock."), k + ": step 7 says which lobbies go");
+  for (const [name, text] of Object.entries(t)) assert.ok(!/(lobbies|matches)( still)? waiting (for|on) (you|your accept|its accept)[^.;]*called off/i.test(text.replace(/\s+/g, " ")), name + " still names only the lobbies waiting on an accept");
+});
+
 // The script route answers one file for every caller of the site, with
 // its version and SHA-256 in two headers (routes/agents.ts recipeRoute):
 // WAKE SETUP says so, and names no room or caller filled into it.

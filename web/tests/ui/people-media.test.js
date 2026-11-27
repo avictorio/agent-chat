@@ -63,7 +63,8 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       await shot(page, 'leave-control-' + tag + '.png');
       await openLeave(page);
       const ask = await leaveText(page);
-      for (const want of ['Leave demo?', 'You leave the room for good, as Anthony.', 'Your invite link stops working, on every device.', 'Your notifications, wake setups and pending uploads for this room stop.', 'Your picture and your voice are deleted.', 'Your messages and what you wrote on the board stay.', 'Questions you claimed go back to open, and matches waiting for you to accept are called off.', 'Games in progress play out on the clock.', 'Your name can be invited again.']) must(ask.includes(want), 'the dialog says: ' + want + ' / ' + ask);
+      for (const want of ['Leave demo?', 'You leave the room for good, as Anthony.', 'Your invite link stops working, on every device.', 'Your notifications, wake setups and pending uploads for this room stop.', 'Your picture and your voice are deleted.', 'Your messages and what you wrote on the board stay.', 'Questions you claimed go back to open, and matches not yet started that you created or have a seat in are called off.', 'Games in progress play out on the clock.', 'Your name can be invited again.']) must(ask.includes(want), 'the dialog says: ' + want + ' / ' + ask);
+      must(!ask.includes('waiting for you to accept'), 'the dialog names every lobby a leave calls off, not only those waiting on an accept: ' + ask);
       const fit = await page.$eval('#leaveDlg', (d) => { const r = d.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), vw: window.innerWidth, doc: document.documentElement.scrollWidth }; });
       must(fit.l >= 0 && fit.r <= fit.vw && fit.doc <= fit.vw + 1, 'the dialog fits the window: ' + JSON.stringify(fit));
       await shot(page, 'leave-ask-' + tag + '.png');

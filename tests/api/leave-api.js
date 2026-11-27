@@ -2,9 +2,12 @@
 // worker/routes/members.ts leaveRoute, worker/room/members.ts leave),
 // against a real local Worker: the refusals and their codes, an invite
 // never opened refused without being opened (over REST and MCP), what a
-// leave changes in the members list, the board and a lobby, the name
-// invited again, the last member's two steps and the room's 404 (and a
-// call in flight's 410) after it. Each part uses its own throwaway room.
+// leave changes in the members list and the board, the lobbies it calls
+// off (waiting on its accept, accepted, created with or without its own
+// seat, over REST and MCP) and the running match it leaves to its clock,
+// the name invited again, the last member's two steps and the room's 404
+// (and a call in flight's 410) after it. Each part uses its own throwaway
+// room.
 // Called from api.test.js after the invite API.
 'use strict';
 
@@ -29,8 +32,13 @@ async function leaveApi(ctx) {
   const H = await mint('LvH', 'human');
   const A = await mint('LvA', 'agent');
   const B = await mint('LvB', 'agent');
+  const C = await mint('LvC', 'agent');
   const U = await mint('LvU', 'agent');
-  for (const t of [H, A, B]) await req('GET', R + '/messages?limit=1', { token: t });
+  for (const t of [H, A, B, C]) await req('GET', R + '/messages?limit=1', { token: t });
+  const game = async (token, json) => ((await req('POST', R + '/games', { token, json })).json || {}).game || {};
+  const statusOf = async (id) => (((await req('GET', R + '/games/' + id, { token: H })).json || {}).game || {}).status;
+  const postsSince = async (id) => (((await req('GET', R + '/messages?limit=50', { token: H })).json || {}).messages || []).filter((m) => m.id > id).map((m) => m.from + ': ' + m.text);
+  const lastId = async () => { const ms = ((await req('GET', R + '/messages?limit=1', { token: H })).json || {}).messages || []; return ms.length ? ms[ms.length - 1].id : 0; };
 
   // refused before the room is asked
   let r = await req('GET', R + '/leave', { token: A });
@@ -70,14 +78,23 @@ async function leaveApi(ctx) {
   let u = await row('LvU');
   check('leave: ... and the invite is still unopened and unseen', u.status === 'unused' && u.joined === null && u.last_seen === null, JSON.stringify(u));
 
-  // LvA has a picture, claims a question, owes a lobby, then leaves
+  // LvA has a picture, claims a question, owes a lobby, has accepted one,
+  // created one it has no seat in and plays a running match, then leaves
   await req('PUT', R + '/avatar', { token: A, headers: { 'Content-Type': 'image/png' }, body: PNG });
   const q = (await req('POST', R + '/questions', { token: H, json: { text: 'Who books the hotel?' } })).json.question;
   await req('POST', R + '/questions/' + q.id, { token: A, json: { action: 'claim' } });
   const d = (await req('POST', R + '/decisions', { token: H, json: { title: 'Lima first' } })).json.decision;
   await req('POST', R + '/decisions/' + d.id, { token: A, json: { action: 'sign' } });
   const lobby = (await req('POST', R + '/games', { token: H, json: { game: 'duel', players: ['LvH', 'LvA'] } })).json.game;
+  const accA = await game(H, { game: 'auction', players: ['LvH', 'LvA', 'LvC'] });
+  r = await req('POST', R + '/games/' + accA.id + '/accept', { token: A });
+  check('leave: LvA accepted an auction that still waits on LvC', r.status === 200 && r.json.game.status === 'lobby', r.status + ' ' + r.text.slice(0, 120));
+  const madeA = await game(A, { game: 'duel', players: ['LvH', 'LvC'] });
+  const runA = await game(H, { game: 'duel', players: ['LvH', 'LvA'] });
+  r = await req('POST', R + '/games/' + runA.id + '/accept', { token: A });
+  check('leave: ... created a duel it has no seat in, and plays a running one', madeA.status === 'lobby' && madeA.created_by === 'LvA' && r.status === 200 && r.json.game.status === 'running', JSON.stringify([madeA.status, madeA.created_by, r.status, r.json && r.json.game && r.json.game.status]));
   await req('POST', R + '/messages', { token: A, json: { text: 'LvA was here' } });
+  const beforeA = await lastId();
   r = await leave(A, OK);
   check('leave: a joined member leaves -> 200 {room, name, left, room_deleted: false}', r.status === 200 && JSON.stringify(Object.keys(r.json)) === '["room","name","left","room_deleted"]' && r.json.name === 'LvA' && r.json.room_deleted === false && r.json.left > 0, r.status + ' ' + r.text.slice(0, 160));
   const left = r.json && r.json.left;
@@ -95,6 +112,10 @@ async function leaveApi(ctx) {
   check('leave: its message stays, and the Referee calls the lobby off', texts.includes('LvA: LvA was here') && texts.includes('Referee: Duel match #' + lobby.id + ' is off - LvA declined the seat.'), JSON.stringify(texts.slice(-4)));
   r = await req('GET', R + '/games/' + lobby.id, { token: H });
   check('leave: the lobby waiting for it is cancelled', r.json && r.json.game && r.json.game.status === 'cancelled', r.text.slice(0, 120));
+  const postsA = await postsSince(beforeA);
+  check('leave: the Referee calls off the lobby it accepted (a decline) and the one it created without a seat (its creator\'s cancel), and nothing announces the leave', JSON.stringify(postsA) === JSON.stringify(['Referee: Duel match #' + lobby.id + ' is off - LvA declined the seat.', 'Referee: Auction match #' + accA.id + ' is off - LvA declined the seat.', 'Referee: Duel match #' + madeA.id + ' is off - LvA, who created it, cancelled it.']), JSON.stringify(postsA));
+  const stA = [await statusOf(accA.id), await statusOf(madeA.id), await statusOf(runA.id)];
+  check('leave: ... both lobbies are cancelled, and its running match plays on', JSON.stringify(stA) === '["cancelled","cancelled","running"]', JSON.stringify(stA));
   r = await req('GET', R + '/questions', { token: H });
   const qq = ((r.json && r.json.questions) || []).find((x) => x.id === q.id) || {};
   check('leave: its claimed question is open again', qq.status === 'open' && qq.claimed_by === null, JSON.stringify(qq));
@@ -109,11 +130,28 @@ async function leaveApi(ctx) {
   r = await req('POST', R + '/invites', { token: H, json: { name: 'LvA', kind: 'agent' } });
   check('leave: its name can be invited again at once', r.status === 201 && r.json.name === 'LvA', r.status + ' ' + r.text.slice(0, 120));
 
-  // LvB leaves over MCP
+  // LvB, who accepted an auction, created a duel it plays in and one it
+  // has no seat in, leaves over MCP
+  const accB = await game(H, { game: 'auction', players: ['LvH', 'LvB', 'LvC'] });
+  r = await req('POST', R + '/mcp', { token: B, json: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'accept_game', arguments: { id: accB.id } } } });
+  const accepted = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
+  check('leave: LvB accepted an auction over MCP, still waiting on LvC', !!accepted && accepted.status === 'lobby', r.text.slice(0, 160));
+  const seatB = await game(B, { game: 'duel', players: ['LvB', 'LvH'] });
+  const madeB = await game(B, { game: 'duel', players: ['LvH', 'LvC'] });
+  check('leave: ... and created two duels, one with its own seat', seatB.status === 'lobby' && madeB.status === 'lobby' && madeB.created_by === 'LvB', JSON.stringify([seatB.status, madeB.status, madeB.created_by]));
+  const beforeB = await lastId();
   r = await rpc(B, { confirm: room });
   const sc = r.json && r.json.result && r.json.result.structuredContent;
   check('leave: MCP leave_room leaves -> {room, name, left, room_deleted: false}', !!sc && sc.room === room && sc.name === 'LvB' && sc.left > 0 && sc.room_deleted === false, r.text.slice(0, 200));
   check('leave: ... and the list shows LvB left', (await row('LvB')).left === (sc && sc.left), JSON.stringify(await row('LvB')));
+  const postsB = await postsSince(beforeB);
+  check('leave: MCP leave_room calls off the lobby it accepted, the one it created and plays in (declines) and the one it created without a seat (its creator\'s cancel), and nothing announces the leave', JSON.stringify(postsB) === JSON.stringify(['Referee: Auction match #' + accB.id + ' is off - LvB declined the seat.', 'Referee: Duel match #' + seatB.id + ' is off - LvB declined the seat.', 'Referee: Duel match #' + madeB.id + ' is off - LvB, who created it, cancelled it.']), JSON.stringify(postsB));
+  const stB = [await statusOf(accB.id), await statusOf(seatB.id), await statusOf(madeB.id)];
+  check('leave: ... all three are cancelled', JSON.stringify(stB) === '["cancelled","cancelled","cancelled"]', JSON.stringify(stB));
+  // LvC goes too, holding no lobby now: an ordinary leave, nothing for the Referee to say
+  const beforeC = await lastId();
+  r = await leave(C, OK);
+  check('leave: LvC leaves, with no lobby left to call off: no line', r.status === 200 && (await postsSince(beforeC)).length === 0, r.status + ' ' + JSON.stringify(await postsSince(beforeC)));
 
   // LvH is the last member who has joined: LvU and the new LvA are unopened
   r = await leave(H, OK);

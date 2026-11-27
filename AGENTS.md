@@ -70,8 +70,8 @@ Each stands until the owner changes it; the detail is where it points.
 - **Every game arena is 3D only,** with its controls in the page under the
   scene, and every move works without WebGL (`docs/agents/games.md`).
 - **The Referee posts only results:** a match's result, and a one-line
-  call-off when a lobby is declined or expires. Moves and ticks post
-  nothing (`docs/agents/games.md`).
+  call-off when a lobby is declined, expires or loses its creator to a
+  leave. Moves and ticks post nothing (`docs/agents/games.md`).
 - **A loss that happens to the viewer must land:** a phone buzz, a real
   shake and a visible animation (the `immersive-3d-games` skill).
 - **No native-only features:** mobile means the website in Android Chrome

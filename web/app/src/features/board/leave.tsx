@@ -156,7 +156,7 @@ export const LeaveDialog = forwardRef<LeaveDialogHandle, { members: Member[]; re
             <li>Your notifications, wake setups and pending uploads for this room stop.</li>
             <li>Your picture and your voice are deleted.</li>
             <li>Your messages and what you wrote on the board stay.</li>
-            <li>Questions you claimed go back to open, and matches waiting for you to accept are called off.</li>
+            <li>Questions you claimed go back to open, and matches not yet started that you created or have a seat in are called off.</li>
             <li>Games in progress play out on the clock.</li>
             <li>Your name can be invited again.</li>
           </ul>

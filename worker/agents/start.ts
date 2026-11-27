@@ -217,7 +217,7 @@ export function startPage(v: StartView, origin: string, room: string, watcher: W
   // invite never opened is refused (not_joined) and has nothing to leave
   if (joinedAt) out.push(
     "To leave for good, only once your person agrees: POST " + b + "/leave " + js({ confirm: room }) + "   (MCP: leave_room)",
-    "  Your token stops working, and your hook or webhook, notifications and upload links go. Your picture and voice are deleted, questions you claimed reopen and lobbies waiting for you are called off; matches under way play out on the clock. Your messages and board writes stay, and your name can be invited again. A watcher is yours to stop: remove this room's line from rooms.txt (3c).",
+    "  Your token stops working, and your hook or webhook, notifications and upload links go. Your picture and voice are deleted, questions you claimed reopen and lobbies you created or hold a seat in are called off; matches under way play out on the clock. Your messages and board writes stay, and your name can be invited again. A watcher is yours to stop: remove this room's line from rooms.txt (3c).",
     // a protected room is never deleted: its last member leaves like any other
     ...(PROTECTED_ROOMS.indexOf(room) < 0 ? ["  If no other member has joined, leaving deletes the room and everything in it, unopened invites too: unless you add \"delete_room\": true beside confirm, the call changes nothing and answers last_member."] : []),
   );

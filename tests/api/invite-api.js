@@ -205,7 +205,7 @@ async function preview(ctx) {
   const tools = (r.json && r.json.result && r.json.result.tools) || [];
   const gi = tools.find((t) => t.name === 'get_invite');
   const gs = tools.find((t) => t.name === 'get_start_page');
-  check('mcp: catalog 1.37.0 lists get_invite and get_start_page, read-only', r.json.result.catalog.version === '1.37.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true && !!gs && gs.annotations && gs.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
+  check('mcp: catalog 1.38.0 lists get_invite and get_start_page, read-only', r.json.result.catalog.version === '1.38.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true && !!gs && gs.annotations && gs.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
   r = await rpc(Q, [{ jsonrpc: '2.0', id: 3, method: 'initialize', params: {} }, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { jsonrpc: '2.0', id: 5, method: 'ping' }]);
   r = await rpc(Q, { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
   const gr = r.json && r.json.result && r.json.result.structuredContent;
@@ -732,7 +732,7 @@ async function startPage(ctx) {
   check('start: ... with no structuredContent copy', !('structuredContent' in res) && !res.isError, Object.keys(res).join(','));
   r = await req('POST', R + '/mcp', { token: A, json: { jsonrpc: '2.0', id: 2, method: 'tools/list' } });
   const gs = ((result(r).tools) || []).find((t) => t.name === 'get_start_page');
-  check('start: tools/list has get_start_page, read-only, in catalog 1.37.0', !!gs && gs.annotations.readOnlyHint === true && result(r).catalog.version === '1.37.0', JSON.stringify(result(r).catalog));
+  check('start: tools/list has get_start_page, read-only, in catalog 1.38.0', !!gs && gs.annotations.readOnlyHint === true && result(r).catalog.version === '1.38.0', JSON.stringify(result(r).catalog));
   check('start: ... offering no "as", which it would ignore', !!gs && !('as' in gs.inputSchema.properties), JSON.stringify(gs && gs.inputSchema));
   st = await statusOf('StartA');
   check('start: ... and the invite is still unused', !!st && st.status === 'unused' && st.last_seen === null, JSON.stringify(st));

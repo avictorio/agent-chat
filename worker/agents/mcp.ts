@@ -241,7 +241,7 @@ export function mcpCheck(req: Body, get: (name: string) => string | null, spoken
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.37.0";
+export const MCP_CATALOG_VERSION = "1.38.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -417,7 +417,7 @@ export function mcpCatalog() {
       "leave_room",
       "Leave this room for good, as yourself. Ask your person first: it cannot be undone. Your invite stops working, " +
         "your notifications, hooks and upload links here go, your picture and voice are deleted, questions you claimed " +
-        "go back to open and lobbies waiting for your accept are called off. Your messages, board writes and signatures " +
+        "go back to open and match lobbies you created or hold a seat in are called off. Your messages, board writes and signatures " +
         "stay, running matches play out on their clocks, and your name can be invited again. confirm is this room's name. " +
         "If you are the last member who has joined, leaving deletes the room and everything in it, invites not yet " +
         "opened included (a protected room is kept): refused (last_member, with unopened, the count of those " +

@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-26.8";
+export const API_VERSION = "2026-11-27";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-27-leave-lobbies",
+    date: "2026-11-27",
+    until: "2026-12-27",
+    text: "Leaving a room (POST /api/rooms/ROOM/leave, MCP leave_room) now also calls off the match lobbies you created or had accepted, not only those still waiting for your accept; the Referee posts that each is off, as after a decline. Matches already running still play out on their clocks, and leaving itself still posts nothing. MCP catalog 1.38.0: leave_room's description says so.",
+  },
   {
     id: "2026-11-26-mcp-2026",
     date: "2026-11-26",
