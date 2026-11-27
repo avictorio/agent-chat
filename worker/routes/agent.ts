@@ -50,6 +50,7 @@ import {
   AGENT_ROOMS_MAX,
   AGENT_SWAP_TRIES,
   AGENT_WAKE_ITEMS_MAX,
+  AGENT_WAKE_LINK_MAX,
   AGENT_WAKE_RETRY_MS,
   AGENT_WAKE_SET_MS,
   AGENT_WAKE_SKEW_MS,
@@ -66,13 +67,13 @@ import {
 } from "../limits.js";
 import { isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
 import { AGENT_UNREADABLE, agentCredential, agentDataKey, agentSealRing, agentUnseal, agentVerifier, newAgentKey, newRecordingId, type AgentEntry } from "../lib/agentkey.js";
-import { keepsWakes, wakeAnswered, wakeExpired, wakeLinksAfter, wakeRecord, wakeSettle, wakeWeight, withWakes, type WakeSeen } from "../lib/wakes.js";
+import { keepsWakes, wakeAnswered, wakeExpired, wakeLinksAfter, wakeRecord, wakeSettle, wakeWeight, type WakeSeen } from "../lib/wakes.js";
 import { hashKey, networkKey } from "../lib/address.js";
 import { cleanName, memberNameProblem, nameFold, sameName } from "../lib/text.js";
 import { warn } from "../lib/log.js";
 import {
   AGENT_KEY_INVALID, AGENT_KEY_MISSING, NOT_AGENT_KEY, activeCapError, agentInstructions, agentKeyNote, claudeCodeLine, dayCapError, dropNote, mcpJsonEntry, nameTakenError,
-  notPersonInviteError, personKeyHandoff, personKeyNote, removedRefusedNote, seatInUseError, unusedNote, wakeAgain, wakeNotSettled, wakeStillSetting, type AgentVariant,
+  notPersonInviteError, personKeyHandoff, personKeyNote, removedRefusedNote, seatInUseError, unusedNote, wakeAgain, wakeLinkUnusable, wakeLost, wakeNotSettled, wakeStillSetting, type AgentVariant,
 } from "../agents/onboarding.js";
 import { MCP_AGENT_CATALOG_VERSION, agentServerInfo, mcpAgentCatalogBuilt, mcpCallOf, mcpErr, mcpHasAgentTool, mcpOk } from "../agents/mcp.js";
 import { mcpServe, roomToolAnswer, type ToolAnswer, type Worded } from "./agents.js";
@@ -143,9 +144,10 @@ async function unseal(k: Opened): Promise<Unsealed | null> {
 
 /** A change to the key's list: the new list and what to answer, with the
  *  rooms' observations (lib/wakes.ts) on which recorded Muse wake links
- *  leave it, each stamped with the version this change read (seen), or only
- *  an answer (nothing written). */
-type Changed<T> = { rooms: AgentEntry[], then: T, seen?: WakeSeen[] } | { answer: T };
+ *  leave it, each stamped with the version this change read (seen), and
+ *  the recordings that are this call's own (own: the ids of the sets it
+ *  sent and saw answered), or only an answer (nothing written). */
+type Changed<T> = { rooms: AgentEntry[], then: T, seen?: WakeSeen[], own?: string[] } | { answer: T };
 
 /** What a rewrite came to: done (with the list as it now stands, after
  *  its swap), an answer that wrote nothing, or a swap that did not happen. */
@@ -170,7 +172,7 @@ async function rewrite<T>(first: Unsealed, change: (u: Unsealed) => Promise<Chan
     }
     const c = await change(u);
     if ("answer" in c) return { answer: c.answer };
-    keepsWakes(u.ver, u.rooms, c.rooms, c.seen || []);
+    keepsWakes(u.ver, u.rooms, c.rooms, c.seen || [], c.own || []);
     const ring = await agentSealRing(u.dk, u.id, u.ver + 1, c.rooms);
     const s = await u.stub.agentSwap("key", u.verifier, u.ver, ring);
     if (s.ok) return { done: c.then, after: { ...u, ver: u.ver + 1, ring, rooms: c.rooms } };
@@ -396,11 +398,11 @@ async function agentKeyNow(env: Env, url: URL, caps: AgentCap[], found: Array<{ 
 // from was read. The routes below settle: a take-off and an add over a
 // refused entry (dropWake), the disconnect (dropWakes), and muse_register
 // at the bound and in its tidy. Each looks before it drops anything: while
-// a recording may still reach the room (not yet expired by the room's
-// clock: a registration that has not answered, still running or cut short)
-// nothing is dropped, and a take-off or an add answers try_again while the
-// disconnect waits. After a registration that finished nothing is
-// outstanding, so nothing waits.
+// a recording may still reach the room (outstanding, and not yet expired by
+// the room's clock: its registration still runs, was cut short, lost its
+// set's answer, or could not write its own write) nothing is dropped, and a
+// take-off or an add answers try_again while the disconnect waits. Nothing
+// waits once a registration's own write has taken its recordings off.
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -572,37 +574,48 @@ async function agentAnswer(rc: RouteContext): Promise<Response> {
 
 /** DELETE /api/agent's two steps, the cut and the wakes (above). */
 async function disconnect(env: Env, stub: DurableObjectStub, id: string, secret: Uint8Array<ArrayBuffer>, verifier: string): Promise<Response> {
-  let last: Response | null = null;
+  // what this call itself turned off, over its tries, and the key's rooms as its first read found them
+  const removed = new Set<string>();
+  let rooms: string[] | null = null;
   for (let t = 0; t < AGENT_SWAP_TRIES; t++) {
     const cut = await stub.agentCut("key", verifier);
-    if (!cut.ok) return last || refusedJson(KEY_REFUSED.invalid);
+    if (!cut.ok) {
+      // refused at once: no such key. Refused after this call read it: another DELETE of the key deleted the
+      // record meanwhile, which it does only once every wake on it settled, so the disconnect is complete
+      if (rooms === null) return refusedJson(KEY_REFUSED.invalid);
+      return json({ deleted: true, rooms, muse_wakes_removed: [...removed], muse_wakes_left: [], note: dropNote([]) });
+    }
     // a list that does not open is no reason to keep the key: it goes, and
     // the answer says its wakes could not be turned off
     const list = await agentUnseal(id, secret, cut.wrapped, cut.ver, cut.ring);
     if (!list) {
       await stub.agentDrop("key", verifier);
-      return json({ deleted: true, rooms: [], muse_wakes_removed: [], muse_wakes_left: null, note: dropNote(null) });
+      return json({ deleted: true, rooms: rooms || [], muse_wakes_removed: [...removed], muse_wakes_left: null, note: dropNote(null) });
     }
+    if (rooms === null) rooms = list.rooms.map((e) => e.room);
     // the wakes, on observations made after this read of the list (its version)
     const w = await dropWakes(env, list.rooms, cut.ver);
-    const rooms = list.rooms.map((e) => e.room);
+    for (const r of w.removed) removed.add(r);
+    const gone = [...removed].filter((r) => !w.left.includes(r));
     if (!w.left.length) {
       keepsWakes(cut.ver, list.rooms, [], w.seen);
       const r = await stub.agentDrop("key", verifier, cut.ver);
-      if (!r.ok && r.code === "stale") continue; // another DELETE wrote meanwhile: read it and look again
-      return json({ deleted: true, rooms, muse_wakes_removed: w.removed, muse_wakes_left: [], note: dropNote([]) });
+      if (r.ok) return json({ deleted: true, rooms, muse_wakes_removed: gone, muse_wakes_left: [], note: dropNote([]) });
+      continue; // the list moved, or another DELETE deleted it: cut again and read what is there
     }
     // only the rooms whose wakes did not settle stay, for the next DELETE
     keepsWakes(cut.ver, list.rooms, w.remain, w.seen);
     const ring = await agentSealRing(list.dk, id, cut.ver + 1, w.remain);
     const kept = await stub.agentRemain("key", verifier, cut.ver, ring);
-    warn("agent.drop", null, { left: w.left.length });
-    last = json({ deleted: true, rooms, muse_wakes_removed: w.removed, muse_wakes_left: w.left, note: dropNote(w.left) });
-    if (kept.ok || kept.code !== "stale") return last;
+    if (kept.ok) {
+      warn("agent.drop", null, { left: w.left.length });
+      return json({ deleted: true, rooms, muse_wakes_removed: gone, muse_wakes_left: w.left, note: dropNote(w.left) });
+    }
+    // the list moved, or another DELETE deleted it: cut again and read what is there
   }
-  // the list kept moving under this call (other DELETEs of the same key): what it saw, every wake named as left
+  // the list kept moving under this call (other DELETEs of the same key): nothing it says could be sure
   warn("agent.drop", null, { remain: "not written" });
-  return last || json({ error: "This key is busy; try again.", code: "try_again" }, 503, { "Retry-After": "1" });
+  return refusedJson({ ...BUSY, retry_after: 1 });
 }
 
 /* ---------- POST /api/agent/rooms and /api/agent/rooms/remove ---------- */
@@ -657,9 +670,9 @@ async function addRooms(env: Env, u: Unsealed, entries: Array<{ room: string, to
  *  but the gadget could turn that wake off (with a key a person made, the
  *  agent holds no token of that room), and a wake for a room the agent can
  *  no longer read through its key serves nobody. A recording that may still
- *  reach the room (a registration that has not answered), or a room that
- *  does not let every link go, keeps the room on the key, its wake as it
- *  was: try_again. A room that refused the key's invite says so instead of
+ *  reach the room (outstanding and not expired), or a room that does not
+ *  let every link go, keeps the room on the key, its wake as it was:
+ *  try_again. A room that refused the key's invite says so instead of
  *  the seat, and says its wake is off when it had one. */
 type Removed = Refused | { room: string, removed: true, muse_wake_removed?: true, note: string };
 async function removeRoom(env: Env, u: Unsealed, room: string): Promise<Rewritten<Removed>> {
@@ -1152,7 +1165,7 @@ async function personAddNow(env: Env, first: Unsealed, planned: Planned[]): Prom
       seen.push(d.seen);
     }
     if (!seen.length) return { answer: null };
-    return { rooms: x.rooms.map((h) => (seen.some((o) => o.room === h.room && o.token === h.token) ? withWakes(h, []) : h)), then: null, seen };
+    return { rooms: wakeSettle(x.rooms, seen), then: null, seen };
   });
   if ("answer" in off && off.answer) return refusedJson(off.answer);
   if ("busy" in off || "gone" in off || "unreadable" in off) return refusedJson("gone" in off ? KEY_REFUSED.invalid : "unreadable" in off ? UNREADABLE : { ...BUSY, retry_after: 1 });
@@ -1299,14 +1312,20 @@ async function agentTool(rc: RouteContext, first: Opened, name: string, args: Bo
 type WakeResult = { room: string, ok: true, name: string, hook: unknown } | { room: string, ok: false, status: number, code: string, error: string };
 
 /** Why a room was not registered this time, told once it is known whether
- *  the code was claimed (spent): unreached (its call threw), late (it
- *  reached the room after its deadline, and the room refused it), busy (the
- *  key's list changed under the call), full (its entry holds
- *  AGENT_WAKE_ITEMS_MAX links and recordings that cannot be settled yet),
- *  not_joined (its seat was never opened). */
-type Skip = "unreached" | "late" | "busy" | "full" | "not_joined";
+ *  the code was claimed (spent): unreached (its look threw: no set was
+ *  sent), late (it reached the room after its deadline, and the room
+ *  refused it), busy (the key's list changed under the call), full (its
+ *  entry holds AGENT_WAKE_ITEMS_MAX links and recordings that cannot be
+ *  settled yet), not_joined (its seat was never opened); and two that are
+ *  no "not registered": lost (its set was sent and its answer lost, so the
+ *  wake may be on: answer_lost), unusable (the code's Muse link is longer
+ *  than AGENT_WAKE_LINK_MAX, so it was neither recorded nor set:
+ *  link_unusable). */
+type Skip = "unreached" | "late" | "busy" | "full" | "not_joined" | "lost" | "unusable";
 function skipped(room: string, why: Skip, spent: boolean): WakeResult {
   if (why === "not_joined") return { room, ok: false, status: 409, code: "not_joined", error: museNotJoined(spent) };
+  if (why === "lost") return { room, ok: false, status: 503, code: "answer_lost", error: wakeLost(room) };
+  if (why === "unusable") return { room, ok: false, status: 502, code: "link_unusable", error: wakeLinkUnusable(room) };
   return { room, ok: false, status: 503, code: "try_again", error: wakeAgain(room, why, spent) };
 }
 
@@ -1430,6 +1449,11 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
   const c = await museClaim(bridge, code);
   if (!c.ok) return { result: mcpErr(c.error, c.code === "rate_limited" ? { code: c.code, retry_after: c.retry_after } : { code: c.code }) };
   const link = c.link;
+  // a link longer than the key records: no room is recorded or set (the code is spent: the bridge claimed it)
+  if (link.length > AGENT_WAKE_LINK_MAX) {
+    for (const a of accepted) results[a.i] = "unusable";
+    return { result: mcpOk({ claimed: true, results: told(true) }) };
+  }
   // a recording on each entry (by its room and token), written before any hook is set
   const deadline = Date.now() + AGENT_WAKE_SET_MS;
   const ids = accepted.map(() => newRecordingId());
@@ -1471,7 +1495,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
         }
         outcome.set(n, "ok");
         results[a.i] = { room: a.e.room, ok: true, name: s.name, hook: s.hook };
-      } catch { unreached++; outcome.set(n, "threw"); results[a.i] = "unreached"; /* counted, and logged below with no room */ }
+      } catch { unreached++; outcome.set(n, "threw"); results[a.i] = "lost"; /* counted, and logged below with no room */ }
     }
   };
   await Promise.all(Array.from({ length: Math.min(AGENT_GLANCE_PARALLEL, todo.length) }, lane));
@@ -1485,7 +1509,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
       if (x.rooms.some((y) => same(y, accepted[n].e))) there.add(n);
       if (answered.includes(n)) rooms = wakeAnswered(rooms, accepted[n].e.room, accepted[n].e.token, link, ids[n]);
     }
-    return { rooms, then: there };
+    return { rooms, then: there, own: answered.map((n) => ids[n]) };
   });
   if ("gone" in post) {
     // cut meanwhile: the hooks this call set go again (the disconnect also turns off every link it recorded)

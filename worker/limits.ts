@@ -308,6 +308,10 @@ export const AGENT_WAKE_RETRY_MS = 1000;
 export const AGENT_WAKE_SET_MS = 15000;
 export const AGENT_WAKE_SKEW_MS = 2000;
 export const AGENT_WAKE_ITEMS_MAX = 5;
+// The longest Muse link id a key records (the bridge's are "ml_" and 32 hex
+// digits, 35): a longer one is neither recorded nor set, so the sealed
+// list's size bound holds by construction.
+export const AGENT_WAKE_LINK_MAX = 64;
 
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {

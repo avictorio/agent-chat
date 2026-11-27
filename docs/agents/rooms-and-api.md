@@ -849,7 +849,13 @@ docs.txt section that owns its routes, caps and formats.
     link with an empty list is one whose every set has answered. A call's
     own write after its sets takes off only its own recording ids, of the
     sets the room answered (ok or refused alike); one whose set threw stays
-    outstanding. A set's answer settles nothing: it never takes a link off,
+    outstanding, and that room's result is `answer_lost` (the room's answer
+    was lost, so the wake may be on or not; the key keeps it on its record;
+    register again with a new code to be sure), not "not registered". A
+    link longer than `AGENT_WAKE_LINK_MAX` (the bridge's ids are 35
+    characters) is neither recorded nor set: every room answers
+    `link_unusable`, so the sealed list's size stays bounded by
+    construction (`agent-glance-size`). A set's answer settles nothing: it never takes a link off,
     its own or another. A link leaves the record only in a settling write:
     the list is read (version v); after that read the room is asked
     (`museHookLook`, or `museDropLook` for one link), and its answer is an
@@ -884,12 +890,13 @@ docs.txt section that owns its routes, caps and formats.
     than the one its set left on (its own too after a refusal), and one
     settling write from the version it wrote, which changes nothing if it
     throws or meets a newer list. Each looks before it drops anything:
-    while a recording may still reach the room (a registration that has
-    not answered, still running or cut short) nothing is dropped, a
+    while a recording may still reach the room (outstanding and not
+    expired: its registration still runs, was cut short, lost its set's
+    answer, or could not write its own write) nothing is dropped, a
     take-off and an add answer `try_again` (503 with `Retry-After`; the tool
     error over MCP) and the disconnect waits for it, at most
-    `AGENT_WAKE_SET_MS + AGENT_WAKE_SKEW_MS`, then looks again. After a
-    registration that finished nothing is outstanding, so nothing waits.
+    `AGENT_WAKE_SET_MS + AGENT_WAKE_SKEW_MS`, then looks again. Nothing
+    waits once a registration's own write has taken its recordings off.
     `DELETE /api/agent` is two steps. The cut (`agentCut`): the key's slot
     is marked cut, and from then on the key opens nothing (every route and
     `/api/mcp` refuse it as they refuse a key that does not exist) but this
@@ -904,9 +911,12 @@ docs.txt section that owns its routes, caps and formats.
     says `muse_wakes_removed` and `muse_wakes_left` (a room that threw
     twice, sent no clock, kept a recording that may still land, or refused
     in any way but "no such seat" or "room gone", as one still on older
-    code would for a gone seat), a room in one of the two, never both:
-    left when any of its links stays, removed when all left and a hook was
-    taken off; its note says the wakes are off only when none is left, and
+    code would for a gone seat); a room is never in both lists: left when
+    any of its links stays, removed when all left and a hook was taken off
+    by this DELETE. Two DELETEs of a key at once both answer truly: one
+    whose write meets a list the other changed cuts and reads again, and
+    when the record is gone (the other deleted it, which it does only once
+    every wake settled) it answers as a complete disconnect. Its note says the wakes are off only when none is left, and
     otherwise names the rooms, says the record keeps them until the same
     DELETE settles them, and what turns them off (the same DELETE again,
     that room's own `DELETE .../muse-hook` while the seat is active, or the

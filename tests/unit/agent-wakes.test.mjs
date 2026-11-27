@@ -8,7 +8,7 @@
 // routes: agent-mcp.test.mjs. Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AGENT_WAKE_ITEMS_MAX, AGENT_WAKE_SKEW_MS } from "../../worker/limits.ts";
+import { AGENT_WAKE_ITEMS_MAX, AGENT_WAKE_LINK_MAX, AGENT_WAKE_SKEW_MS } from "../../worker/limits.ts";
 import { keepsWakes, wakeAnswered, wakeExpired, wakeLinksAfter, wakeRecord, wakeSettle } from "../../worker/lib/wakes.ts";
 
 const SKEW = AGENT_WAKE_SKEW_MS;
@@ -17,14 +17,14 @@ const entry = (hooks, token = "tok-a") => ({ room: "lima", token, name: "Hank", 
 /** an observation of lima's seat, stamped with version ver */
 const seenAt = (ver, now, link, extra = {}) => ({ room: "lima", token: "tok-a", ver, now, link, ...extra });
 
-test("the guard: a link may leave the list only with an observation of its seat stamped with the version replaced, whose hook is another, by whose room clock each of its outstanding recordings has expired; a recording may go while its link stays", () => {
-  const ok = (before, after, seen = []) => assert.doesNotThrow(() => keepsWakes(7, before, after, seen));
+test("the guard: a link may leave the list only with an observation of its seat stamped with the version replaced, whose hook is another, by whose room clock each of its outstanding recordings has expired; a recording may go while its link stays only as its call's own or expired", () => {
+  const ok = (before, after, seen = [], own = []) => assert.doesNotThrow(() => keepsWakes(7, before, after, seen, own));
   const refused = (before, after, seen, why) => assert.throws(() => keepsWakes(7, before, after, seen), why);
   const X = { link: "link-x", recs: [] };
   const P = { link: "link-x", recs: [{ id: "r1", deadline: 1000 }] };
   ok([entry([X])], [entry([X])]);
-  ok([entry([P])], [entry([X])], [], "a recording goes, its link stays");
-  ok([entry([X])], [entry([X, { link: "link-y", recs: [{ id: "r2", deadline: 5 }] }])], [], "a recording added");
+  ok([entry([P])], [entry([X])], [], ["r1"]);
+  ok([entry([X])], [entry([X, { link: "link-y", recs: [{ id: "r2", deadline: 5 }] }])]);
   // gone with no observation, or with one stamped with another version
   refused([entry([X])], [], [], /no observation/);
   refused([entry([X])], [entry(null)], [], /no observation/);
@@ -35,10 +35,27 @@ test("the guard: a link may leave the list only with an observation of its seat 
   refused([entry([X])], [], [seenAt(7, 10, "link-x")], /hook is on/);
   refused([entry([P])], [], [seenAt(7, 1000 + SKEW, null)], /may still reach/);
   ok([entry([P])], [], [seenAt(7, 1000 + SKEW + 1, null)]);
-  ok([entry([X])], [], [seenAt(7, 10, "link-y")], "another link's hook: an empty list leaves at once");
+  ok([entry([X])], [], [seenAt(7, 10, "link-y")]);
   // a drop that did not say what is on after it settles only the link it dropped
   ok([entry([X])], [], [seenAt(7, 10, null, { only: "link-x" })]);
   refused([entry([X, { link: "link-y", recs: [] }])], [], [seenAt(7, 10, null, { only: "link-x" })], /drop of another link/);
+});
+
+test("the guard checks recordings too: one may leave only as the caller's own or expired by a stamped observation of its entry, so a write that drops another call's outstanding recording is refused", () => {
+  const two = entry([{ link: "L", recs: [{ id: "mine", deadline: 1000 }, { id: "theirs", deadline: 1000 }] }]);
+  // a call's own write: its own id goes
+  assert.doesNotThrow(() => keepsWakes(7, [two], wakeAnswered([two], "lima", "tok-a", "L", "mine"), [], ["mine"]));
+  // ... not unnamed
+  assert.throws(() => keepsWakes(7, [two], wakeAnswered([two], "lima", "tok-a", "L", "mine"), []), /neither its call's own nor expired/);
+  // an own write that takes off every recording of its link (another call's included) is refused
+  assert.throws(() => keepsWakes(7, [two], [entry([{ link: "L", recs: [] }])], [], ["mine"]), /neither its call's own nor expired/);
+  // a settling write that prunes a recording of the link its hook is on before it expired is refused; after, allowed
+  const on = entry([{ link: "L", recs: [{ id: "r", deadline: 1000 }] }]);
+  assert.throws(() => keepsWakes(7, [on], [entry([{ link: "L", recs: [] }])], [seenAt(7, 1000 + SKEW, "L")]), /may still reach/);
+  assert.doesNotThrow(() => keepsWakes(7, [on], [entry([{ link: "L", recs: [] }])], [seenAt(7, 1000 + SKEW + 1, "L")]));
+  assert.throws(() => keepsWakes(7, [on], [entry([{ link: "L", recs: [] }])], [seenAt(6, 1000 + SKEW + 1, "L")]), /neither its call's own nor expired/, "an observation of another version prunes nothing");
+  // a link leaves only with every recording expired, the caller's own included
+  assert.throws(() => keepsWakes(7, [on], [], [seenAt(7, 10, "other")], ["r"]), /may still reach/);
 });
 
 test("the list's three writes as pure functions: a recording before a set (at most AGENT_WAKE_ITEMS_MAX links and recordings), a call's own write takes off its own id only, a settling write keeps the hook's link and what may still land and prunes what has expired", () => {
@@ -57,6 +74,9 @@ test("the list's three writes as pure functions: a recording before a set (at mo
   assert.ok(full[0].hooks.reduce((n, h) => n + 1 + h.recs.length, 0) <= AGENT_WAKE_ITEMS_MAX);
   assert.equal(wakeRecord(full, "lima", "tok-a", "new", { id: "z", deadline: 1 }, AGENT_WAKE_ITEMS_MAX), null, "full: not recorded");
   assert.equal(wakeRecord([{ ...entry(null), state: "refused" }], "lima", "tok-a", "L", { id: "z", deadline: 1 }, AGENT_WAKE_ITEMS_MAX), null, "a refused entry is not recorded on");
+  // a link longer than AGENT_WAKE_LINK_MAX is never recorded
+  assert.ok(wakeRecord([entry(null)], "lima", "tok-a", "m".repeat(AGENT_WAKE_LINK_MAX), { id: "z", deadline: 1 }, AGENT_WAKE_ITEMS_MAX));
+  assert.equal(wakeRecord([entry(null)], "lima", "tok-a", "m".repeat(AGENT_WAKE_LINK_MAX + 1), { id: "z", deadline: 1 }, AGENT_WAKE_ITEMS_MAX), null);
   // a settling write: the hook's link stays, a link with a recording still to land stays (its expired ones pruned)
   const e = entry([{ link: "on", recs: [{ id: "old", deadline: 10 }] }, { link: "gone", recs: [] }, { link: "late", recs: [{ id: "x", deadline: 10 }, { id: "y", deadline: 9000 }] }]);
   assert.deepEqual(wakeLinksAfter(e, seenAt(7, 10 + SKEW + 1, "on")), [{ link: "on", recs: [] }, { link: "late", recs: [{ id: "y", deadline: 9000 }] }]);
@@ -80,7 +100,7 @@ function wakeModel(regs, takeOffs, ticks) {
   const init = { T: 0, ticks: 0, hook: null, ver: 0, rooms: [entry(null)], r: regs.map(() => ({ pc: "rec" })), o: takeOffs.map(() => ({ pc: "read", tries: 0 })) };
   const seen = new Set();
   let states = 0, broken = null;
-  const write = (s, next, obs) => { keepsWakes(s.ver, s.rooms, next, obs); return { ...s, rooms: next, ver: s.ver + 1 }; };
+  const write = (s, next, obs, own = []) => { keepsWakes(s.ver, s.rooms, next, obs, own); return { ...s, rooms: next, ver: s.ver + 1 }; };
   const step = (s, path) => {
     if (broken) return;
     const key = JSON.stringify(s);
@@ -106,7 +126,7 @@ function wakeModel(regs, takeOffs, ticks) {
         step(set(s, { pc: "done" }), path.concat(g.id + ".stopped"));
       } else if (me.pc === "own") {
         const next = me.answered ? wakeAnswered(s.rooms, "lima", "tok-a", g.link, g.id) : s.rooms;
-        const w = write(s, next, []);
+        const w = write(s, next, [], me.answered ? [g.id] : []);
         step(set(w, { pc: me.answered ? "look" : "done", v: w.ver }), path.concat(g.id + ".own"));
         step(set(s, { pc: "done" }), path.concat(g.id + ".stopped-before-own"));
       } else if (me.pc === "look") {

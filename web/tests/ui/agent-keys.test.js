@@ -568,7 +568,7 @@ async function worker() {
     await page.waitForSelector('#keyOffDlg[open]', { timeout: 3000 });
     await page.click('#keyOffYes');
     await page.waitForSelector('#keyOffDlg [role=alert]', { timeout: 5000 });
-    must((await text(page, '#keyOffDlg [role=alert]')) === 'family-trip may still be reached by a Muse registration through this key that has not answered yet, so it is still on this key as it was. Try again in 12 seconds.', await text(page, '#keyOffDlg [role=alert]'));
+    must((await text(page, '#keyOffDlg [role=alert]')) === 'family-trip may still be reached by a Muse registration through this key whose outcome there is not on the key\'s record yet, so it is still on this key as it was. Try again in 12 seconds.', await text(page, '#keyOffDlg [role=alert]'));
     must(await page.$eval('#keyOffDlg', (d) => d.open) && !!(await page.$('#keyHeldRooms li[data-room="family-trip"]')), 'the dialog stays open, the room on the list');
   });
   await scenario('keys-takeoff-done', { rooms: MINE, api: { info: async (S) => ({ body: S.removed ? { ...INFO, rooms: INFO.rooms.slice(1) } : INFO }), remove: async (body, S) => { S.removed = true; return { body: { room: body.room, removed: true, muse_wake_removed: true, note: 'x' } }; } } }, async (page, S) => {
@@ -648,7 +648,7 @@ async function worker() {
     await paste(page, KEY);
     await page.waitForSelector('#keyFinish', { timeout: 5000 });
     must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
-    must((await text(page, '#keyFinish')) === 'If you disconnected this key and the page said some rooms did not confirm their Muse wakes were off, this turns them off now; it changes nothing for a key that was mistyped or is fully disconnected. Turn off its Muse wakes', await text(page, '#keyFinish'));
+    must((await text(page, '#keyFinish')) === 'If you disconnected this key and the page said some rooms did not confirm their Muse wakes were off, this tries again to turn them off (some may still not confirm); it changes nothing for a key that was mistyped or is fully disconnected. Try its Muse wakes again', await text(page, '#keyFinish'));
     must(!S.calls.some((c) => c.m === 'DELETE'), 'nothing sent until asked');
   }, '#keyHeld');
   await state('refused-key-done', { rooms: MINE, api: { ...REFUSED_KEY, drop: async (S) => { S.drops = (S.drops || 0) + 1; await new Promise((r) => setTimeout(r, 400)); return { body: { deleted: true, rooms: ['family-trip'], muse_wakes_removed: ['family-trip'], muse_wakes_left: [], note: W.dropNote([]) } }; } } }, async (page, S) => {

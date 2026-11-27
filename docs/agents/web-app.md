@@ -138,7 +138,7 @@ Front-end conventions.
   wake is left or the key's record is gone. A well-formed key that Open
   answers `agent_key_invalid` for (a disconnected key whose record still
   holds rooms is refused so, as is a mistyped one) gets one more action
-  beside the refusal: "Turn off its Muse wakes", which sends that DELETE,
+  beside the refusal: "Try its Muse wakes again", which sends that DELETE,
   says it is working while it runs (it may wait for a registration still
   running), shows the disconnect's result, and says nothing was turned off
   when the answer is the refusal again. Nothing is stored on the

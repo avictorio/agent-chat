@@ -815,10 +815,10 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
       ) : null}
       {refused && !held ? (
         <p className="hint" id="keyFinish">
-          If you disconnected this key and the page said some rooms did not confirm their Muse wakes were off, this turns them off now; it
-          changes nothing for a key that was mistyped or is fully disconnected.{" "}
+          If you disconnected this key and the page said some rooms did not confirm their Muse wakes were off, this tries again to turn
+          them off (some may still not confirm); it changes nothing for a key that was mistyped or is fully disconnected.{" "}
           <LinkButton type="button" id="keyFinishGo" disabled={busy} onClick={() => void finish()}>
-            Turn off its Muse wakes
+            Try its Muse wakes again
           </LinkButton>
         </p>
       ) : null}

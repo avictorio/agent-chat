@@ -68,7 +68,10 @@ Playwright); `tests/fixtures/` holds the files they share.
   deadline and one millisecond after), a refused first registration and
   its tidy, a take-off and a disconnect right after a finished
   registration (no wait), an outstanding recording at the skew margin's
-  edge, a settling write that loses its compare-and-set and looks again,
+  edge, a registration whose own write never goes through, a set whose
+  answer is lost (after and before it ran), a link longer than a key
+  records, two DELETEs of one key at once, a settling write that loses
+  its compare-and-set and looks again,
   the two clocks seconds apart either way, an answer with no clock, the
   bound, an older room whose invites' names fold alike and that room put
   back on the key by each of the three adds, the cut key (refused
@@ -92,7 +95,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   alike, a set's deadline kept by the room's clock and that clock in
   every answer, the drop saying which link is on after it), the record's
   guard, its three writes as pure functions and a bounded exhaustive
-  model over them (`agent-wakes`: two registrations of one link or two,
+  model over them (`agent-wakes`: the guard refusing a write that drops
+  another call's recording, or prunes one not expired; two registrations
+  of one link or two,
   sets taken, refused, thrown or never run, own writes, tidies and a
   take-off in every order, lost compare-and-sets; at every state a hook
   that is on has its link recorded) and the Agent keys view's

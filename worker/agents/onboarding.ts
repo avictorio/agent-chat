@@ -210,11 +210,12 @@ export function wakeNotSettled(room: string) {
   return room + " did not confirm that the Muse wake this key set up there is off (it could not be reached, or refused), so it is still on this key and that wake may still be on. Try again shortly.";
 }
 /** Taking R off the key, or putting it back with another invite, while a
- *  registration through the key that has not answered (it still runs, or
- *  was cut short) may still set a wake there: its recording has not
- *  expired by the room's clock (lib/wakes.ts). */
+ *  set of a Muse registration through the key may still reach R: its
+ *  recording is outstanding (the registration still runs, was cut short,
+ *  its set's answer was lost, or its own write did not go through) and has
+ *  not expired by the room's clock (lib/wakes.ts). */
 export function wakeStillSetting(room: string, seconds: number) {
-  return room + " may still be reached by a Muse registration through this key that has not answered yet, so it is still on this key as it was. Try again in " + spanS(seconds) + ".";
+  return room + " may still be reached by a Muse registration through this key whose outcome there is not on the key's record yet, so it is still on this key as it was. Try again in " + spanS(seconds) + ".";
 }
 /** Taking off a room that refused the key's invite: no seat is claimed;
  *  wake: the Muse wake the key set up there was turned off with it. */
@@ -222,6 +223,17 @@ export function removedRefusedNote(room: string, wake: boolean) {
   return wake
     ? "The key forgets " + room + ", which no longer takes its invite, and the Muse wake this key set up there is off."
     : "The key forgets " + room + ", which no longer takes its invite: nothing else changes there.";
+}
+/** A room whose set muse_register sent and whose answer was lost (the call
+ *  threw): the wake may be on there or not, and the key keeps it on its
+ *  record either way. */
+export function wakeLost(room: string) {
+  return room + " did not answer the registration, so its Muse wake may be on there or not: this key keeps it on its record, so taking " + room + " off the key or disconnecting the key turns it off either way. To be sure it is on, register " + room + " again with a new code from the gadget, since this one was used.";
+}
+/** A room muse_register did not record or set because the code's Muse link
+ *  is not one a key records (longer than AGENT_WAKE_LINK_MAX). */
+export function wakeLinkUnusable(room: string) {
+  return "The link to your person's Muse that this code gave could not be used through your key, so nothing was set in " + room + ". The code was used: ask your person to connect the gadget again for a new one.";
 }
 /** A room muse_register did not register this time, and why; spent: the
  *  gadget's code was claimed, so registering again needs a new one. */
