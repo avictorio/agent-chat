@@ -343,15 +343,17 @@ docs.txt section that owns its routes, caps and formats.
   as a pending delete). A lobby with its seat goes by the decline
   (`gameDecline`: "... is off - NAME declined the seat."), one it
   created without a seat by its creator's cancel (`gameCancel` with
-  `announce`: "... is off - NAME, who created it, cancelled it."), each
-  in its own path's step; no line says the member left. Each path
-  settles the lobby's clock first (`advanceLobby`), so a lobby past its
-  deadline is called off as expired and the path changes nothing more.
-  Left open, a lobby with its seat could start with a player who is
-  gone, who loses every turn on the clock, and one it created would lose
-  the member who set it up and could cancel it. `revoke()` drops push
-  rows, filed by `nameKey`, only when no active invite shares that key,
-  for the same pair. Storage comes after (`mediaDelete`;
+  `announce`: "... is off - NAME, who created it, cancelled it.", the
+  name as the match stores its creator), all inside the leave's one
+  step; no line says the member left. Each path settles the lobby's
+  clock first (`advanceLobby`), so a lobby past its deadline is called
+  off as expired and the path changes nothing more. Left open, a lobby
+  with its seat could start with a player who is gone, who loses every
+  turn on the clock, and one it created would be left with no member
+  who can cancel it. `revoke()` drops push rows, filed by `nameKey`,
+  only when no active invite shares that key (the same legacy pair of
+  names that guards the claims and lobbies above). Storage comes after
+  (`mediaDelete`;
   `invalidateSpeakCache` only while `alive(gen)`, since it writes rows;
   in the route `leaveAfter`: `cartesiaDelete` then `voiceDelDone`), each
   failure logged, none undoing the leave. Signatures, messages, files and

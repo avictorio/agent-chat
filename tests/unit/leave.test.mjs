@@ -313,6 +313,88 @@ test("an owner's revoke calls no lobby off: only the member's own leave does", a
   assert.equal(h.one("SELECT COUNT(*) AS n FROM m WHERE sender = 'Referee'").n, 0);
 });
 
+const refereeLines = (h, after = 0) => h.all("SELECT text FROM m WHERE id > ? AND sender = 'Referee' ORDER BY id", after).map((x) => x.text);
+const lastId = (h) => h.one("SELECT COALESCE(MAX(id), 0) AS n FROM m").n;
+
+test("a match that is running, finished or already called off is left as it is, the running one it created without a seat included", async () => {
+  const h = makeRoom();
+  for (const n of ["Ada", "Bea", "Cy"]) h.member(n);
+  // running, created by the leaver with no seat of its own: the one kind the creator's cancel would reach
+  const made = (await h.room.createGame("Ada", ["Bea", "Cy"], { game: "duel" }, R)).game.id;
+  await h.room.gameAccept(made, "Bea", R);
+  assert.equal((await h.room.gameAccept(made, "Cy", R)).game.status, "running");
+  // running, with its seat
+  const plays = (await h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R)).game.id;
+  assert.equal((await h.room.gameAccept(plays, "Ada", R)).game.status, "running");
+  // called off already: one it cancelled, one it declined
+  const cancelled = (await h.room.createGame("Ada", ["Bea", "Cy"], { game: "duel" }, R)).game.id;
+  await h.room.gameCancel(cancelled, "Ada", false, R);
+  const declined = (await h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R)).game.id;
+  await h.room.gameDecline(declined, "Ada", R);
+  const ids = [made, plays, cancelled, declined];
+  const was = ids.map((id) => [h.room.gameRow(id).status, h.room.gameRow(id).st.rev]);
+  const before = lastId(h);
+  assert.equal((await h.room.leave("tok-Ada", R, false)).ok, true);
+  assert.deepEqual(ids.map((id) => [h.room.gameRow(id).status, h.room.gameRow(id).st.rev]), was);
+  assert.deepEqual(was.map((x) => x[0]), ["running", "running", "cancelled", "cancelled"]);
+  assert.deepEqual(refereeLines(h, before), [], "no line for a match the leave leaves alone");
+});
+
+test("the lobbies are called off in the leave's own step: each is off and its line posted before the leave first waits", async () => {
+  const h = makeRoom();
+  for (const n of ["Ada", "Bea", "Cy"]) h.member(n);
+  const ids = [];
+  for (const [, make] of LOBBY_KINDS) ids.push((await make(h)).game.id);
+  const before = lastId(h);
+  const leaving = h.room.leave("tok-Ada", R, false);
+  // nothing has been awaited: what another call to the room would find now
+  assert.deepEqual(ids.map((id) => h.room.gameRow(id).status), ["cancelled", "cancelled", "cancelled", "cancelled"]);
+  assert.equal(refereeLines(h, before).length, 4);
+  assert.equal((await leaving).ok, true);
+  assert.equal(refereeLines(h, before).length, 4, "and nothing more afterwards");
+});
+
+test("a call-off that throws stops neither the leave nor the other call-offs", async () => {
+  const h = makeRoom();
+  for (const n of ["Ada", "Bea", "Cy"]) h.member(n);
+  const a = (await h.room.createGame("Ada", ["Bea", "Cy"], { game: "duel" }, R)).game.id;
+  const b = (await h.room.createGame("Bea", ["Bea", "Ada"], { game: "duel" }, R)).game.id;
+  const real = h.room.postSystem;
+  let calls = 0;
+  h.room.postSystem = function (...args) { if (calls++ === 0) throw new Error("the first line fails"); return real.apply(this, args); };
+  const warned = [];
+  const warn = console.warn, error = console.error;
+  console.warn = (...x) => warned.push(x.join(" "));
+  console.error = (...x) => warned.push(x.join(" "));
+  const before = lastId(h);
+  let r;
+  try { r = await h.room.leave("tok-Ada", R, false); } finally { console.warn = warn; console.error = error; h.room.postSystem = real; }
+  assert.equal(r.ok, true);
+  assert.ok(inv(h, "Ada").revoked && inv(h, "Ada").left_ts, "the leave is complete");
+  assert.deepEqual([h.room.gameRow(a).status, h.room.gameRow(b).status], ["cancelled", "cancelled"]);
+  assert.deepEqual(refereeLines(h, before), ["Duel match #" + b + " is off - Ada declined the seat."], "the other lobby's line is posted");
+  assert.ok(warned.some((w) => w.includes("leave.lobby")), "the failure is logged: " + JSON.stringify(warned.slice(0, 2)));
+});
+
+test("a cancel through the API posts no Referee line; the creator's line names the creator as the match stores it, once", async () => {
+  const h = makeRoom();
+  for (const n of ["Ada", "Bea", "Cy"]) h.member(n);
+  const byCreator = (await h.room.createGame("Ada", ["Bea", "Cy"], { game: "duel" }, R)).game.id;
+  const byOwner = (await h.room.createGame("Ada", ["Bea", "Cy"], { game: "duel" }, R)).game.id;
+  const before = lastId(h);
+  // as the route and the MCP tool call it: no announce
+  assert.equal((await h.room.gameCancel(byCreator, "Ada", false, R, false)).status, 200);
+  assert.equal((await h.room.gameCancel(byOwner, null, true, R, false)).status, 200);
+  assert.deepEqual(refereeLines(h, before), []);
+  // a leaver whose name is spelled otherwise than the match's creator: the line says the creator's
+  const stored = (await h.room.createGame("ADA", ["Bea", "Cy"], { game: "duel" }, R)).game;
+  assert.equal(stored.created_by, "ADA");
+  assert.equal((await h.room.leave("tok-Ada", R, false)).ok, true);
+  assert.deepEqual(refereeLines(h, before), ["Duel match #" + stored.id + " is off - ADA, who created it, cancelled it."]);
+  await h.room.gameCancel(stored.id, "Ada", false, R, false, true);
+  assert.equal(refereeLines(h, before).length, 1, "a match already called off gets no second line");
+});
+
 test("its push registrations, hook and upload links go", async () => {
   const h = makeRoom();
   h.member("Ada");

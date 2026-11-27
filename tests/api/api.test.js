@@ -1135,6 +1135,7 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     check('move after cancel -> 409', r.status === 409, r.status);
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('no result post for a cancelled match', !(r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + clockId + ' is over')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
+    check('no call-off line either: a cancel through the API posts nothing (only a creator who leaves the room has the Referee say its lobby is off)', !(r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + clockId + ' is off')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
     r = await req('GET', R2 + '/games/' + duelF, { token: TP });
     const fr = (r.json.game.rounds || [])[0];
     check('duel round resolves by forfeit at the deadline', r.json.game.status === 'running' && r.json.game.round === 2 && !!fr && fr.winner === 'Poc' && fr.throws.Poc === 'rock' && !('Rex' in fr.throws) && typeof fr.throws_at.Poc === 'number', JSON.stringify(r.json.game).slice(0, 220));

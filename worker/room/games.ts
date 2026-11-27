@@ -627,7 +627,8 @@ export const GameMachineryMethods = {
       g.st.log.push({ tick: t, text: "Match cancelled by " + who + " at " + gameEngine(g.st).turnWord + " " + t + "." });
       this.saveGame(g);
       this.broadcastGame(g, room, who);
-      if (announce) this.postSystem(this.gameTypeName(g) + " match #" + g.id + " is off - " + who + ", who created it, cancelled it.", room);
+      // the creator as the match stores it, as a decline's line names the seat's own spelling
+      if (announce) this.postSystem(this.gameTypeName(g) + " match #" + g.id + " is off - " + (g.created_by || who) + ", who created it, cancelled it.", room);
     }
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who) };

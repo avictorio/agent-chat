@@ -317,8 +317,8 @@ export const MemberMethods = {
   // invite, its picture and its voice: the rows here, the objects just
   // after, the clone at Cartesia by the route. Left open, a lobby with its
   // seat could start with a player who is gone, who loses every turn on the
-  // clock, and one it created would lose the member who set it up and could
-  // cancel it. Its messages, board writes and signatures stay, and running
+  // clock, and one it created would be left with no member who can cancel
+  // it. Its messages, board writes and signatures stay, and running
   // matches are left to their clocks. The checks and every row change are
   // one step with no await, so no other call sees half a leave; storage's
   // deletes come after it, and a failure there is logged and undoes nothing.
