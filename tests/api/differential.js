@@ -1,9 +1,13 @@
 // The differential check: what every existing address answers, byte for
 // byte, on this checkout and on an earlier one. It starts two local
 // servers, each with its own checkout's tests/api/server.js (its ROOT is
-// the checkout the file sits in), sends both the same fixed list of
-// requests in the same order (the room's routes and MCP endpoint, the agent
-// key's routes and address in each credential state, the page shell), and
+// the checkout the file sits in), and one fake Muse both bridges call,
+// sends both the same fixed list of requests in the same order (the room's
+// routes and MCP endpoint, a Muse registration with room tokens, the agent
+// key's routes and address in each credential state, the page shell),
+// checks on both sides that each set-up call did what the list assumes (a
+// room made, an invite made, a key made, a gadget linked), so two
+// identical refusals cannot pass for a match, and
 // compares each answer's status, content type, headers (all but those that
 // differ per connection) and body, with what differs per run masked:
 // tokens and keys, timestamps (in milliseconds, and ISO times with
@@ -15,7 +19,8 @@
 // disconnect's new fields and the agent catalog's version, digest and new
 // tool taken out (ADDED_SECTIONS, CHANGED_SECTIONS, EXPECTED_DOC_EDITS,
 // EXPECTED_SENTENCE_EDITS and agentMcpMasked below: a change that edits
-// those on purpose lists its edits there); the app shell's
+// those on purpose lists its edits there), and a note names each part
+// left out wherever the two copies differ there; the app shell's
 // Content-Security-Policy may differ only by CSP_ADDED, and a path this
 // checkout adds (NEW_PATHS) must have been the other's unknown-path 404.
 // Everything else must be identical.
@@ -46,8 +51,8 @@ const CHANGED_SECTIONS = ['AGENT KEYS (ONE MCP SERVER FOR ALL YOUR ROOMS)'];
  *  other serves], filled with the origin and the limits as served (fill). */
 const EXPECTED_DOC_EDITS = [
   ['      VOICES), POST /api/agents and the /api/agent routes (AGENT KEYS), POST /api/agents/invite\n      and POST /api/agent/rooms/invite (a person inviting an agent onto a key with their own\n      invite), muse_register on the agent key\'s address, and POST .../leave and MCP leave_room\n      (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.', '      VOICES), POST /api/agents and the /api/agent routes (AGENT KEYS), and POST .../leave and MCP\n      leave_room (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.'],
-  ['    not_person_invite\n                     403  an agent\'s invite offered as the inviter of an agent key\'s seat\n    seat_in_use      409  the agent seat of that name you invited is already in use: reuse "any"\n                          takes it (AGENT KEYS)\n', ''],
-  ['                          time, or a room could not be reached to turn off the Muse wake your key\n                          set up there; wait the Retry-After seconds and send it again', '                          time; wait the Retry-After seconds and send it again'],
+  ['    not_person_invite\n                     403  an invite the room stores as an agent\'s (or with no kind) offered as the\n                          inviter of an agent key\'s seat\n    seat_in_use      409  the agent seat of that name you invited is already in use: reuse "any"\n                          takes it (AGENT KEYS)\n', ''],
+  ['                          time, or a room has not confirmed that the Muse wake your key set up\n                          there is off, or a registration through your key still runs there;\n                          wait the Retry-After seconds and send it again', '                          time; wait the Retry-After seconds and send it again'],
   ['                          using it is all it takes); the call did not open it. muse_register:\n                          a room you have not joined yet, skipped', '                          using it is all it takes); the call did not open it'],
   ['  agent key, call muse_register at {{origin}}/api/mcp instead (AGENT KEYS): it needs no room\n  token. With your room tokens:', '  agent key, keep your room tokens for this call:'],
   ['AGENT KEYS at {{origin}}/api. Your person can also make one for you on the site\'s home page.', 'AGENT KEYS at {{origin}}/api.'],
@@ -61,6 +66,7 @@ const EXPECTED_SENTENCE_EDITS = [
   ['Tell your person; a new key can be made from your agent invites, or by your person on the site\'s home page.', 'Tell your person; a new key can be made from your agent invites.'],
   ['(the watcher\'s rooms.txt, a webhook; a Muse wake needs none: muse_register)', '(the watcher\'s rooms.txt, a webhook, POST /api/muse/hooks)'],
   ['This key works nowhere now, and the Muse wakes it set up are off. Every seat stays', 'This key works nowhere now. Every seat stays'],
+  ['Every seat stays as it was: you are still a member of each of these rooms that still takes your invite,', 'Every seat stays: you are still a member of these rooms,'],
   ['every tool but list_rooms, whats_waiting, add_room, remove_room and muse_register takes room', 'every tool but list_rooms, whats_waiting, add_room and remove_room takes room'],
   ['never join a room, nor do leave_room and muse_register;', 'never join a room, nor does leave_room;'],
   ['{{origin}}/api/agents, and a person can make one for it on the site\'s home page, under Agent keys (AGENT KEYS at {{origin}}/api).', '{{origin}}/api/agents (AGENT KEYS at {{origin}}/api).'],
@@ -94,10 +100,15 @@ function agentMcpMasked(text, mine) {
   return JSON.stringify(j);
 }
 
-/** One run of the fixed list against a server: each request's label and answer. */
-async function scenario(base, owner, suf) {
+/** One run of the fixed list against a server: each request's label and
+ *  answer, and the set-up calls that did not do what the list assumes. */
+async function scenario(srv, muse, suf) {
+  const base = srv.base, owner = srv.owner;
   const out = [];
   const tokens = {};
+  const setup = [];
+  /** a set-up call must have done what the rest of the list assumes */
+  const must = (label, ok) => { if (!ok) setup.push(label); };
   const send = async (label, method, p, o = {}) => {
     const headers = Object.assign({}, o.headers || {});
     if (o.owner) headers['X-Owner-Key'] = owner;
@@ -114,8 +125,8 @@ async function scenario(base, owner, suf) {
     return { status: r.status, json, text };
   };
   const room = 'difftest-' + suf, R = '/api/rooms/' + room;
-  await send('create room', 'POST', R, { owner: true });
-  const mk = async (name, kind) => { const r = await send('invite ' + name, 'POST', R + '/invites', { owner: true, json: { name, kind } }); tokens[name] = r.json.token; return r.json.token; };
+  must('create room', (await send('create room', 'POST', R, { owner: true })).status === 201);
+  const mk = async (name, kind) => { const r = await send('invite ' + name, 'POST', R + '/invites', { owner: true, json: { name, kind } }); must('invite ' + name, r.status === 201 && !!(r.json && r.json.token)); tokens[name] = r.json.token; return r.json.token; };
   const ag = await mk('DiffAgent', 'agent'), fresh = await mk('DiffFresh', 'agent'), gone = await mk('DiffGone', 'agent'), per = await mk('DiffPerson', 'human'), leaver = await mk('DiffLeaver', 'agent');
   await send('revoke DiffGone', 'DELETE', R + '/invites/' + gone, { owner: true });
   // the start page and the looks, before and after joining
@@ -132,6 +143,17 @@ async function scenario(base, owner, suf) {
   await send('members, person', 'GET', R + '/members', { token: per });
   await send('members, owner', 'GET', R + '/members', { owner: true });
   await send('decision', 'POST', R + '/decisions', { token: per, json: { title: 'Book the hotel' } });
+  // a Muse registration with room tokens (POST /api/muse/hooks, its claim in museClaim): a gadget linked on the fake Muse
+  const { museGadget, handover } = require('./muse-hooks.js');
+  const gadget = await museGadget({ muse, SUF: suf + '-' + srv.port, sealPublicKey: srv.sealPublicKey }, handover((method, p, o) => send('muse ' + p, method, p, o), '198.51.100.9'), 'diff');
+  must('muse: a gadget linked', gadget.status === 200 && !!gadget.code && !!gadget.link);
+  tokens.museCode = gadget.code; tokens.museLink = gadget.link;
+  await send('muse hooks, a revoked token only (code not used)', 'POST', '/api/muse/hooks', { json: { code: gadget.code, rooms: [{ room, token: gone }] } });
+  const reg = await send('muse hooks, the active agent', 'POST', '/api/muse/hooks', { json: { code: gadget.code, routing: 'main', rooms: [{ room, token: ag }, { room, token: gone }] } });
+  must('muse: registered', reg.status === 200 && !!reg.json && reg.json.claimed === true);
+  await send('muse hooks, the code again', 'POST', '/api/muse/hooks', { json: { code: gadget.code, rooms: [{ room, token: ag }] } });
+  await send('muse hooks, a made-up code', 'POST', '/api/muse/hooks', { json: { code: 'not-a-code-of-any-gadget', rooms: [{ room, token: ag }] } });
+  await send('muse hook, the agent\'s own view', 'GET', R + '/muse-hook', { token: ag });
   // the per-room MCP endpoint: every kind of request, in each credential state
   const NEW = '2026-07-28', V = 'io.modelcontextprotocol/protocolVersion', C = 'io.modelcontextprotocol/clientCapabilities';
   const legacy = (method, params, id) => ({ jsonrpc: '2.0', id: id === undefined ? 1 : id, method, params: params || {} });
@@ -185,15 +207,17 @@ async function scenario(base, owner, suf) {
   await send('page /muse-terms', 'GET', '/muse-terms');
   // the agent key's routes and address, in each credential state
   const room2 = 'difftest2-' + suf, R2 = '/api/rooms/' + room2;
-  await send('agent: create room 2', 'POST', R2, { owner: true });
+  must('agent: create room 2', (await send('agent: create room 2', 'POST', R2, { owner: true })).status === 201);
   const k1 = (await send('agent: invite DiffKeyed', 'POST', R + '/invites', { owner: true, json: { name: 'DiffKeyed', kind: 'agent' } })).json.token;
   const k2 = (await send('agent: invite DiffKeyed 2', 'POST', R2 + '/invites', { owner: true, json: { name: 'DiffKeyed', kind: 'agent' } })).json.token;
   const k3 = (await send('agent: invite DiffKeyed2', 'POST', R2 + '/invites', { owner: true, json: { name: 'DiffKeyed2', kind: 'agent' } })).json.token;
+  must('agent: three agent invites', !!k1 && !!k2 && !!k3);
   tokens.DiffKeyed = k1; tokens.DiffKeyed2room = k2; tokens.DiffKeyed2 = k3;
   const net = { 'CF-Connecting-IP': '10.99.0.1' };
   await send('agent POST /api/agents, refused (a person\'s invite)', 'POST', '/api/agents', { json: { rooms: [{ room, token: per }] }, headers: net });
   const made = await send('agent POST /api/agents', 'POST', '/api/agents', { json: { rooms: [{ room, token: k1 }] }, headers: net });
   const KEY = (made.json || {}).key || '';
+  must('agent: a key made', made.status === 201 && /^\.ac1\./.test(KEY));
   tokens.KEY = KEY;
   const kh = { Authorization: 'Bearer ' + KEY };
   await send('agent GET /api/agent', 'GET', '/api/agent', { headers: kh });
@@ -201,7 +225,7 @@ async function scenario(base, owner, suf) {
   await send('agent GET /api/agent, no key', 'GET', '/api/agent');
   await send('agent GET /api/agent, a room token', 'GET', '/api/agent', { headers: { Authorization: 'Bearer ' + k1 } });
   await send('agent GET /api/agent, a wrong key', 'GET', '/api/agent', { headers: { Authorization: 'Bearer .ac1.' + 'A'.repeat(22) + '.' + 'A'.repeat(43) } });
-  await send('agent POST /api/agent/rooms', 'POST', '/api/agent/rooms', { headers: kh, json: { rooms: [{ room: room2, token: k2 }] } });
+  must('agent: a room added', (await send('agent POST /api/agent/rooms', 'POST', '/api/agent/rooms', { headers: kh, json: { rooms: [{ room: room2, token: k2 }] } })).status === 201);
   await send('agent POST /api/agent/rooms, held', 'POST', '/api/agent/rooms', { headers: kh, json: { rooms: [{ room: room2, token: k2 }] } });
   const acreds = [['a key', kh], ['no key', {}], ['a room token', { Authorization: 'Bearer ' + k1 }], ['a wrong key', { Authorization: 'Bearer .ac1.' + 'B'.repeat(22) + '.' + 'B'.repeat(43) }]];
   for (const [what, h] of acreds) {
@@ -218,7 +242,7 @@ async function scenario(base, owner, suf) {
   await send('agent POST /api/agent/rooms/remove, not held', 'POST', '/api/agent/rooms/remove', { headers: kh, json: { room: room2 } });
   await send('new POST /api/agents/invite', 'POST', '/api/agents/invite', { json: { name: 'DiffNew', rooms: [{ room, inviter_token: per }], check: true }, headers: net });
   await send('new POST /api/agent/rooms/invite', 'POST', '/api/agent/rooms/invite', { headers: kh, json: { name: 'DiffNew', rooms: [{ room: room2, inviter_token: per }], check: true } });
-  await send('agent DELETE /api/agent', 'DELETE', '/api/agent', { headers: kh });
+  must('agent: disconnected', (await send('agent DELETE /api/agent', 'DELETE', '/api/agent', { headers: kh })).status === 200);
   await send('agent GET /api/agent, disconnected', 'GET', '/api/agent', { headers: kh });
   await send('agent: delete invites 2', 'DELETE', R2 + '/invites', { owner: true });
   await send('agent: delete room 2', 'DELETE', R2 + '?confirm=' + room2, { owner: true });
@@ -233,7 +257,7 @@ async function scenario(base, owner, suf) {
   await send('mcp, no such room', 'POST', '/api/rooms/difftest-none-' + suf + '/mcp', { token: ag, json: legacy('initialize') });
   await send('delete invites', 'DELETE', R + '/invites', { owner: true });
   await send('delete room', 'DELETE', R + '?confirm=' + room, { owner: true });
-  return { out, tokens };
+  return { out, tokens, setup };
 }
 
 /** An answer's body with what differs per run masked. */
@@ -258,13 +282,21 @@ function masked(text, tokens) {
   const LIM = await import('../../worker/limits.ts');
   const mine = require('./server.js');
   const theirs = require(path.resolve(OTHER, 'tests', 'api', 'server.js'));
-  const a = await theirs.start();
-  const b = await mine.start();
+  // one fake Muse for both bridges (a gadget's account is its own per server)
+  const muse = await (await import('./fake-muse.mjs')).startFakeMuse();
+  const a = await theirs.start({ museOrigin: muse.url });
+  const b = await mine.start({ museOrigin: muse.url });
   let diffs = 0, compared = 0, cspChanged = 0;
+  /** the parts left out of the compare where the copies differ: part -> the answers' labels */
+  const left = new Map();
+  const leftOut = (part, label) => { if (!left.has(part)) left.set(part, []); left.get(part).push(label); };
   try {
     const suf = Date.now().toString(36);
-    const ra = await scenario(a.base, a.owner, suf);
-    const rb = await scenario(b.base, b.owner, suf);
+    const ra = await scenario(a, muse, suf);
+    const rb = await scenario(b, muse, suf);
+    for (const [side, r] of [['the earlier checkout', ra], ['this checkout', rb]]) {
+      if (r.setup.length) { console.log('FAIL on ' + side + ', set-up calls did not do what the list assumes: ' + r.setup.join('; ')); process.exit(1); }
+    }
     // the served origin, to fill the expected edits
     const origin = String((JSON.parse(rb.out.find((x) => x.label === '/api/changes').text).url || '')).replace(/\/api\/changes$/, '');
     const fill = (s) => s.replace(/\{\{origin\}\}/g, origin).replace(/\{\{MUSE_BATCH_MAX\}\}/g, String(LIM.MUSE_BATCH_MAX));
@@ -279,27 +311,42 @@ function masked(text, tokens) {
         continue;
       }
       // a section runs to the next line that starts at the margin (its body is indented)
-      const cut = (t, head) => {
+      const sectionOf = (t, head) => {
         const at = t.indexOf('\n' + head + '\n');
-        if (at < 0) return t;
+        if (at < 0) return '';
         const next = t.slice(at + 1).search(/\n(?=[^ \n])/);
-        return t.slice(0, at) + (next < 0 ? '' : t.slice(at + 1 + next));
+        return next < 0 ? t.slice(at) : t.slice(at, at + 1 + next);
       };
+      const cut = (t, head) => { const sec = sectionOf(t, head); return sec ? t.replace(sec, '') : t; };
       if (y.label === '/api') {
-        for (const head of ADDED_SECTIONS) ty = cut(ty, head);
-        for (const head of CHANGED_SECTIONS) { ty = cut(ty, head); tx = cut(tx, head); }
-        for (const [now, was] of EXPECTED_DOC_EDITS) { const n = fill(now); if (ty.includes(n)) ty = ty.replace(n, fill(was)); }
+        for (const head of ADDED_SECTIONS) { if (ty.includes('\n' + head + '\n')) leftOut('the section ' + head + ', which only this checkout has', y.label); ty = cut(ty, head); }
+        for (const head of CHANGED_SECTIONS) {
+          if (sectionOf(tx, head) !== sectionOf(ty, head)) leftOut('the section ' + head + ', which this checkout rewrites', y.label);
+          ty = cut(ty, head); tx = cut(tx, head);
+        }
+        EXPECTED_DOC_EDITS.forEach(([now, was], e) => { const n = fill(now); if (ty.includes(n)) { ty = ty.replace(n, fill(was)); leftOut('docs edit ' + (e + 1) + ' (' + JSON.stringify(n.trim().slice(0, 56)) + '...)', y.label); } });
       }
       if (y.label.startsWith('agent ')) {
-        for (const [now, was] of EXPECTED_SENTENCE_EDITS) {
+        EXPECTED_SENTENCE_EDITS.forEach(([now, was], e) => {
           const n = fill(now), w = fill(was);
+          const before = ty;
           ty = ty.split(n).join(w).split(JSON.stringify(n).slice(1, -1)).join(JSON.stringify(w).slice(1, -1));
-        }
+          if (ty !== before) leftOut('changed sentence ' + (e + 1) + ' (' + JSON.stringify(n.trim().slice(0, 56)) + '...)', y.label);
+        });
         // the disconnect's two new fields
+        const before = ty;
         ty = ty.replace('"muse_wakes_removed":[],"muse_wakes_left":[],', '');
-        if (y.label.startsWith('agent mcp')) { tx = agentMcpMasked(tx, false); ty = agentMcpMasked(ty, true); }
+        if (ty !== before) leftOut('the disconnect\'s fields muse_wakes_removed and muse_wakes_left', y.label);
+        if (y.label.startsWith('agent mcp')) {
+          const mx = agentMcpMasked(tx, false), my = agentMcpMasked(ty, true);
+          if (mx !== tx || my !== ty) {
+            const raw = (t) => { try { return JSON.stringify(JSON.parse(t)); } catch { return t; } };
+            if (raw(tx) !== raw(ty)) leftOut('the agent catalog\'s version and digest, and the tool muse_register', y.label);
+          }
+          tx = mx; ty = my;
+        }
       }
-      if (y.label === '/llms.txt') for (const [now, was] of EXPECTED_DOC_EDITS) { const n = fill(now); if (ty.includes(n)) ty = ty.replace(n, fill(was)); }
+      if (y.label === '/llms.txt') EXPECTED_DOC_EDITS.forEach(([now, was], e) => { const n = fill(now); if (ty.includes(n)) { ty = ty.replace(n, fill(was)); leftOut('docs edit ' + (e + 1) + ' (' + JSON.stringify(n.trim().slice(0, 56)) + '...)', y.label); } });
       if (y.label === '/api/changes') {
         // the notices only this checkout has, left out
         const jx = JSON.parse(tx), jy = JSON.parse(ty);
@@ -332,7 +379,10 @@ function masked(text, tokens) {
   } finally {
     a.stop();
     b.stop();
+    muse.close();
   }
+  // each part left out of the compare, where the two copies differ there, and on which answers
+  for (const [part, labels] of left) console.log('note left out ' + part + ': on ' + labels.length + ' answer' + (labels.length === 1 ? '' : 's') + ' (' + labels.slice(0, 4).join('; ') + (labels.length > 4 ? '; ...' : '') + ')');
   if (cspChanged !== CSP_CHANGED.size) { diffs++; console.log('FAIL the app shell\'s policy was checked on ' + cspChanged + ' answers, not ' + CSP_CHANGED.size); }
   console.log(diffs ? 'DIFFERENTIAL: ' + diffs + ' of ' + compared + ' answers differ' : 'DIFFERENTIAL: all ' + compared + ' answers identical, headers included (masked as above; the app shell\'s policy gained only "' + CSP_ADDED.slice(2) + '" on ' + cspChanged + ' answers)');
   process.exit(diffs ? 1 : 0);

@@ -75,7 +75,9 @@ test("the five tools of the key's own: titles, arguments, hints and descriptions
   assert.deepEqual(by.muse_register.inputSchema.properties.rooms.items, { type: "string" });
   assert.ok(!("as" in by.muse_register.inputSchema.properties) && !("room" in by.muse_register.inputSchema.properties));
   assert.deepEqual(by.muse_register.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false });
-  assert.equal(by.muse_register.description, "Have your person's Muse woken by rooms on your key, with the one-time code from their Muse gadget (Agree and connect, or Add rooms): the code works once, within " + spanS(MUSE_LINK_CODE_TTL_S) + " of the tap, for the rooms you name (or every room on your key that you have joined). A room you have not joined yet is skipped: join it first, then register it with a new code. It replaces any hook you had in those rooms and joins nothing. routing is where wakes land: agent-chat (the default), main, per-room or a side chat's id. Disconnecting your key turns these wakes off.");
+  assert.equal(by.muse_register.description, "Have your person's Muse woken by rooms on your key, with the one-time code from their Muse gadget (Agree and connect, or Add rooms): the code works once, within " + spanS(MUSE_LINK_CODE_TTL_S) + " of the tap, for the rooms you name (or every room on your key that you have joined). A room you have not joined yet is skipped, and a seat your person made for you on the site starts that way: make a first call that joins the room (get_room_state with it, say), then register it, with a new code if this one was used for other rooms. It replaces any hook you had in those rooms and joins nothing. routing is where wakes land: agent-chat (the default), main, per-room or a side chat's id. Taking a room off your key, or disconnecting the key, turns the wakes it set up off.");
+  // the call it names joins, at the key's address (agentInstructions: any tool but the listed ones joins)
+  assert.ok(by.get_room_state && !["list_rooms", "whats_waiting", "add_room", "remove_room", "get_invite", "get_start_page", "leave_room", "muse_register"].includes("get_room_state"));
   assert.ok(by.muse_register.description.includes("within 30 minutes of the tap"), "the code's life from limits.ts");
   assert.ok(by.whats_waiting.description.endsWith("At most once every " + AGENT_GLANCE_GAP_S + " seconds."), "the gap from limits.ts");
   for (const n of OWN) assert.ok(/joins nothing|joins no room|Your seat stays/.test(by[n].description), n + " says what it joins");
@@ -97,7 +99,7 @@ test("every title differs, across both lists, and every tool has one", () => {
 // moves the agent's, which derives from it).
 test("the (version, digest) pairs of both catalogs are the pinned ones", () => {
   assert.deepEqual([MCP_CATALOG_VERSION, mcpCatalogBuilt().digest], ["1.38.0", "d1e0ba642e2dc5bc"]);
-  assert.deepEqual([MCP_AGENT_CATALOG_VERSION, mcpAgentCatalogBuilt().digest], ["1.1.0", "18af78e181c3b6ff"]);
+  assert.deepEqual([MCP_AGENT_CATALOG_VERSION, mcpAgentCatalogBuilt().digest], ["1.1.0", "45576f66f7ad29f2"]);
   assert.equal(mcpCatalogBuilt().tools.length, 41);
   assert.equal(mcpAgentCatalogBuilt().tools.length, 46);
 });

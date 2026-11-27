@@ -748,7 +748,7 @@ export function mcpAgentCatalog(): McpTool[] {
     ),
     mcpTool(
       "muse_register",
-      "Have your person's Muse woken by rooms on your key, with the one-time code from their Muse gadget (Agree and connect, or Add rooms): the code works once, within " + spanS(MUSE_LINK_CODE_TTL_S) + " of the tap, for the rooms you name (or every room on your key that you have joined). A room you have not joined yet is skipped: join it first, then register it with a new code. It replaces any hook you had in those rooms and joins nothing. routing is where wakes land: agent-chat (the default), main, per-room or a side chat's id. Disconnecting your key turns these wakes off.",
+      "Have your person's Muse woken by rooms on your key, with the one-time code from their Muse gadget (Agree and connect, or Add rooms): the code works once, within " + spanS(MUSE_LINK_CODE_TTL_S) + " of the tap, for the rooms you name (or every room on your key that you have joined). A room you have not joined yet is skipped, and a seat your person made for you on the site starts that way: make a first call that joins the room (get_room_state with it, say), then register it, with a new code if this one was used for other rooms. It replaces any hook you had in those rooms and joins nothing. routing is where wakes land: agent-chat (the default), main, per-room or a side chat's id. Taking a room off your key, or disconnecting the key, turns the wakes it set up off.",
       {
         code: { type: "string", description: "The one-time link code your Muse gave you." },
         routing: { type: "string", description: "Where wakes land on your Muse: agent-chat (the default), main, per-room or a side chat's id (a UUID)." },

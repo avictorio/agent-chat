@@ -13,7 +13,7 @@
 // call made. Keys and tokens are made here. Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeWorld, read, agentInvite } from "./agent-world.mjs";
+import { makeWorld, read, agentInvite, waitedBeforeWrite } from "./agent-world.mjs";
 import { agentInviteAddRoute, agentInviteCreateRoute, agentMcpRoute, agentRoute } from "../../worker/routes/agent.ts";
 import { claudeCodeLine, personKeyHandoff, personKeyNote, unusedNote } from "../../worker/agents/onboarding.ts";
 import { AGENT_KEYS_PER_DAY, AGENT_KEYS_PER_IP, AGENT_KEYS_PER_ROOM_DAY, AGENT_KEYS_WINDOW_S, AGENT_QUOTA_ROOM, AGENT_ROOMS_MAX, MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY } from "../../worker/limits.ts";
@@ -168,8 +168,8 @@ test("every inviter is looked up, in order, before any seat is planned or counte
     [{ room: "nowhere", inviter_token: "tok-123456789012345678901" }, 404, { error: "No room with that name yet. Create it from the home page.", room: "nowhere" }],
     [{ room: "lima", inviter_token: "tok-not-one-of-lima-s-xx" }, 403, { error: "Room \"lima\": This invite link isn't valid for this room.", code: "invite_invalid", room: "lima" }],
     [{ room: "oslo", inviter_token: revoked }, 403, { error: "Room \"oslo\": This invite link has been revoked. Ask whoever gave it to you for a new one.", code: "invite_revoked", room: "oslo" }],
-    [{ room: "lima", inviter_token: hank }, 403, { error: "Room \"lima\": this is an agent's invite. Only a person's own invite can invite an agent onto a key.", code: "not_person_invite", room: "lima" }],
-    [{ room: "oslo", inviter_token: "tok-nokind-000000000000" }, 403, { error: "Room \"oslo\": this is an agent's invite. Only a person's own invite can invite an agent onto a key.", code: "not_person_invite", room: "oslo" }],
+    [{ room: "lima", inviter_token: hank }, 403, { error: "Room \"lima\": this invite is stored as an agent's. Only an invite the room stores as a person's can invite an agent onto a key.", code: "not_person_invite", room: "lima" }],
+    [{ room: "oslo", inviter_token: "tok-nokind-000000000000" }, 403, { error: "Room \"oslo\": this invite is stored as an agent's. Only an invite the room stores as a person's can invite an agent onto a key.", code: "not_person_invite", room: "oslo" }],
   ];
   for (const [bad, status, want] of cases) {
     const first = bad.room === "lima" ? { room: "oslo", inviter_token: pat.oslo } : { room: "lima", inviter_token: pat.lima };
@@ -321,13 +321,17 @@ test("a refusal at a later room keeps the invites the call made, unopened, names
   clean(w, "the retry", again);
 });
 
-test("a call whose caller went away runs to its end (waitUntil); its key is nobody's, and a retry with the same name reuses its seats", async () => {
+test("a call whose caller went away runs to its end: its work is under waitUntil before its first write; its key is nobody's, and a retry with the same name reuses its seats", async () => {
   const { w, pat } = people(["lima", "oslo"]);
   const rc = w.rc("POST", "/api/agents/invite", { json: { name: "Scout", rooms: entries(pat, ["lima", "oslo"]) }, headers: { "CF-Connecting-IP": IP } });
-  // the answer is never read
-  void agentInviteCreateRoute(rc);
+  const mark = w.asked.length;
+  // the caller goes away: the answer is never read, and only work registered with waitUntil may go on
+  const gone = agentInviteCreateRoute(rc);
+  await gone;
   await Promise.all(w.pending);
-  await new Promise((r) => setTimeout(r, 20));
+  const first = waitedBeforeWrite(w, mark);
+  assert.equal(w.asked[first.first].method, "agentReserve", "the first write is the counters");
+  assert.ok(first.ok, "registered with waitUntil before the counters were taken: " + JSON.stringify({ waits: w.waits, first: first.first }));
   for (const n of ["lima", "oslo"]) assert.equal(rowsOf(w, n, "Scout").length, 1, n + ": the seat was made");
   const again = await invite(w, { name: "Scout", rooms: entries(pat, ["lima", "oslo"]) });
   assert.equal(again.status, 201);
@@ -501,4 +505,72 @@ test("POST /api/agent/rooms/invite: the most rooms counts as add_room counts, a 
   const g = (await read(agentRoute(w.rc("GET", "/api/agent", { headers: { Authorization: "Bearer " + key } })))).json;
   assert.equal(g.rooms.filter((x) => x.room === "m0").length, 1);
   assert.equal(g.rooms.find((x) => x.room === "m0").state, "held");
+});
+
+test("adding rooms: the work is under waitUntil before its first write", async () => {
+  const { w, pat } = people(["lima", "oslo"]);
+  const key = (await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]) })).json.key;
+  const mark = w.asked.length;
+  const r = await addInvite(w, key, { name: "Scout", rooms: entries(pat, ["oslo"]) });
+  assert.equal(r.status, 201, r.text);
+  const first = waitedBeforeWrite(w, mark);
+  assert.equal(w.asked[first.first].name + "." + w.asked[first.first].method, "oslo.invite", "the first write is the invite");
+  assert.ok(first.ok, "registered with waitUntil before it: " + JSON.stringify({ waits: w.waits.slice(-2), first: first.first }));
+});
+
+test("an invite whose answer was lost: a look says whether it was made (left_unused) and when the look cannot tell, the answer says one may have been (maybe_unused); never that nothing was kept", async () => {
+  // the room wrote the invite, then its answer was lost
+  {
+    const { w, pat } = people(["lima", "oslo"]);
+    const oslo = w.harness("oslo").room, real = oslo.invite.bind(oslo);
+    oslo.invite = (...a) => { real(...a); throw new Error("Network connection lost."); };
+    const r = await invite(w, { name: "Scout", rooms: entries(pat, ["lima", "oslo"]) });
+    assert.equal(r.status, 500);
+    assert.deepEqual(r.json, { error: "Room \"oslo\" could not be reached, so no key was made. Try again.", room: "oslo", left_unused: ["lima", "oslo"], note: unusedNote(["lima", "oslo"]) });
+    assert.equal(rowsOf(w, "oslo", "Scout").length, 1, "the seat the lost answer made");
+    delete oslo.invite;
+    const again = await invite(w, { name: "Scout", rooms: entries(pat, ["lima", "oslo"]) });
+    assert.deepEqual(again.json.rooms.map((x) => x.seat), ["reused", "reused"], "a retry uses it");
+  }
+  // the room wrote nothing, and its answer was lost: not named
+  {
+    const { w, pat } = people(["lima"]);
+    w.harness("lima").room.invite = () => { throw new Error("Network connection lost."); };
+    const r = await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]) });
+    assert.deepEqual(r.json, { error: "Room \"lima\" could not be reached, so no key was made. Try again.", room: "lima" });
+  }
+  // the look throws too: it cannot tell
+  {
+    const { w, pat } = people(["lima"]);
+    const lima = w.harness("lima").room, real = lima.invite.bind(lima);
+    lima.invite = (...a) => { real(...a); throw new Error("Network connection lost."); };
+    lima.members = () => { throw new Error("Network connection lost."); };
+    const r = await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]) });
+    assert.deepEqual(r.json, { error: "Room \"lima\" could not be reached, so no key was made. Try again.", room: "lima", maybe_unused: ["lima"], note: unusedNote([], ["lima"]) });
+    assert.equal(unusedNote([], ["lima"]), "An invite may have been made in lima: the room's answer was lost. Trying again with the same name uses it if so.");
+  }
+});
+
+test("a check in which no inviter passed reads no counter at all, full or not", async () => {
+  const w = makeWorld({ env: { TEST_HOOKS: "1" } });
+  const pat = agentInvite(w.room("lima"), "Pat", "human");
+  w.harness(AGENT_QUOTA_ROOM).room.setTestAgentLimits({ per_day: 1 });
+  assert.equal((await invite(w, { name: "Scout", rooms: [{ room: "lima", inviter_token: pat }] })).status, 201);
+  // the site's day is full now: a check with a made-up token, from another network, learns nothing of it
+  const mark = w.asked.length;
+  const r = await invite(w, { name: "X", rooms: [{ room: "nowhere", inviter_token: "tok-made-up-0000000000000" }], check: true }, "10.200.0.1");
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json, { ok: false, rooms: [{ room: "nowhere", name: "X", problem: { status: 404, error: "No room with that name yet. Create it from the home page." } }] });
+  assert.ok(!asked(w, mark).some((m) => m.startsWith(AGENT_QUOTA_ROOM + ".")), "no counter read: " + asked(w, mark).join(" "));
+});
+
+test("the day's retry time comes from the room's own answer", async () => {
+  const { w, pat } = people(["lima"]);
+  const lima = w.harness("lima").room, real = lima.inviteLoad.bind(lima);
+  lima.inviteLoad = (...a) => ({ ...real(...a), recent: MEMBER_INVITES_PER_DAY, retry_after: 4321 });
+  const r = await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]) });
+  assert.equal(r.status, 429);
+  assert.equal(r.headers.get("Retry-After"), "4321");
+  const c = await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]), check: true });
+  assert.equal(c.json.rooms[0].problem.code, "rate_limited");
 });

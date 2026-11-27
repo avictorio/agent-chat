@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import {
   AgentKeyClient,
   ApiError,
@@ -31,7 +32,8 @@ import { AGENT_NAME_MAX, agentNameProblem, cleanAgentName } from "./agentName";
 // list of a key's rooms. A key lives only in this view's state, never in
 // storage, a URL or the history: it goes on Done, on Close, after a
 // disconnect, when the view is left (HomeApp renders it only while it is
-// shown) and on pagehide (the parent remounts the forms). A key is one
+// shown, and switches views at once) and on pagehide (the parent remounts
+// the forms at once, before the page can be frozen). A key is one
 // password for several rooms; the device already holds the person's own
 // invites, and a key beside them in storage would put every seat on it one
 // script away. Every name and sentence from the server is rendered as text.
@@ -56,7 +58,7 @@ const CHECKING: Look = { state: "checking" };
 
 const REASON: Record<Exclude<Look["state"], "person">, string> = {
   checking: "Checking…",
-  agent: "Your invite here is an agent's, not yours.",
+  agent: "The invite this browser holds here is an agent's.",
   refused: "This browser's invite here no longer works.",
   gone: "This room no longer exists.",
   failed: "Couldn't check this room; try again.",
@@ -69,7 +71,7 @@ const NOT_KEY = "That is a room invite link or token, not an agent key.";
 const NETWORK = "Couldn't reach the site; try again.";
 
 /** A refusal's code and body, when the answer was the Worker's. */
-function bodyOf(e: unknown): { status: number; code?: string; error?: string; room?: string; left_unused?: string[]; note?: string; retry_after?: number } | null {
+function bodyOf(e: unknown): { status: number; code?: string; error?: string; room?: string; note?: string; retry_after?: number } | null {
   if (!(e instanceof ApiError)) return null;
   const b = e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : {};
   return {
@@ -77,7 +79,6 @@ function bodyOf(e: unknown): { status: number; code?: string; error?: string; ro
     code: typeof b.code === "string" ? b.code : undefined,
     error: typeof b.error === "string" ? b.error : undefined,
     room: typeof b.room === "string" ? b.room : undefined,
-    left_unused: Array.isArray(b.left_unused) ? b.left_unused.filter((x): x is string => typeof x === "string") : undefined,
     note: typeof b.note === "string" ? b.note : undefined,
     retry_after: typeof b.retry_after === "number" ? b.retry_after : undefined,
   };
@@ -281,9 +282,17 @@ function RoomPicker(props: {
                   </label>
                 ) : null}
                 {res && res.seat === "reused" && !res.opened ? (
-                  <p className="hint">Uses {res.name}'s unused invite here (invited by you). Anyone you gave that invite's link can still use it.</p>
+                  <p className="hint">
+                    Uses {res.name}'s unused invite here (invited by you). Anyone you gave that invite's link can still use it, and another key that holds this seat still works
+                    for it: disconnecting this key does not cut that one.
+                  </p>
                 ) : null}
-                {res && res.seat === "reused" && res.opened ? <p className="hint">Uses {res.name}'s seat here (already a member, invited by you).</p> : null}
+                {res && res.seat === "reused" && res.opened ? (
+                  <p className="hint">
+                    Uses {res.name}'s seat here (already a member, invited by you). Another key that holds this seat still works for it: disconnecting this key does not cut
+                    that one.
+                  </p>
+                ) : null}
                 {failed ? (
                   <p className="hint bad" role="alert">
                     {onRow(r.room, failed)}
@@ -310,6 +319,8 @@ function useSeatRun<T>(o: {
   lost: string;
   /** what did not happen, before a failure's note on the invites it left unused */
   unmade: string;
+  /** the button, as the pause before a reused seat names it */
+  button: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [say, setSay] = useState("");
@@ -318,6 +329,9 @@ function useSeatRun<T>(o: {
   const [otherErr, setOtherErr] = useState<{ room: string; text: string } | null>(null);
   // the new keys' counters are full: the button waits until their window ends
   const [waiting, setWaiting] = useState(false);
+  // the check that paused before reusing seats: the next run with the form unchanged (the same check) goes ahead
+  const [pauseFor, setPauseFor] = useState<SeatCheck | null>(null);
+  const paused = pauseFor !== null && o.form.check === pauseFor;
   const wait = (sec: number) => {
     setWaiting(true);
     window.setTimeout(() => setWaiting(false), Math.max(1, sec) * 1000);
@@ -333,15 +347,19 @@ function useSeatRun<T>(o: {
       return;
     }
     setBusy(true);
-    setSay("Checking the rooms…");
     let check: SeatCheck;
-    try {
-      check = (await o.call(got.name, got.entries, true)) as SeatCheck;
-    } catch (e) {
-      setBusy(false);
-      setSay("");
-      setAlert(keyRefusal(e));
-      return;
+    if (paused && o.form.check) check = o.form.check;
+    else {
+      setPauseFor(null);
+      setSay("Checking the rooms…");
+      try {
+        check = (await o.call(got.name, got.entries, true)) as SeatCheck;
+      } catch (e) {
+        setBusy(false);
+        setSay("");
+        setAlert(keyRefusal(e));
+        return;
+      }
     }
     if (!check.ok) {
       setBusy(false);
@@ -354,6 +372,15 @@ function useSeatRun<T>(o: {
       else setAlert("Some rooms can't take the agent as it is: each one above says why.");
       return;
     }
+    // a seat that already exists, not asked for: pause, say so, and let the next tap go ahead
+    if (!paused && reusedUnasked(check, o.form).length) {
+      setBusy(false);
+      setSay("");
+      o.setForm({ ...o.form, check, failed: null });
+      setPauseFor(check);
+      return;
+    }
+    setPauseFor(null);
     o.setForm({ ...o.form, check, failed: null });
     setSay(o.making);
     try {
@@ -376,10 +403,21 @@ function useSeatRun<T>(o: {
       }
       if (b.room && o.form.ticked.includes(b.room)) o.setForm({ ...o.form, check, failed: { room: b.room, error: b.error || "" } });
       const head = b.room && o.form.ticked.includes(b.room) ? "" : keyRefusal(e) + " ";
-      setAlert(head + (b.left_unused && b.left_unused.length && b.note ? o.unmade + " " + b.note : "Nothing was kept."));
+      // the note says which invites stay unused, or may have been made: "Nothing was kept." only when nothing was
+      setAlert(head + (b.note ? o.unmade + " " + b.note : "Nothing was kept."));
     }
   };
-  return { busy, say, alert, nameErr, otherErr, waiting, run };
+  const reuse = paused && pauseFor ? reusedUnasked(pauseFor, o.form) : [];
+  const pause = reuse.length
+    ? (reuse.length === 1 ? reuse[0] + " reuses a seat that already exists. " : "These rooms reuse a seat that already exists: " + reuse.join(", ") + ". ") +
+      "Another key that holds such a seat keeps working for it. " + o.button + " goes ahead."
+    : "";
+  return { busy, say, alert, nameErr, otherErr, waiting, run, pause };
+}
+
+/** The rooms a check would give a seat that already exists, unless the person ticked to use that seat. */
+function reusedUnasked(check: SeatCheck, form: SeatForm): string[] {
+  return check.rooms.filter((r) => r.seat === "reused" && !form.useSeat.includes(r.room)).map((r) => r.room);
 }
 
 /** The new key, shown once: the key and what to give the agent. The page
@@ -431,6 +469,11 @@ function KeyMade({ made, name, onDone, cardRef }: { made: PersonKeyMade; name: s
           </li>
         ))}
       </ul>
+      {made.rooms.some((r) => r.seat === "reused") ? (
+        <p className="hint" id="keyMadeShared">
+          An existing seat may be held by another key too: that key still works for it, and disconnecting this one does not cut it.
+        </p>
+      ) : null}
       <p className="hint" id="keyMadeNote">{made.note}</p>
       <div className="dlg-actions">
         <Button type="button" variant="primary" id="keyMadeDone" onClick={onDone}>
@@ -458,6 +501,7 @@ function MakeKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
     },
     making: "Making the key…",
     unmade: "No key was made.",
+    button: "Make key",
     lost: "Couldn't reach the site, so this page can't tell whether the key was made. If it was, it is lost: nobody can see it again. Making the key again with the same name uses the same seats.",
   });
   useEffect(() => {
@@ -517,6 +561,11 @@ function MakeKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
           {run.alert ? (
             <p className="hint bad" id="keyErr" role="alert">
               {run.alert}
+            </p>
+          ) : null}
+          {run.pause ? (
+            <p className="hint key-pause" id="keyReuse" role="status">
+              {run.pause}
             </p>
           ) : null}
           <p className="hint" id="keySay" aria-live="polite">
@@ -633,7 +682,9 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
     try {
       const d = await new AgentKeyClient(held.key).disconnect();
       dropRef.current?.close();
-      setDropped(d);
+      // the agent is a member only where a room still took the key's invite, as the key last showed it
+      const took = new Set(held.info.rooms.filter((r) => r.state === "held").map((r) => r.room));
+      setDropped({ ...d, rooms: d.rooms.filter((r) => took.has(r)) });
       clear();
     } catch (e) {
       const t = keyRefusal(e);
@@ -661,6 +712,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
     },
     making: "Adding the rooms…",
     unmade: "No room was added.",
+    button: "Add rooms",
     lost: "Couldn't reach the site, so this page can't tell whether the rooms were added. Open the key again to see; adding them again with the same name uses the same seats.",
   });
 
@@ -698,7 +750,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
             {dropped.muse_wakes_left === null
               ? " This key's record could not be read, so the Muse wakes it set up could not be turned off: Disconnect on the Muse gadget stops every wake at once."
               : dropped.muse_wakes_left.length
-                ? " These rooms could not be reached to turn off the Muse wakes this key set up: " + dropped.muse_wakes_left.join(", ") + ". Disconnect on the Muse gadget stops every wake at once."
+                ? " These rooms did not confirm that the Muse wakes this key set up there are off: " + dropped.muse_wakes_left.join(", ") + ". Disconnect on the Muse gadget stops every wake at once."
                 : ""}
           </span>
         ) : (
@@ -722,7 +774,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
                         {r.muse_wake ? (
                           <>
                             {" "}
-                            <Pill tone="muted">Wakes this agent's Muse</Pill>
+                            <Pill tone="muted">Muse wake set up with this key</Pill>
                           </>
                         ) : null}
                       </>
@@ -782,6 +834,11 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
                   {add.alert}
                 </p>
               ) : null}
+              {add.pause ? (
+                <p className="hint key-pause" id="keyAddReuse" role="status">
+                  {add.pause}
+                </p>
+              ) : null}
               <Button type="button" id="keyAdd" disabled={add.busy || busy || add.waiting || !form.name.trim() || !form.ticked.length} onClick={() => void add.run()}>
                 Add rooms
               </Button>
@@ -810,11 +867,17 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
         }}
       >
         <h3 id="keyOffTitle">Take {off ? off.room : ""} off this key?</h3>
-        <p>
-          The key forgets this room. The agent stays a member of {off ? off.room : ""}. Once it is off the key, the agent cannot leave {off ? off.room : ""} through the
-          key: to take it out of {off ? off.room : ""}, have it leave first (leave_room), or add {off ? off.room : ""} back later.
-        </p>
-        {off && off.muse_wake ? <p>The Muse wake this key set up in {off.room} is turned off.</p> : null}
+        {off && off.state !== "held" ? (
+          <p>
+            The key forgets this room, which no longer takes the key's invite ({REFUSED_WHY[off.code || ""] || off.code}). Nothing else changes there.
+          </p>
+        ) : (
+          <p>
+            The key forgets this room. The agent stays a member of {off ? off.room : ""}. Once it is off the key, the agent cannot leave {off ? off.room : ""} through the
+            key: to take it out of {off ? off.room : ""}, have it leave first (leave_room), or add {off ? off.room : ""} back later.
+          </p>
+        )}
+        {off && off.muse_wake ? <p>The Muse wake set up with this key in {off.room} is turned off.</p> : null}
         {dlgErr ? (
           <p className="forget-err" role="alert">
             {dlgErr}
@@ -843,8 +906,9 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
       >
         <h3 id="keyDropTitle">Disconnect this key everywhere?</h3>
         <p>
-          It stops working at once, in every room. The agent stays a member of each room until it leaves or the site's owner removes it; any room link it was given
-          itself still works; links it already got for an upload or a file run until they expire. The Muse wakes this key set up are turned off.
+          It stops working at once, in every room. The agent stays a member of each room that still takes this key's invite until it leaves or the site's owner removes
+          it; any room link it was given itself still works; links it already got for an upload or a file run until they expire. The Muse wakes this key set up are
+          turned off.
         </p>
         {dlgErr ? (
           <p className="forget-err" role="alert">
@@ -872,7 +936,8 @@ export function AgentKeysView({ rooms }: { rooms: DeviceRoom[] }) {
   const [gen, setGen] = useState(0);
   const openRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
-    const drop = () => setGen((g) => g + 1);
+    // at once, inside the event: a page frozen into the back-forward cache keeps no key in its DOM or state
+    const drop = () => flushSync(() => setGen((g) => g + 1));
     window.addEventListener("pagehide", drop);
     return () => window.removeEventListener("pagehide", drop);
   }, []);
@@ -881,8 +946,8 @@ export function AgentKeysView({ rooms }: { rooms: DeviceRoom[] }) {
       <h1 className="page-title">Agent keys</h1>
       <p className="lede">
         One key lets an agent use several of your rooms through one connection. Pick the rooms here: the site invites the agent into each with your invite and puts the
-        invites on the key, so the agent never holds a new seat's own link. Where it reuses a seat the agent already had, anyone you gave that invite's link can still
-        use it.
+        invites on the key, so the site never gives the agent a new seat's own link (a person in the room can still see it in the members list). Where it reuses a seat
+        the agent already had, anyone you gave that invite's link can still use it, and so can another key that holds that seat.
       </p>
       <div key={gen}>
         <MakeKey rooms={rooms} looks={looks} retry={retry} focusOpen={() => openRef.current?.focus()} />

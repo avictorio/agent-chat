@@ -57,3 +57,31 @@ test("whats_waiting on AGENT_ROOMS_MAX full rooms: its JSON under 60,000 charact
   assert.ok(text < 60000, "whats_waiting's JSON is " + text + " characters on " + AGENT_ROOMS_MAX + " rooms");
   assert.ok(sealed < 8192, "the sealed list is " + sealed + " bytes on " + AGENT_ROOMS_MAX + " rooms");
 });
+
+// The sealed list's size with every entry of a full key at the wake bound:
+// AGENT_ROOMS_MAX rooms, each name and token at its longest, each refused
+// (a code and a time besides), and each recording AGENT_WAKE_LINKS_MAX Muse
+// wakes, every link at the longest the claim takes (MUSE_CODE_MAX) and at
+// the bridge's own length. Printed, and bounded: the list goes into one
+// SQLite row and one RPC with each change, and into each call's memory.
+import { agentDataKey, agentSealRing, newAgentKey } from "../../worker/lib/agentkey.ts";
+import { AGENT_WAKE_LINKS_MAX, MUSE_CODE_MAX } from "../../worker/limits.ts";
+
+test("the sealed list of a full key with every entry at the wake bound: printed, and under 32 KB", async () => {
+  const k = newAgentKey();
+  const { dk } = await agentDataKey(k.id, k.secret);
+  const at = Date.now();
+  const sizes = {};
+  for (const [what, len] of [["the bridge's links", ("ml_" + "0".repeat(32)).length], ["the longest links", MUSE_CODE_MAX]]) {
+    const rooms = Array.from({ length: AGENT_ROOMS_MAX }, (_, i) => ({
+      room: fit("room-" + i + "-with-a-name-as-long-as-room-names-are-allowed-to-be", 64),
+      token: fit("tok" + i + "-xxxxxxxxxxxxxxxxxxxxxxxx", 24),
+      name: fit("Hank Hawthorne the Longest Named Agent", MAX_NAME),
+      added: at, state: "refused", code: "invite_revoked", at,
+      hooks: Array.from({ length: AGENT_WAKE_LINKS_MAX }, (__, j) => ({ link: fit("ml_" + i + "_" + j + "_" + "0".repeat(len), len), at: at + j, ...(j ? {} : { done: true }) })),
+    }));
+    sizes[what] = b64urlDecode(await agentSealRing(dk, k.id, 1, rooms)).length;
+  }
+  console.log("the sealed list on " + AGENT_ROOMS_MAX + " rooms with " + AGENT_WAKE_LINKS_MAX + " Muse wakes each: " + JSON.stringify(sizes) + " bytes");
+  for (const [what, n] of Object.entries(sizes)) assert.ok(n < 32768, what + ": " + n + " bytes");
+});

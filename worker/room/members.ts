@@ -173,10 +173,13 @@ export const MemberMethods = {
   // Invites this member made in the last 24 hours, and active invites overall.
   inviteLoad(name: string | null | undefined) {
     const mine = this.sql.exec<Pick<InvRow, "invited_by" | "created">>("SELECT invited_by, created FROM inv WHERE invited_by IS NOT NULL AND created > ?", Date.now() - 86400e3).toArray().filter((r) => sameName(r.invited_by, name));
+    const oldest = mine.length ? Math.min(...mine.map((r) => r.created)) : null;
     return {
       recent: mine.length,
-      // the oldest of those, which ages out first (a refusal's Retry-After)
-      oldest: mine.length ? Math.min(...mine.map((r) => r.created)) : null,
+      // the oldest of those, which ages out first
+      oldest,
+      // the seconds until it does: a day's refusal's Retry-After (invite(), and an agent key's planning)
+      retry_after: oldest === null ? 0 : Math.max(1, Math.ceil((oldest + 86400e3 - Date.now()) / 1000)),
       active: this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one().n,
     };
   },
@@ -251,7 +254,7 @@ export const MemberMethods = {
     if (this.nameHeld(name, null)) return null;
     if (limits) {
       const load = this.inviteLoad(by);
-      if (load.recent >= limits.perDay) return { limit: "day", retry_after: Math.max(1, Math.ceil(((load.oldest || Date.now()) + 86400e3 - Date.now()) / 1000)) };
+      if (load.recent >= limits.perDay) return { limit: "day", retry_after: load.retry_after || 1 };
       if (load.active >= limits.maxActive) return { limit: "active" };
     }
     const bytes = crypto.getRandomValues(new Uint8Array(18));

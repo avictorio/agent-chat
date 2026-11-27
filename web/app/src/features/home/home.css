@@ -114,6 +114,8 @@
 /* the held key's live region, at the card's foot, takes no room while it has
    nothing to say (the making card's sits above its button and spaces it) */
 .homeApp .key-held .key-say:empty {margin: 0; }
+/* the pause before a seat that already exists is reused: said in the ink, by the button */
+.homeApp .key-pause {color: var(--ink); margin: 10px 0 10px; }
 .homeApp .key-sub {font-size: 14px; margin: 20px 0 6px; }
 .homeApp .key-lead {margin: 0 0 14px; }
 .homeApp .key-make .list-label, .homeApp .key-held .list-label {padding-left: 4px; }

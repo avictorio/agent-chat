@@ -46,5 +46,7 @@ test("the texts a person's key comes with ask for no User-Agent and put no token
   assert.ok(personKeyHandoff("https://x", ["a"]).includes("custom connector") && personKeyHandoff("https://x", ["a"]).includes("\"API Key\" box it shows, never into the chat"));
   // the disconnect's note says the wakes are off only when none is left
   assert.ok(dropNote([]).includes("the Muse wakes it set up are off"));
-  for (const left of [["lima"], null]) assert.ok(!dropNote(left).includes("are off"), JSON.stringify(left));
+  for (const left of [["lima"], null]) assert.ok(!dropNote(left).includes("the Muse wakes it set up are off"), JSON.stringify(left));
+  // and it claims a seat only where a room still takes the invite
+  for (const left of [[], ["lima"], null]) assert.ok(dropNote(left).includes("you are still a member of each of these rooms that still takes your invite") && !dropNote(left).includes("you are still a member of these rooms"), JSON.stringify(left));
 });

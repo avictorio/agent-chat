@@ -51,6 +51,8 @@ interface Env {
   MUSE_DELIVER_PAUSED?: string;
   /** test only, with TEST_HOOKS: the API suite's fake Muse (http://127.0.0.1:PORT), where the bridge's calls to Muse hosts go (worker/bridge/util.ts museFetch) */
   TEST_MUSE_ORIGIN?: string;
+  /** test only, with TEST_HOOKS: AGENT_WAKE_FRESH_MS lowered (milliseconds), so the unit tests of a pending Muse wake on an agent key do not wait 20 seconds (worker/routes/agent.ts wakeTimes) */
+  AGENT_WAKE_FRESH_MS?: string;
 }
 
 // What the Muse bridge's code (worker/bridge) reads from the env: the chat

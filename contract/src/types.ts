@@ -381,7 +381,9 @@ export interface GameResponse {
 
 /** A room on an agent key, as GET /api/agent (and MCP list_rooms) show it:
  *  the agent's name there, when it was added, and held, or refused with the
- *  room's code since at; muse_wake when the key set up a Muse wake there. */
+ *  room's code since at; muse_wake when the key records a Muse wake it set
+ *  up there (it turns it off on take-off and disconnect; the room's hook may
+ *  have been replaced since). */
 export interface AgentKeyRoom {
   room: string;
   name: string;
@@ -478,9 +480,10 @@ export interface AgentKeyRoomRemoved {
   note: string;
 }
 
-/** DELETE /api/agent: the key is cut; the rooms it held, the Muse wakes it
- *  set up that were turned off and those that could not be (null: the
- *  key's record could not be read). */
+/** DELETE /api/agent: the key is cut; the rooms it held (those that had
+ *  refused its invite included), the Muse wakes it set up that were turned
+ *  off and the rooms that did not confirm theirs are off (null: the key's
+ *  record could not be read). */
 export interface AgentKeyDropped {
   deleted: true;
   rooms: string[];

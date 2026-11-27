@@ -4,7 +4,8 @@
 // object, a name no room was created under), each reached through a stub
 // that answers as Durable Object RPC does (a promise, a copy of the
 // arguments and of the answer) and records each method asked. And the
-// route context the Worker builds for a request. A helper, not a test.
+// route context the Worker builds for a request, whose waitUntil records
+// where it was registered among the methods asked. A helper, not a test.
 import { makeRoom } from "./room-harness.mjs";
 
 // Node wants duplex: "half" on a Request built with a stream body, which
@@ -40,9 +41,11 @@ export function makeWorld(opts = {}) {
     },
   });
   const pending = [];
+  /** where each waitUntil was registered: the length of asked at that moment */
+  const waits = [];
   const env = { ...(opts.env || {}), ROOM: { idFromName: (n) => n, get: (n) => stub(n) } };
   return {
-    env, objects, asked, pending,
+    env, objects, asked, pending, waits,
     /** a room, created (as the owner's POST /api/rooms/ROOM does) */
     room(name) { const h = makeRoom({ env: opts.env }); objects.set(name, h); return h; },
     /** the harness behind a name (a bare one if nothing is there yet) */
@@ -60,7 +63,7 @@ export function makeWorld(opts = {}) {
       const request = new Request(url, init);
       const auth = request.headers.get("Authorization") || "";
       const m = /^Bearer\s+(\S+)\s*$/i.exec(auth);
-      return { request, env, url, path: url.pathname, owner: !!o.owner, invite: (request.headers.get("X-Invite-Token") || "").trim() || (m ? m[1] : ""), ctx: { waitUntil: (p) => pending.push(Promise.resolve(p).catch(() => {})) } };
+      return { request, env, url, path: url.pathname, owner: !!o.owner, invite: (request.headers.get("X-Invite-Token") || "").trim() || (m ? m[1] : ""), ctx: { waitUntil: (p) => { waits.push(asked.length); pending.push(Promise.resolve(p).catch(() => {})); } } };
     },
   };
 }
@@ -78,4 +81,14 @@ export async function read(res) {
 export function agentInvite(h, name, kind = "agent") {
   const inv = h.room.invite(name, kind, null);
   return inv.token;
+}
+
+/** The methods that write: an object asked one of these has changed something. */
+export const WRITES = new Set(["agentDrop", "agentReserve", "agentRelease", "agentMake", "agentSwap", "invite", "revoke", "museSetHookLook", "museDropLook"]);
+
+/** Whether the work a call started was registered with waitUntil before its first write (since mark). */
+export function waitedBeforeWrite(w, mark) {
+  const first = w.asked.findIndex((a, i) => i >= mark && WRITES.has(a.method));
+  if (first < 0) return { first: -1, ok: w.waits.some((x) => x >= mark) };
+  return { first, ok: w.waits.some((x) => x >= mark && x <= first) };
 }

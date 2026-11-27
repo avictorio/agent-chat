@@ -289,6 +289,18 @@ export const AGENT_SWAP_TRIES = 3;
 // deploy, say) is asked once more after this many milliseconds, then
 // reported as left on.
 export const AGENT_WAKE_RETRY_MS = 1000;
+// The Muse wakes a key set up in a room (muse_register) are recorded on the
+// room's entry, each link before the room is asked to set it, and a link
+// comes off the entry only once a room has answered that no hook of that
+// link is there. A link is pending from its record until the call that
+// recorded it has had the room's answer; that call asks for no hook later
+// than AGENT_WAKE_SET_MS after recording it, so a link pending longer than
+// AGENT_WAKE_FRESH_MS can no longer be set by anyone and counts as
+// answered. An entry records at most AGENT_WAKE_LINKS_MAX links: one wake
+// and a registration's new link, with room for one more whose set threw.
+export const AGENT_WAKE_SET_MS = 15000;
+export const AGENT_WAKE_FRESH_MS = 20000;
+export const AGENT_WAKE_LINKS_MAX = 3;
 
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {

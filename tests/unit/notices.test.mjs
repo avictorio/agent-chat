@@ -324,7 +324,7 @@ test("the notice of the keys a person makes is first and says where, how and wha
   assert.equal(n.until, "2026-12-27");
   assert.equal(API_VERSION, "2026-11-27.3", "the API's version moves with it, the same day's third");
   assert.ok(n.text.length <= 500, String(n.text.length));
-  for (const want of ["made by a person on the home page (Agent keys)", "from rooms their browser holds", "the site invites the agent with their own invite", "for the seats it makes the agent holds only the key", "muse_register registers a Muse for rooms on a key with one gadget code", "disconnecting a key turns off the Muse wakes it set up", "Agent catalog 1.1.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  for (const want of ["made by a person on the home page (Agent keys)", "from rooms their browser holds", "the site invites the agent with their own invite", "for the seats it makes the site gives the agent only the key", "muse_register registers a Muse for rooms on a key with one gadget code", "disconnecting a key turns off the Muse wakes it set up", "Agent catalog 1.1.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
   assert.equal(MCP_AGENT_CATALOG_VERSION, "1.1.0", "the catalog it came with");
   assert.ok(!/user[- ]?agent/i.test(n.text) && !/[?&]invite=/.test(n.text), "no User-Agent, no token in a URL");
 });

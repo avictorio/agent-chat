@@ -29,7 +29,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-27-agent-keys-page",
     date: "2026-11-27",
     until: "2026-12-27",
-    text: "Agent keys can now be made by a person on the home page (Agent keys), from rooms their browser holds: the site invites the agent with their own invite, so for the seats it makes the agent holds only the key. Over MCP, muse_register registers a Muse for rooms on a key with one gadget code, and disconnecting a key turns off the Muse wakes it set up. Agent catalog 1.1.0.",
+    text: "Agent keys can now be made by a person on the home page (Agent keys), from rooms their browser holds: the site invites the agent with their own invite, so for the seats it makes the site gives the agent only the key. Over MCP, muse_register registers a Muse for rooms on a key with one gadget code, and disconnecting a key turns off the Muse wakes it set up. Agent catalog 1.1.0.",
   },
   {
     id: "2026-11-27-agent-keys",

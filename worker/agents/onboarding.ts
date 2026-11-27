@@ -3,6 +3,7 @@
 // server/discover's).
 import { API_VERSION } from "./notices.js";
 import { oneLine, quoted } from "../lib/text.js";
+import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, spanS } from "../limits.js";
 
 export function forAgents(origin: string, room: string) {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
@@ -120,12 +121,19 @@ export function agentKeyNote(origin: string) {
 // terminal, and never into the hand-off, which a person pastes into a chat.
 
 /** The note that comes with a key a person made, once. reused: a seat on
- *  it is one the agent had already, whose link it may hold. */
+ *  it is one the agent had already, whose link it may hold, and which
+ *  another key may hold too. The site gives the agent no link for a seat it
+ *  makes, but a person in the room sees every member's link in the members
+ *  list (GET /members), so the note says what the key's disconnect cuts. */
 export function personKeyNote(reused: boolean) {
   return "Shown only now: the site keeps no copy it can show again. Whoever holds this key acts as the agent in every room on it: give it only to that agent's settings, never in a message. " +
-    "The seats it holds were made with your invites, so the agent holds no room link of its own for them: disconnecting the key cuts it off from them at once." +
-    (reused ? " A seat it already had keeps any link the agent was given for it." : "");
+    "The seats it holds were made with your invites, and the site gave the agent no link of its own for them, so disconnecting the key cuts it off from them, unless it gets a seat's link another way: a person in the room can see each member's link in the members list." +
+    (reused ? " " + SEAT_SHARED : "");
 }
+
+/** What reusing a seat means, wherever a reused seat is told of: the
+ *  person's note, the page's check and its key card. */
+export const SEAT_SHARED = "A seat it already had keeps any link given for it, and another key that holds the same seat still works for it: disconnecting this key does not cut that one.";
 
 /** Claude Code's settings for a key (mcp_json in the answer of POST
  *  /api/agents/invite): the agent-chat server's entry in a .mcp.json file,
@@ -145,23 +153,76 @@ export function personKeyHandoff(origin: string, rooms: string[]) {
 }
 
 /** A failed call's word on the invites it made before it failed: they
- *  stay, unopened, and a retry with the same name reuses them. */
-export function unusedNote(rooms: string[]) {
-  return rooms.length === 1
-    ? "The invite this call made in " + rooms[0] + " stays unused, and trying again with the same name uses it."
-    : "The invites this call made in " + rooms.join(", ") + " stay unused, and trying again with the same name uses them.";
+ *  stay, unopened, and a retry with the same name reuses them; and on the
+ *  rooms where the room's answer to an invite was lost, so the call cannot
+ *  tell whether one was made (maybe). */
+export function unusedNote(rooms: string[], maybe: string[] = []) {
+  const said: string[] = [];
+  if (rooms.length) {
+    said.push(rooms.length === 1
+      ? "The invite this call made in " + rooms[0] + " stays unused, and trying again with the same name uses it."
+      : "The invites this call made in " + rooms.join(", ") + " stay unused, and trying again with the same name uses them.");
+  }
+  if (maybe.length) said.push("An invite may have been made in " + maybe.join(", ") + ": the room's answer was lost. Trying again with the same name uses it if so.");
+  return said.join(" ");
 }
 
 /** What a disconnect ends and what it leaves (DELETE /api/agent's note):
- *  wakesLeft is the rooms whose Muse wake the key set up could not be
- *  turned off (each room still wakes until that room's own muse-hook route
- *  or the gadget's Disconnect stops it), or null when the key's list could
- *  not be read. It says the wakes are off only when none is left. */
+ *  wakesLeft is the rooms that did not confirm the Muse wake the key set up
+ *  there is off (each room still wakes until that room's own muse-hook
+ *  route or the gadget's Disconnect stops it), or null when the key's list
+ *  could not be read. It says the wakes are off only when none is left, and
+ *  a seat only where a room still takes the invite: the key may hold rooms
+ *  that refused it (the agent left, was removed, or the room is gone). */
 export function dropNote(wakesLeft: string[] | null) {
-  const seats = "Every seat stays: you are still a member of these rooms, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire.";
+  const seats = "Every seat stays as it was: you are still a member of each of these rooms that still takes your invite, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire.";
   if (wakesLeft && !wakesLeft.length) return "This key works nowhere now, and the Muse wakes it set up are off. " + seats;
   if (!wakesLeft) return "This key works nowhere now. " + seats + " This key's record could not be read, so the Muse wakes it set up could not be turned off: Disconnect on the Muse gadget stops every wake at once.";
-  return "This key works nowhere now. " + seats + " These rooms could not be reached to turn off the Muse wakes this key set up: " + wakesLeft.join(", ") + "; in each, DELETE /api/rooms/ROOM/muse-hook with that room's own token turns it off, and Disconnect on the Muse gadget stops every wake at once.";
+  return "This key works nowhere now. " + seats + " These rooms did not confirm that the Muse wakes this key set up there are off (they could not be reached, or refused): " + wakesLeft.join(", ") + "; in each, DELETE /api/rooms/ROOM/muse-hook with that room's own token turns it off while your seat there is active, and Disconnect on the Muse gadget stops every wake at once.";
+}
+
+// The refusals and notes of the key's routes that a page or a test shows
+// as the Worker words them (worker/routes/agent.ts); R is the room.
+
+/** An entry's agent name is taken in R (planning, or the room's invite()). */
+export function nameTakenError(room: string, name: string) {
+  return "Room \"" + room + "\": " + name + " is already taken here. Pick another name.";
+}
+/** R holds an agent seat of that name the same person invited, in use. */
+export function seatInUseError(room: string, name: string) {
+  return "Room \"" + room + "\": " + name + " is already a member here, invited by you: use that seat, or pick another name.";
+}
+/** The two caps of a room's invite(), worded as the members route words them (routes/members.ts). */
+export function dayCapError(room: string) {
+  return "Room \"" + room + "\": You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day";
+}
+export function activeCapError(room: string) {
+  return "Room \"" + room + "\": This room already has " + MAX_ACTIVE_INVITES + " active invites";
+}
+/** The inviter's invite is not stored as a person's (kind human): what is checked is the invite's kind. */
+export function notPersonInviteError(room: string) {
+  return "Room \"" + room + "\": this invite is stored as an agent's. Only an invite the room stores as a person's can invite an agent onto a key.";
+}
+/** Taking R off the key: a room that did not settle every Muse wake the key recorded there. */
+export function wakeNotSettled(room: string) {
+  return room + " did not confirm that the Muse wake this key set up there is off (it could not be reached, or refused), so it is still on this key and that wake may still be on. Try again shortly.";
+}
+/** Taking R off the key while a registration through the key still runs there. */
+export function wakeStillSetting(room: string, seconds: number) {
+  return room + " has a Muse registration through this key still running, so it is still on this key. Try again in " + spanS(seconds) + ".";
+}
+/** Taking off a room that refused the key's invite: no seat is claimed. */
+export function removedRefusedNote(room: string) {
+  return "The key forgets " + room + ", which no longer takes its invite: nothing else changes there.";
+}
+/** A room muse_register did not register this time, and why; spent: the
+ *  gadget's code was claimed, so registering again needs a new one. */
+export function wakeAgain(room: string, why: "unreached" | "busy" | "full", spent: boolean) {
+  const what = why === "unreached" ? room + " could not be reached just now"
+    : why === "busy" ? room + " was changed on your key while it was being registered"
+      : room + " already records as many Muse wakes through this key as a room can until an earlier registration there settles";
+  return what + ", so it was not registered: register it again shortly" +
+    (spent ? " with a new code from the gadget, since this one was used." : "; this code was not used, so it still works until it expires.");
 }
 
 /** What a request's credential turned out to be at the agent key's

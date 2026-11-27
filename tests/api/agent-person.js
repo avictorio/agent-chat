@@ -159,7 +159,7 @@ async function agentPerson(ctx) {
 
     // the disconnect: the key's wakes go (A), the agent's own hook stays (B)
     r = await req('DELETE', '/api/agent', { headers: bearer(KEY) });
-    check('agent person: DELETE /api/agent disconnects and turns off the key\'s wake', r.status === 200 && r.json.deleted === true && JSON.stringify(r.json.muse_wakes_removed) === JSON.stringify([A]) && JSON.stringify(r.json.muse_wakes_left) === '[]' && /the Muse wakes it set up are off/.test(r.json.note), r.text.slice(0, 300));
+    check('agent person: DELETE /api/agent disconnects and turns off the key\'s wake', r.status === 200 && r.json.deleted === true && JSON.stringify(r.json.muse_wakes_removed) === JSON.stringify([A]) && JSON.stringify(r.json.muse_wakes_left) === '[]' && /the Muse wakes it set up are off/.test(r.json.note) && /you are still a member of each of these rooms that still takes your invite/.test(r.json.note), r.text.slice(0, 300));
     let st2 = null;
     for (let i = 0; i < 30; i++) { st2 = await roomsOf(gadget.link); if (st2 && st2.rooms === 0) break; await new Promise((x) => setTimeout(x, 100)); }
     check('agent person: the bridge heard the hooks gone (the key\'s link counts none)', st2 && st2.rooms === 0, JSON.stringify(st2));

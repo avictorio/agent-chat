@@ -94,9 +94,13 @@ Front-end conventions.
   key sends the check first (`POST /api/agents/invite` with `check`) and,
   when nothing stands in the way, the call at once; the check's problems
   show on their rooms without the `Room "R": ` prefix, a seat of the
-  person's in use is offered with a checkbox (`reuse: "any"`), an unused
-  one is reused and said so, a full counter disables the button until its
-  `retry_after`. The agent's name is checked first as the server checks a
+  person's in use is offered with a checkbox (`reuse: "any"`), a full
+  counter disables the button until its `retry_after`. A seat that already
+  exists is never reused silently: when the check would reuse one the
+  person did not tick, the view stops there, shows each such room's line
+  and one by the button (another key that holds such a seat keeps working
+  for it; Make key, or Add rooms, goes ahead), and the next tap makes the
+  key if the name and the ticks are as checked (any change checks again). The agent's name is checked first as the server checks a
   new name (`agentName.ts`, kept the same as `cleanName` and
   `memberNameProblem` by `tests/unit/agent-name.test.mjs`). The new key is
   shown once, in its card: the key, Claude Code's `.mcp.json` entry first
@@ -110,17 +114,25 @@ Front-end conventions.
   the agent's MCP settings or its secure credential field. The held key's
   live region, at its card's foot, is an empty paragraph until it has
   something to say, and takes no room then (`.key-held .key-say:empty`);
-  the making card's sits above its button, and its margin spaces it. A failure says what is left (`left_unused`'s note, else "Nothing
-  was kept."), and a lost answer that a key made then is lost and that
-  making it again uses the same seats. A pasted key is checked for its form
+  the making card's sits above its button, and its margin spaces it. A
+  failure says what is left (the answer's note on `left_unused` and
+  `maybe_unused`, else "Nothing was kept."), and a lost answer that a key
+  made then is lost and that making it again uses the same seats. A pasted key is checked for its form
   first, then opened (`GET /api/agent`): its rooms with their state and
-  wake, Add rooms (the device's rooms not on it; a full key says so), Take
+  "Muse wake set up with this key" (`muse_wake`: what the key records, not
+  that the wake is still on), Add rooms (the device's rooms not on it; a full key says so), Take
   off this key and Disconnect everywhere, each asked first in a native
   `<dialog>` (Escape closes, a click on the backdrop closes when no call
-  runs, `confirm` where `showModal` is missing). Nothing is stored on the
+  runs, `confirm` where `showModal` is missing). Membership is said only of
+  rooms that still take the key's invite: the take-off dialog of a refused
+  row says the room no longer takes it, the disconnect dialog limits its
+  sentence to those rooms, and the disconnect result names only rooms the
+  key showed as held. Nothing is stored on the
   device (`AGENTS.md` section 5): the key is in the view's state only, gone
-  on Done, Close, a disconnect, leaving the view and `pagehide` (the view
-  remounts its sections), and the only calls are the looks and the agent
+  on Done, Close, a disconnect, leaving the view and `pagehide`, the last
+  two inside the event itself (`flushSync`: the view remounts its
+  sections, and HomeApp switches views), so a page frozen into the
+  back-forward cache holds no key in its DOM or state; and the only calls are the looks and the agent
   routes (`AgentKeyClient`, `@chat/contract`, the key only in
   `Authorization: Bearer`). Every name and sentence from the server is
   rendered as text. Copy goes through the toast bus (`ToastHost`, which the

@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon as I } from "../../ui/Icon";
 import { CreateView } from "./CreateRoom";
@@ -86,7 +87,8 @@ export default function HomeApp() {
 
   const show = useCallback((v: string, fromHash?: boolean) => {
     if (!VIEWS[v]) v = "rooms";
-    setView(v);
+    // at once: leaving Agent keys takes any key it held out of the page's memory and DOM in this same task
+    flushSync(() => setView(v));
     setNavOpen(false);
     if (!fromHash) {
       try {
