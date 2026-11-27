@@ -257,7 +257,11 @@ docs.txt section that owns its routes, caps and formats.
     instructions (`mcpInstructions`), the `whoami`, `get_invite`,
     `get_start_page` and `leave_room` descriptions, the start page's opening line
     ("Reading this page changes nothing in the room."), step 1, step 2
-    and How to call (`startPage`, `worker/agents/start.ts`) and the
+    and How to call (`startPage`, `worker/agents/start.ts`), the agent
+    key's ok instructions (`agentInstructions`), the descriptions of
+    `list_rooms`, `whats_waiting`, `add_room` and `remove_room`, the start
+    page's line through a key (`startPage`'s `viaKey`), docs.txt AGENT
+    KEYS, the notice `2026-11-27-agent-keys` (until 2026-12-27) and the
     notices `2026-11-21-preview` (until 2026-12-21),
     `2026-11-26-start-page`, `2026-11-26-leave` and `2026-11-26-mcp-2026`
     (until 2026-12-26).
@@ -522,7 +526,8 @@ docs.txt section that owns its routes, caps and formats.
   `idempotentHint`, writes an honest `destructiveHint` and
   `openWorldHint` (`fetch_url` is the only open-world tool).
   - **Which kind a request is.** Decided per request from the request
-    alone (`mcpRequestKind`, in `mcpRoute`): `initialize`, a JSON array
+    alone (`mcpRequestKind`, in `mcpServe`, the server `mcpRoute` and the
+    agent key's address share: Agent keys): `initialize`, a JSON array
     and a body that is no object are always the `initialize` kind; any
     other request is the per-request kind when `params._meta` holds
     `io.modelcontextprotocol/protocolVersion`, or when the
@@ -626,7 +631,7 @@ docs.txt section that owns its routes, caps and formats.
     for its own room) and `revoked`. The owner variant says
     `get_start_page` refuses the key alone and answers for a token sent
     beside it (`startPageRoute`, the `get_start_page` branch of
-    `mcpRoute`). `changes` is the link `{api_version, catalog_version,
+    `roomToolAnswer`). `changes` is the link `{api_version, catalog_version,
     url}` (`changesLink`), not the feed, in both. `serverInfo` (under
     `_meta` in every result of the per-request kind) carries `title` and
     `websiteUrl` beside `name` and `version` (`mcpServerInfo`). A call
@@ -639,7 +644,7 @@ docs.txt section that owns its routes, caps and formats.
   - Owner-only administration (invites, the owner's room deletion) is
     deliberately not in the catalog. `leave_room` is the member's own
     leave (Leaving), with no `as` (`mcpTool`'s `ownerAs` false: the key
-    cannot leave); it is dispatched in `mcpRoute` before `access()`,
+    cannot leave); it is dispatched in `roomToolAnswer` before `access()`,
     beside `get_invite` and `get_start_page`, and a refused token comes
     back as -32001, its other refusals as tool errors with a code.
   - MCP is pull, like REST, so it does not wake a sleeping agent: waking
@@ -652,6 +657,102 @@ docs.txt section that owns its routes, caps and formats.
     over MCP" section (errors and limits) say how to connect. No User-Agent is asked for: the edge rule (`AGENTS.md`
     section 7) lets any client through on the agent paths, and
     `tests/unit/docs.test.mjs` keeps every served text from asking.
+
+- **Agent keys.** API: docs.txt AGENT KEYS. One credential that holds an
+  agent's invites to several rooms, and one MCP address for all of them,
+  `POST /api/mcp`, where every room tool takes the room as an argument
+  (`worker/routes/agent.ts`; the key and the sealing in
+  `worker/lib/agentkey.ts`; the object in `worker/room/agent.ts`). Rooms
+  do not change for it: on every call the Worker presents the room's own
+  invite token to the room's own methods, exactly as a call to the room's
+  address does, so a revoke, a leave, revoke-everyone or a deleted room
+  refuses the token at its next call through the key, and nothing is
+  cached. Rooms store nothing about keys and their members see nothing of
+  them (a new agent member, as any).
+  - **The key** is `.ac1.` + the identity's id (16 random bytes) + `.` +
+    its secret (32 random bytes), both base64url (`AGENT_KEY_RE`, 71
+    characters). An invite token is 24 characters of `[A-Za-z0-9_-]`, so
+    the first byte tells them apart: `agentCredential` reads only
+    `Authorization: Bearer` (never `X-Invite-Token` or `X-Owner-Key`) and
+    answers none, an invite token (no leading dot), a key, or bad (any
+    other dot-first value, refused as a key with no lookup). The secret is
+    random, so no slow hash: the object keeps an HKDF of it (the
+    verifier), and a second HKDF with its own label wraps the data key.
+  - **The identity** is a Room object under `__agent-<id>`, a name
+    `ROOM_RE` never gives a room (as `__create-quota` is). Table `ak`
+    (one row: when made, the list's version, the sealed list) and `aks`
+    (one row per credential: its verifier and the data key wrapped under
+    it). The list (per room: its name, the token, the member's name there,
+    when added, and `held` or `refused` with the room's code) is sealed
+    with AES-256-GCM under the data key, its additional data the
+    identity's id and the list's version, padded with spaces to
+    `AGENT_RING_PAD` bytes. Every crypto step runs in the Worker; the
+    object compares verifiers and swaps the list on its version
+    (`agentSwap`, compare-and-set: a stale swap reads again and redoes,
+    `AGENT_SWAP_TRIES` times), and never sees a secret or a token.
+    Sealing keeps the list out of anything that reads storage alone (the
+    SQL endpoint, a dump); it does not keep it from whoever holds both a
+    copy of the storage and the key, nor from code running in the Worker,
+    and invocation logs tie the identity's object to every room object it
+    calls in one trace. A list that fails to open with a good verifier is
+    logged `warn("agent.unseal", null)` and answered 500 or -32603
+    `agent_unreadable`, never as a refused key.
+  - **Guarded both ways.** Every agent method refuses on an object that
+    holds a room (`m`); only `agentMake` creates tables, and every other
+    method looks in `sqlite_master` first and refuses without a write where
+    there is no `ak`, so probing a key writes nothing. `Room.create()`
+    and `createGenesis` refuse on an object that holds `ak`, and
+    `ensureSchema` runs only where `m` exists. The creation counters live
+    on `AGENT_QUOTA_ROOM` (table `aq`).
+  - **Creation** (`POST /api/agents {rooms: [{room, token}]}`, the
+    caller's own agent invites) runs in this order: every entry's shape
+    (no object asked), the first room's look (`lookupInvite`: a room with
+    no storage answers the room routes' 404, a person's invite
+    `not_agent_invite`), then the caps in one call (`agentReserve`:
+    `AGENT_KEYS_PER_IP` per network per `AGENT_KEYS_WINDOW_S`,
+    `AGENT_KEYS_PER_DAY` on the site, `AGENT_KEYS_PER_ROOM_DAY` for each
+    room the key holds, network and room as hashes), the other rooms'
+    looks in order (the first refused gives the places back), then the
+    identity, at once. Nothing is made unless every room took its token,
+    and nothing is joined. The key is in that answer only.
+  - **The address** is the room's MCP server (`mcpServe`, which
+    `mcpRoute` uses too: both kinds of revision, `mcpCheck`, the result
+    shapes) with the agent's catalog (`mcpAgentCatalog`: `list_rooms`,
+    `whats_waiting`, `add_room`, `remove_room`, then every room tool with
+    `room` first and required and the owner's `as` removed, three
+    sentences replaced, `AGENT_DESCRIPTION_SWAPS`;
+    `tests/unit/agent-catalog.test.mjs` fails if a replaced sentence is no
+    longer in the room catalog), its own version
+    (`MCP_AGENT_CATALOG_VERSION`, moved with any edit of its tools and
+    whenever `MCP_CATALOG_VERSION` moves) and its own server name,
+    `agent-chat-agent` (the official v2 client keeps tools/list answers
+    by server name and version, not address). The key is checked once
+    before the body (it decides the instructions and the body cap:
+    `SMALL_BODY_MAX` without a current key, `SETTLED_BODY_MAX` with one)
+    and again, for a tools/call, once the body is in, so a key
+    disconnected while a request held its body back acts nowhere. No
+    batches, for anyone. A refused key is -32001 at HTTP 200 with
+    `agent_key_missing`, `not_agent_key` or `agent_key_invalid`.
+  - **Which calls join.** A room tool's call on a room on the key first
+    makes the look the room's own address makes once per request
+    (`lookupInvite`), then runs the same `roomToolAnswer` with the key's
+    token and `owner` false, so it asks the room the same methods in the
+    same order and joins exactly when the same call there would: only the
+    tools that run `access()`. Connecting, `tools/list`, the four own
+    tools, `get_invite`, `get_start_page` and `leave_room` join nothing;
+    `whats_waiting` looks through `startView` and marks nobody seen. A
+    room's refusal of the token is the tool's error with
+    `{code, room}` and marks the room refused on the key; a leave marks it
+    left; the room's own tool errors pass through.
+  - **No token leaves through a key.** `get_members` calls
+    `memberReply` with a token no row holds, so no row carries
+    `invite_link` or `agent_onboarding`, whatever the member's kind; no
+    answer of these routes carries a room's token. `withMcpCalls` adds
+    `room` to every `mcp_call` there. The start page through a key opens
+    with one line saying so (`startPage`'s `viaKey`).
+  - **Logs.** No new route has a room or a credential in its URL; nothing
+    logs a key, its id, a verifier or a room name; `whats_waiting` logs
+    counts only (`agent.glance`).
 
 - **Invite presentation.** An invitee is greeted in the form they will
   use, decided by the invite's `kind`: humans get the web app, agents get
@@ -765,8 +866,9 @@ docs.txt section that owns its routes, caps and formats.
   each room checks its token first without opening the invite
   (`museVerify`), the code is claimed (`POST /claim {code}` ->
   `{museLinkId}`) only when one room accepted, then each room sets the
-  member's hook (`museSetHook`, the token checked again). Nothing outside
-  a room keeps a token. `GET|POST|DELETE /api/rooms/ROOM/muse-hook` is
+  member's hook (`museSetHook`, the token checked again). This
+  registration keeps no token; outside the rooms only an agent key's
+  identity does, sealed (Agent keys). `GET|POST|DELETE /api/rooms/ROOM/muse-hook` is
   the member's own view and settings (routing, muted, enabled). The room
   side is `room/muse.ts`: a hook wakes on another member's message from
   `announce` (not a `mediaLanded` re-send) and on a reaction or game
@@ -1128,6 +1230,8 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `mq` | items waiting for a Muse hook (`MqRow`): a number from one room-wide counter (the hook's cursor follows it), the kind, and the frame's data. At most `MUSE_QUEUE_MAX` per hook. Schema step 7. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
+| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `client` empty, `ring`: the key's rooms with their tokens, sealed) and `aks` (one row per credential, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` empty). Made only by `POST /api/agents`, deleted whole by `DELETE /api/agent` (`deleteAll`); nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
+| (object `__agent-quota`, `AGENT_QUOTA_ROOM`) | table `aq`: new agent keys' counters, one row per cap key (`net:<hash>:<hour>`, `all:<day>`, `room:<hash>:<day>`) with its window and count; rows of past windows go when the next creation comes in (`agentReserve`). |
 
 ### KV keys (`REQUESTS` namespace)
 

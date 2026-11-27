@@ -219,6 +219,77 @@ async function mcpClients(ctx) {
     }
   }
 
+  // The agent key's address, POST /api/mcp, with each library: a key from
+  // two rooms' agent invites (this room's and one of its own), sent as
+  // Authorization: Bearer. v1 and v2 by default open with initialize, v2
+  // in auto mode probes server/discover and stays on 2026-07-28, and v2
+  // pinned speaks only it; each connects, lists tools with room on every
+  // room tool, lists its rooms and posts in one. A room the key holds whose
+  // invite is revoked is a tool error (isError) with structuredContent.code;
+  // a wrong key rejects with -32001 agent_key_invalid; and one response
+  // cache store shared by a room's address and the agent address keeps each
+  // address's own list (the two servers' names differ).
+  {
+    const room2 = 'apitest-mcpk-' + SUF, R2 = '/api/rooms/' + room2;
+    r = await req('POST', R2, { owner: true });
+    const K1 = await invite('McpKeyed');
+    const K2 = ((await req('POST', R2 + '/invites', { owner: true, json: { name: 'McpKeyed', kind: 'agent' } })).json || {}).token;
+    const made = await req('POST', '/api/agents', { json: { rooms: [{ room, token: K1 }, { room: room2, token: K2 }] }, headers: { 'CF-Connecting-IP': '10.250.' + (parseInt(SUF, 36) % 200) + '.1' } });
+    const KEY = made.json && made.json.key;
+    check('mcp clients, agent key: a key from two rooms\' agent invites', r.status === 201 && made.status === 201 && !!KEY, made.status + ' ' + made.text.slice(0, 120));
+    if (KEY) {
+      const agentUrl = new URL(BASE + '/api/mcp');
+      const headers = { Authorization: 'Bearer ' + KEY };
+      const run = async (client, transport) => withClient(client, transport, async () => {
+        const out = { era: client.getProtocolEra ? client.getProtocolEra() : 'legacy', server: client.getServerVersion(), instructions: client.getInstructions() };
+        const tools = (await client.listTools()).tools;
+        out.tools = tools.length;
+        out.roomFirst = tools.filter((t) => !['list_rooms', 'whats_waiting', 'add_room', 'remove_room'].includes(t.name)).every((t) => Object.keys(t.inputSchema.properties)[0] === 'room' && t.inputSchema.required[0] === 'room');
+        out.rooms = (await client.callTool({ name: 'list_rooms', arguments: {} })).structuredContent.rooms.map((x) => x.room);
+        out.post = await client.callTool({ name: 'post_message', arguments: { room: room2, text: 'hello through the key' } });
+        return out;
+      });
+      const v1run = await run(new v1.Client({ name: 'apitest-v1-key', version: '0.0.0' }), new v1.Transport(agentUrl, { requestInit: { headers } }));
+      const v2def = await run(new v2.Client({ name: 'apitest-v2-key', version: '0.0.0' }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }));
+      const v2auto = await run(new v2.Client({ name: 'apitest-v2-key-auto', version: '0.0.0' }, { versionNegotiation: { mode: 'auto' } }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }));
+      const v2pin = await run(new v2.Client({ name: 'apitest-v2-key-pin', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }));
+      for (const [what, got, era] of [['v1', v1run, 'legacy'], ['v2 default', v2def, 'legacy'], ['v2 auto', v2auto, 'modern'], ['v2 pinned to ' + MODERN, v2pin, 'modern']]) {
+        const o = got.out || {};
+        check('mcp clients, agent key (' + what + '): connects to /api/mcp and is told it is the agent server', got.ok && o.era === era && !!o.server && o.server.name === 'agent-chat-agent' && /^All your Agent Chat rooms as tools, through your agent key\./.test(o.instructions || ''), said(got));
+        check('mcp clients, agent key (' + what + '): lists the tools, room first on every room tool, and its rooms', o.tools === listed.length + 4 && o.roomFirst === true && JSON.stringify(o.rooms) === JSON.stringify([room, room2]), JSON.stringify({ tools: o.tools, roomFirst: o.roomFirst, rooms: o.rooms }));
+        check('mcp clients, agent key (' + what + '): post_message {room} goes through', !!o.post && !o.post.isError, JSON.stringify(o.post).slice(0, 160));
+      }
+      // a revoked room through the key: a tool error with the code, from both libraries
+      await req('DELETE', R2 + '/invites/' + K2, { owner: true });
+      for (const [what, client, transport] of [
+        ['v1', new v1.Client({ name: 'apitest-v1-key-rev', version: '0.0.0' }), new v1.Transport(agentUrl, { requestInit: { headers } })],
+        ['v2 pinned', new v2.Client({ name: 'apitest-v2-key-rev', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } })],
+      ]) {
+        const got = await withClient(client, transport, async () => client.callTool({ name: 'whoami', arguments: { room: room2 } }));
+        check('mcp clients, agent key (' + what + '): a revoked room\'s call returns isError with structuredContent.code invite_revoked', got.ok && got.out.isError === true && got.out.structuredContent.code === 'invite_revoked' && got.out.structuredContent.room === room2, said(got));
+      }
+      // a wrong key: connecting works, listing rejects with -32001 agent_key_invalid
+      const fake = '.ac1.' + 'A'.repeat(22) + '.' + 'A'.repeat(43);
+      for (const [what, client, transport] of [
+        ['v1', new v1.Client({ name: 'apitest-v1-key-bad', version: '0.0.0' }), new v1.Transport(agentUrl, { requestInit: { headers: { Authorization: 'Bearer ' + fake } } })],
+        ['v2 pinned', new v2.Client({ name: 'apitest-v2-key-bad', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers: { Authorization: 'Bearer ' + fake } } })],
+      ]) {
+        const got = await withClient(client, transport, async () => { try { await client.listTools(); return { listed: true }; } catch (e) { return { code: e.code, data: e.data }; } });
+        check('mcp clients, agent key (' + what + '): a wrong key rejects with -32001 agent_key_invalid', got.ok && got.out.code === -32001 && !!got.out.data && got.out.data.code === 'agent_key_invalid', said(got));
+      }
+      // one response cache store across a room's address and the agent address
+      const store = new v2.InMemoryResponseCacheStore();
+      const a = new v2.Client({ name: 'apitest-v2-cache-room', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } }, responseCacheStore: store });
+      const ga = await withClient(a, new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer ' + T1 } } }), async () => (await a.listTools()).tools.map((t) => t.name));
+      const b = new v2.Client({ name: 'apitest-v2-cache-agent', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } }, responseCacheStore: store });
+      const gb = await withClient(b, new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }), async () => (await b.listTools()).tools.map((t) => t.name));
+      check('mcp clients, agent key: one shared response cache gives each address its own list', ga.ok && gb.ok && !ga.out.includes('list_rooms') && gb.out.includes('list_rooms') && gb.out.length === ga.out.length + 4, JSON.stringify({ room: ga.ok && ga.out.length, agent: gb.ok && gb.out.length }));
+      await req('DELETE', '/api/agent', { headers });
+    }
+    await req('DELETE', R2 + '/invites', { owner: true });
+    await req('DELETE', R2 + '?confirm=' + room2, { owner: true });
+  }
+
   await req('DELETE', R + '/invites', { owner: true });
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }

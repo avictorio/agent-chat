@@ -30,6 +30,7 @@ import { createRoomRoute, roomRoute } from "./routes/rooms.js";
 import { streamRoute } from "./routes/stream.js";
 import {
   hookCoderaceSecret,
+  hookAgentLimits,
   hookAlarm,
   hookGameExpire,
   hookGameImages,
@@ -51,6 +52,7 @@ import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "
 import { speakRoute, voiceRoute } from "./routes/voices.js";
 import { museHandoverRoute, museHookRoute, museRegisterRoute, type MuseHandover } from "./routes/muse.js";
 import { webhookHookRoute } from "./routes/webhook.js";
+import { agentCreateRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "./routes/agent.js";
 
 import {
   attachmentsRoute,
@@ -189,6 +191,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (path === "/api/test-hooks/sigv4") { const r = await hookSigv4(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/liarsdice") { const r = await hookLiarsDice(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/muse") { const r = await hookMuse(rc); if (r !== undefined) return r; }
+    if (path === "/api/test-hooks/agent-limits") { const r = await hookAgentLimits(rc); if (r !== undefined) return r; }
     const usm = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/(part|sign|status|finish|abort)\/?$/);
     if (usm) { const r = await uploadLinkStepRoute(rc, usm); if (r !== undefined) return r; }
     const um = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/?$/);
@@ -198,6 +201,13 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
 
     if (path === "/api/create-room") { const r = await createRoomRoute(rc); if (r !== undefined) return r; }
     if (path === "/api/muse/hooks" || path === "/api/muse/hooks/") return museRegisterRoute(rc);
+    // the agent key's routes and its one MCP address (routes/agent.ts): not
+    // under a room, and never reached by a room's name
+    if (path === "/api/agents" || path === "/api/agents/") return agentCreateRoute(rc);
+    if (path === "/api/agent" || path === "/api/agent/") return agentRoute(rc);
+    if (path === "/api/agent/rooms" || path === "/api/agent/rooms/") return agentRoomsRoute(rc);
+    if (path === "/api/agent/rooms/remove" || path === "/api/agent/rooms/remove/") return agentRemoveRoute(rc);
+    if (path === "/api/mcp" || path === "/api/mcp/") return agentMcpRoute(rc);
     {
       // the Muse gadget's handover (no member token: routes/muse.ts)
       const hm = /^\/api\/muse\/(connect|update|disconnect|status|seal-key)\/?$/.exec(path);

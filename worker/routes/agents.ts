@@ -21,6 +21,7 @@ import {
   mcpRequestKind,
   mcpServerInfo,
   mcpUnknownTool,
+  type McpTool,
 } from "../agents/mcp.js";
 import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
@@ -160,7 +161,9 @@ export function changesRoute(rc: RouteContext) {
 // answers, and those that carry their revision and the client's
 // capabilities on every request (from MCP_FIRST_MODERN_VERSION on), which
 // pass mcpCheck and then ask server/discover, tools/list or tools/call
-// (perRequest).
+// (perRequest). Both are mcpServe, which the agent key's address
+// (routes/agent.ts agentMcpRoute) shares; this route gives it the room's
+// catalog, instructions, token checks and tool calls (roomToolAnswer).
 export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -182,7 +185,6 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // call, a batch's included. A batch can take a while (a call may fetch a
   // page or wait on storage), and one checked only at its start went on
   // reading and acting for a member who had been removed meanwhile.
-  const getAcc = () => stub.access(invite, owner);
   let checkP: Promise<{ ok: true } | Refusal> | null = null;
   // No token, no question for the room: the refusal is built here, for
   // every method that needs one (the room could only answer
@@ -209,51 +211,67 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!tokenOk.ok) body = await settleBody(request, SMALL_BODY_MAX);
   if (!body) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Request too large: without a valid invite token a request can be up to " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" } }, 413);
   try { rpcBody = await body.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
-  // A tools/call of a tool in the catalog, once its name (and, over the
-  // revisions without initialize, the token) has been taken: get_invite,
-  // get_start_page and leave_room look, or leave, without access(); every
-  // other tool runs access(), which opens the invite, then mcpCallTool.
-  // say words a token refusal for the kind of revision asked (its sentence;
-  // the code is the contract).
-  const toolAnswer = async (tname: string, targs: Body, say: (r: Worded) => Worded): Promise<ToolAnswer> => {
-    const no = (r: Worded): ToolAnswer => { const w = say(r); return { error: { code: -32001, message: w.error, data: { code: w.code } } }; };
-    if (tname === "get_invite") {
-      const pv = invite ? await stub.previewInvite(invite) : missing();
-      if (!pv.ok) return no(pv);
-      return { result: mcpOk(invitePreviewBody(url.origin, room, pv)) };
-    }
-    // the start page's text, once (no structuredContent copy); the owner
-    // key alone has none, and with a token it is that token's page, with
-    // the line that says calls carrying the key act as the owner
-    if (tname === "get_start_page") {
-      if (!invite) return owner ? { result: mcpErr(OWNER_NO_START_PAGE) } : no(missing());
-      const v = await stub.startView(invite, room);
-      if (!v.ok) return no(startRefusal(v));
-      return { result: { content: [{ type: "text", text: startPage(v, url.origin, room, await watcherPin(url.origin), START_LIMITS, owner) }] } };
-    }
-    // a leave, as POST .../leave takes it: the room looks the token up
-    // (room/members.ts leave) and refuses an invite never opened without
-    // opening it, so this runs no access(); the owner key is no member
-    if (tname === "leave_room") {
-      if (owner) return { result: mcpErr(LEAVE_OWNER, { code: "owner_not_member" }) };
-      // the token's refusal first, as every other tool answers it: the
-      // look this request already made (checkToken), which opens nothing
-      const tk = await checkToken();
-      if (!tk.ok) return no(tk);
-      const ask = leaveAsk(targs, room);
-      if (!ask.confirmed) return { result: mcpErr(leaveConfirmRefusal(room), { code: "confirm_mismatch" }) };
-      let r: LeaveResult | Refusal | LastMemberRefusal;
-      // a room deleted meanwhile (goneError), as any other tool's call answers it
-      try { r = await stub.leave(invite, room, ask.deleteRoom); } catch (e) { return { result: mcpErr(isGoneError(e) ? GONE_MSG : String((e && (e as Error).message) || e), isGoneError(e) ? { code: "room_deleted" } : undefined) }; }
-      if (!r.ok) { const b = leaveRefusalBody(r); return r.code.indexOf("invite_") === 0 ? no(b) : { result: mcpErr(b.error, b.unopened === undefined ? { code: b.code } : { code: b.code, unopened: b.unopened }) }; }
-      leaveAfter(rc, stub, room, r);
-      return { result: mcpOk(leaveBody(room, r)) };
-    }
-    const acc = owner || invite ? await getAcc() : missing();
-    if (!acc.ok) return no(acc);
-    try { return { result: await (async () => { const from = acc.name || (owner ? bodyText(targs.as, "as").trim().slice(0, MAX_NAME) : ""); const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs, invite); return r && r.isError ? r : mcpOk(r); })() }; }
-    catch (e) { const ce = (e || {}) as { message?: string, code?: string, retry_after?: number }; return { result: mcpErr(ce.message ? ce.message : String(e), ce.code ? (ce.retry_after ? { code: ce.code, retry_after: ce.retry_after } : { code: ce.code }) : undefined) }; }
-  };
+  if (Array.isArray(rpcBody) && !tokenOk.ok) {
+    return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request: a batch (a JSON array of requests) is answered only for a valid invite token. " + tokenOk.error + " Without one, send ping or initialize as a single request.", data: { code: tokenOk.code } } }, 400);
+  }
+  return mcpServe(rc, {
+    serverInfo: mcpServerInfo(url.origin),
+    catalog: mcpCatalogBuilt,
+    catalogVersion: MCP_CATALOG_VERSION,
+    has: mcpHasTool,
+    instructions: mcpInstructions(url.origin, variant),
+    verdict: checkToken,
+    // a name that is no tool of the catalog opens nothing: the token's
+    // verdict, from a fresh look (lookupInvite only reads, and a batch can
+    // run a while) or, without a token, the tokenless refusal; the owner
+    // key passes
+    unknownVerdict: async () => { if (owner) return null; const l = invite ? await stub.lookupInvite(invite) : missing(); return l.ok ? null : l; },
+    // a token that is none of the room's gets the start page's sentence
+    // (written for a client that sent a header: send the token alone, for
+    // its own room); every other refusal keeps the room's
+    say: (r: Worded): Worded => (r.code === "invite_invalid" ? { error: START_INVALID, code: r.code } : r),
+    tool: (tname, targs, say) => roomToolAnswer({ rc, stub, room, invite, owner, checkToken, missing, refuse: (r) => { const w = say(r); return { error: { code: -32001, message: w.error, data: { code: w.code } } }; } }, tname, targs),
+  }, rpcBody);
+}
+
+/** A refusal's sentence and code, as a tools/call words it. */
+export type Worded = { error: string, code: string };
+/** A tools/call's answer: its result, or the JSON-RPC error. */
+export type ToolAnswer = { result: object } | { error: { code: number, message: string, data?: Record<string, unknown> } };
+
+/** One MCP address as the shared server (mcpServe) serves it: who answers,
+ *  its catalog, the instructions for what this request's credential turned
+ *  out to be, that credential's verdict and how a tool call runs. The
+ *  room's address (mcpRoute) and the agent key's (routes/agent.ts
+ *  agentMcpRoute) each make one, so the two kinds of revision, mcpCheck and
+ *  the shapes of every result are one code for both. */
+export type McpSurface = {
+  /** initialize's serverInfo, and every per-request result's _meta */
+  serverInfo: Record<string, unknown>,
+  /** the catalog, built once per isolate */
+  catalog: () => { tools: McpTool[], digest: string },
+  catalogVersion: string,
+  /** whether a tools/call names a tool of the catalog */
+  has: (name: string) => boolean,
+  instructions: string,
+  /** the credential's verdict, from the one look this request made */
+  verdict: () => Promise<{ ok: true } | (Worded & { ok: false })>,
+  /** the verdict a tools/call naming no tool gets over the revisions that
+   *  open with initialize: null when it passes */
+  unknownVerdict: () => Promise<Worded | null>,
+  /** a refusal as a request of the per-request kind words it */
+  say: (r: Worded) => Worded,
+  /** a tools/call of a tool in the catalog; say words a credential
+   *  refusal for the kind of revision asked */
+  tool: (name: string, args: Body, say: (r: Worded) => Worded) => Promise<ToolAnswer>,
+};
+
+/** The MCP server both addresses share, once the request's body has been
+ *  read and parsed: one request or a batch of the revisions that open with
+ *  initialize (handleRpc), or one of the per-request kind (perRequest). The
+ *  agent key's address refuses every batch before it gets here. */
+export async function mcpServe(rc: RouteContext, s: McpSurface, rpcBody: unknown): Promise<Response> {
+  const { request, url } = rc;
   // A request of a revision that opens with initialize, alone or in a batch.
   const handleRpc = async (/** one JSON-RPC request, as sent */ raw: unknown) => {
     const req = isObject(raw) ? raw : null;
@@ -269,32 +287,30 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (method === "initialize") {
       return ok({
         protocolVersion: mcpProtocolVersion(params ? params.protocolVersion : undefined), capabilities: { tools: {} },
-        serverInfo: mcpServerInfo(url.origin),
-        catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogBuilt().digest },
-        changes: changesLink(url.origin), instructions: mcpInstructions(url.origin, variant),
+        serverInfo: s.serverInfo,
+        catalog: { version: s.catalogVersion, digest: s.catalog().digest },
+        changes: changesLink(url.origin), instructions: s.instructions,
       });
     }
     if (method !== "tools/call") {
-      const c = await checkToken();
+      const c = await s.verdict();
       if (!c.ok) return fail(-32001, c.error, { code: c.code });
     }
-    if (method === "tools/list") { const cat = mcpCatalogBuilt(); return ok({ tools: cat.tools, catalog: { version: MCP_CATALOG_VERSION, digest: cat.digest } }); }
+    if (method === "tools/list") { const cat = s.catalog(); return ok({ tools: cat.tools, catalog: { version: s.catalogVersion, digest: cat.digest } }); }
     if (method === "tools/call") {
       const tname = params && typeof params.name === "string" ? params.name : "";
       // arguments that are not an object are taken as none (each tool says what it misses)
       const targs: Body = params && isObject(params.arguments) ? params.arguments : {};
       if (!tname) return fail(-32602, "tools/call needs params.name");
-      // a name that is no tool of the catalog opens nothing: the token's
-      // verdict, from a fresh look (lookupInvite only reads, and a batch can
-      // run a while) or, without a token, the tokenless refusal; the owner
-      // key passes. Then a tool error (isError), which these clients hand
-      // to their model.
-      if (!mcpHasTool(tname)) {
-        const l = owner ? null : invite ? await stub.lookupInvite(invite) : missing();
-        if (l && !l.ok) return fail(-32001, l.error, { code: l.code });
+      // a name that is no tool of the catalog opens nothing: the
+      // credential's verdict first, then a tool error (isError), which
+      // these clients hand to their model
+      if (!s.has(tname)) {
+        const l = await s.unknownVerdict();
+        if (l) return fail(-32001, l.error, { code: l.code });
         return ok(mcpErr(mcpUnknownTool(tname)));
       }
-      const a = await toolAnswer(tname, targs, (r) => r);
+      const a = await s.tool(tname, targs, (r) => r);
       return "result" in a ? ok(a.result) : { jsonrpc: "2.0", id: id, error: a.error };
     }
     return fail(-32601, "Method not found: " + method);
@@ -302,11 +318,11 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // A request of a revision without initialize (one per POST, never in a
   // batch): mcpCheck's refusals first (400, or 404 for a method this
   // endpoint lacks, with the protocol's own codes), then the method's own
-  // checks, then the token's verdict where the method needs one, then the
-  // work. Those answers are in-band, HTTP 200, a refused token included
-  // (-32001 with data.code, as over the other kind): the official v2 client
-  // hands a 200's code and data to its caller, a 401's or 403's only as an
-  // HTTP error, and a 401 sends a client with an auth flow into OAuth,
+  // checks, then the credential's verdict where the method needs one, then
+  // the work. Those answers are in-band, HTTP 200, a refused credential
+  // included (-32001 with data.code, as over the other kind): the official v2
+  // client hands a 200's code and data to its caller, a 401's or 403's only
+  // as an HTTP error, and a 401 sends a client with an auth flow into OAuth,
   // which this endpoint does not offer. Every result carries resultType and
   // the server's identity in _meta. A notification (no id) gets the bare
   // 202, validated for nothing and running nothing.
@@ -318,48 +334,41 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     const method = req.method;
     // past mcpCheck, params is an object (its _meta holds the revision)
     const params: Body = isObject(req.params) ? req.params : {};
-    const done = (result: object) => json({ jsonrpc: "2.0", id, result: { resultType: "complete", ...result, _meta: { [MCP_META_SERVER]: mcpServerInfo(url.origin) } } });
+    const done = (result: object) => json({ jsonrpc: "2.0", id, result: { resultType: "complete", ...result, _meta: { [MCP_META_SERVER]: s.serverInfo } } });
     const fail = (code: number, message: string, data?: Record<string, unknown>) => json({ jsonrpc: "2.0", id, error: data ? { code, message, data } : { code, message } });
-    // a token that is none of the room's gets the start page's sentence
-    // (written for a client that sent a header: send the token alone, for
-    // its own room); every other refusal keeps the room's
-    const say = (r: Worded): Worded => (r.code === "invite_invalid" ? { error: START_INVALID, code: r.code } : r);
-    const refuse = (r: Worded) => { const w = say(r); return fail(-32001, w.error, { code: w.code }); };
+    const refuse = (r: Worded) => { const w = s.say(r); return fail(-32001, w.error, { code: w.code }); };
     // answers anyone, as initialize does, with the instructions for what
-    // the token turned out to be; ttlMs 0 since those follow the token and
+    // the credential turned out to be; ttlMs 0 since those follow it and
     // can go stale the moment an invite is revoked
     if (method === "server/discover") {
       return done({
         supportedVersions: MCP_MODERN_VERSIONS, capabilities: { tools: {} },
-        instructions: mcpInstructions(url.origin, variant),
-        catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogBuilt().digest },
+        instructions: s.instructions,
+        catalog: { version: s.catalogVersion, digest: s.catalog().digest },
         changes: changesLink(url.origin), ttlMs: 0, cacheScope: "private",
       });
     }
     // one page, so any cursor is one this endpoint never gave. The list is
-    // the same for everyone, but it is answered only for a token: private,
-    // so no shared cache hands it to a caller without one.
+    // the same for everyone, but it is answered only for a credential:
+    // private, so no shared cache hands it to a caller without one.
     if (method === "tools/list") {
       if (params.cursor !== undefined && params.cursor !== null) return fail(-32602, "Invalid cursor: tools/list answers in one page; send it without a cursor.");
-      const tk = await checkToken();
+      const tk = await s.verdict();
       if (!tk.ok) return refuse(tk);
-      const cat = mcpCatalogBuilt();
-      return done({ tools: cat.tools, catalog: { version: MCP_CATALOG_VERSION, digest: cat.digest }, ttlMs: MCP_TOOLS_TTL_MS, cacheScope: "private" });
+      const cat = s.catalog();
+      return done({ tools: cat.tools, catalog: { version: s.catalogVersion, digest: cat.digest }, ttlMs: MCP_TOOLS_TTL_MS, cacheScope: "private" });
     }
     // tools/call, the one method left (mcpCheck refused the rest)
     const tname = params.name;
     if (typeof tname !== "string" || !tname) return fail(-32602, "tools/call needs params.name");
     if (params.arguments !== undefined && !isObject(params.arguments)) return fail(-32602, "Invalid params for tools/call: 'arguments' must be an object");
-    const tk = await checkToken();
+    const tk = await s.verdict();
     if (!tk.ok) return refuse(tk);
-    // after the token, so a caller without one learns nothing of the catalog
-    if (!mcpHasTool(tname)) return fail(-32602, mcpUnknownTool(mcpEcho(tname)));
-    const a = await toolAnswer(tname, isObject(params.arguments) ? params.arguments : {}, say);
+    // after the credential, so a caller without one learns nothing of the catalog
+    if (!s.has(tname)) return fail(-32602, mcpUnknownTool(mcpEcho(tname)));
+    const a = await s.tool(tname, isObject(params.arguments) ? params.arguments : {}, s.say);
     return "result" in a ? done(a.result) : json({ jsonrpc: "2.0", id, error: a.error });
   };
-  if (Array.isArray(rpcBody) && !tokenOk.ok) {
-    return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request: a batch (a JSON array of requests) is answered only for a valid invite token. " + tokenOk.error + " Without one, send ping or initialize as a single request.", data: { code: tokenOk.code } } }, 400);
-  }
   if (Array.isArray(rpcBody)) {
     // batches belong to the revisions that open with initialize: one that
     // holds a request of the other kind (the claim in its _meta) is
@@ -374,10 +383,74 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   return single ? json(single) : accepted();
 }
 
-/** A refusal's sentence and code, as a tools/call words it. */
-type Worded = { error: string, code: string };
-/** A tools/call's answer: its result, or the JSON-RPC error. */
-type ToolAnswer = { result: object } | { error: { code: number, message: string, data?: Record<string, unknown> } };
+/** What one room tool's call needs, at the room's address (mcpRoute) and
+ *  through an agent key (routes/agent.ts, with the token the key holds for
+ *  that room, owner false). */
+export type RoomToolCall = {
+  rc: RouteContext,
+  stub: DurableObjectStub,
+  room: string,
+  /** the invite token presented to the room ("" for none) */
+  invite: string,
+  owner: boolean,
+  /** the token's verdict from this request's look (lookupInvite), which opens nothing */
+  checkToken: () => Promise<{ ok: true } | Refusal>,
+  /** the refusal of a request with no token, as this address words it */
+  missing: () => Refusal,
+  /** a refusal of the token, as this address answers a tools/call with one */
+  refuse: (r: Worded) => ToolAnswer,
+  /** set through an agent key: get_start_page says so, get_members gives
+   *  out no invite link or note and each mcp_call names the room */
+  viaKey?: boolean,
+};
+
+/** A tools/call of a room tool in one room, once its name (and, over the
+ *  revisions without initialize, the credential) has been taken:
+ *  get_invite, get_start_page and leave_room look, or leave, without
+ *  access(); every other tool runs access(), which opens the invite, then
+ *  mcpCallTool. Both addresses run this, so a call through an agent key asks
+ *  the room what the same call at the room's own address asks. */
+export async function roomToolAnswer(c: RoomToolCall, tname: string, targs: Body): Promise<ToolAnswer> {
+  const { rc, stub, room, invite, owner } = c;
+  const { env, url } = rc;
+  const no = c.refuse;
+  if (tname === "get_invite") {
+    const pv = invite ? await stub.previewInvite(invite) : c.missing();
+    if (!pv.ok) return no(pv);
+    return { result: mcpOk(invitePreviewBody(url.origin, room, pv)) };
+  }
+  // the start page's text, once (no structuredContent copy); the owner
+  // key alone has none, and with a token it is that token's page, with
+  // the line that says calls carrying the key act as the owner
+  if (tname === "get_start_page") {
+    if (!invite) return owner ? { result: mcpErr(OWNER_NO_START_PAGE) } : no(c.missing());
+    const v = await stub.startView(invite, room);
+    if (!v.ok) return no(startRefusal(v));
+    return { result: { content: [{ type: "text", text: startPage(v, url.origin, room, await watcherPin(url.origin), START_LIMITS, owner, !!c.viaKey) }] } };
+  }
+  // a leave, as POST .../leave takes it: the room looks the token up
+  // (room/members.ts leave) and refuses an invite never opened without
+  // opening it, so this runs no access(); the owner key is no member
+  if (tname === "leave_room") {
+    if (owner) return { result: mcpErr(LEAVE_OWNER, { code: "owner_not_member" }) };
+    // the token's refusal first, as every other tool answers it: the
+    // look this request already made (checkToken), which opens nothing
+    const tk = await c.checkToken();
+    if (!tk.ok) return no(tk);
+    const ask = leaveAsk(targs, room);
+    if (!ask.confirmed) return { result: mcpErr(leaveConfirmRefusal(room), { code: "confirm_mismatch" }) };
+    let r: LeaveResult | Refusal | LastMemberRefusal;
+    // a room deleted meanwhile (goneError), as any other tool's call answers it
+    try { r = await stub.leave(invite, room, ask.deleteRoom); } catch (e) { return { result: mcpErr(isGoneError(e) ? GONE_MSG : String((e && (e as Error).message) || e), isGoneError(e) ? { code: "room_deleted" } : undefined) }; }
+    if (!r.ok) { const b = leaveRefusalBody(r); return r.code.indexOf("invite_") === 0 ? no(b) : { result: mcpErr(b.error, b.unopened === undefined ? { code: b.code } : { code: b.code, unopened: b.unopened }) }; }
+    leaveAfter(rc, stub, room, r);
+    return { result: mcpOk(leaveBody(room, r)) };
+  }
+  const acc = owner || invite ? await stub.access(invite, owner) : c.missing();
+  if (!acc.ok) return no(acc);
+  try { return { result: await (async () => { const from = acc.name || (owner ? bodyText(targs.as, "as").trim().slice(0, MAX_NAME) : ""); const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs, invite, c.viaKey ? { agent: true } : undefined); return r && r.isError ? r : mcpOk(r); })() }; }
+  catch (e) { const ce = (e || {}) as { message?: string, code?: string, retry_after?: number }; return { result: mcpErr(ce.message ? ce.message : String(e), ce.code ? (ce.retry_after ? { code: ce.code, retry_after: ce.retry_after } : { code: ce.code }) : undefined) }; }
+}
 
 /** The answer to notifications alone: 202, no body, and the CORS headers
  *  json() gives every other answer. Without them a browser refused it, and

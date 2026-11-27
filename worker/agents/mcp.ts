@@ -15,6 +15,7 @@
 // themselves are the credential - no token crosses to wherever the bytes live).
 
 import {
+  AGENT_GLANCE_GAP_S,
   AUDIO_MAX,
   CLIENT_MSG_ID_MAX,
   DATE_RE,
@@ -43,6 +44,7 @@ import {
   MESSAGES_PAGE,
   MOVE_DIR_MAX,
   pageTooBig,
+  pollGap,
   UP_KINDS,
   UP_MAX_DIRECT_TEXT,
   UP_MAX_TEXT,
@@ -673,6 +675,95 @@ export function mcpCatalog() {
   // revision carry it; a client that predates titles ignores it)
   return list.map((t): McpTool => ({ name: t.name, title: MCP_TOOL_TITLES[t.name], description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }));
 }
+
+// The agent key's address (POST /api/mcp, routes/agent.ts): every room tool
+// of the catalog above with one more argument, the room, first and
+// required (and without the owner key's "as": no key is the owner), plus
+// four tools of its own. It is generated from the room catalog, so the two
+// cannot drift, and it has its own version and server name: the official
+// v2 client keeps a tools/list answer by the server's name and version, not
+// its address, so one name for both would hand a client the room address's
+// list here. Bump MCP_AGENT_CATALOG_VERSION on any edit of the four tools
+// or of the sentences below, and whenever MCP_CATALOG_VERSION moves.
+export const MCP_AGENT_CATALOG_VERSION = "1.0.0";
+/** Who answers at the agent key's address: initialize's serverInfo and
+ *  every per-request result's _meta. @param origin the site's origin */
+export function agentServerInfo(origin: string) {
+  return { name: "agent-chat-agent", title: "Agent Chat: your rooms", version: MCP_AGENT_CATALOG_VERSION, websiteUrl: origin };
+}
+/** The address's own tools' titles (MCP_TOOL_TITLES holds the room tools'). */
+export const AGENT_TOOL_TITLES: Record<string, string> = {
+  list_rooms: "Your rooms",
+  whats_waiting: "What waits on you in every room",
+  add_room: "Add a room's invite to your key",
+  remove_room: "Take a room off your key",
+};
+/** The room argument every room tool takes at that address. */
+const ROOM_ARG = { type: "string", description: "The room's name, as list_rooms gives it." };
+/** The room descriptions' sentences that say otherwise through a key: the
+ *  tool, the sentence as the room catalog has it, and what replaces it
+ *  (tests/unit/agent-catalog.test.mjs checks each sentence is there, so an
+ *  edit of the room text fails the test instead of dropping the change). */
+export const AGENT_DESCRIPTION_SWAPS: Array<[string, string, string]> = [
+  ["get_members", "For the owner key and people, each row but a revoked member's also carries that member's invite link, so a lost one can be re-sent; an agent gets its own row's link only. The links are passwords: never post them.",
+    "On this address no row carries an invite link or invite note, yours included: your key never gives out a room's token."],
+  ["get_start_page", "The same text as a GET of /api/rooms/ROOM with your token.",
+    "The same text as a GET of /api/rooms/ROOM with that room's token, with one line first saying it came through your key."],
+  ["leave_room", "Same as POST /api/rooms/ROOM/leave.",
+    "Same as POST /api/rooms/ROOM/leave. Through your key, it also marks the room on your key as left; take it off with remove_room."],
+];
+/** A room tool as the agent key's address lists it. */
+function withRoom(t: McpTool): McpTool {
+  let description = t.description;
+  for (const [name, was, now] of AGENT_DESCRIPTION_SWAPS) if (name === t.name) description = description.replace(was, now);
+  const props = Object.fromEntries(Object.entries(t.inputSchema.properties).filter(([k]) => k !== "as"));
+  return { name: t.name, title: t.title, description, inputSchema: { type: "object", properties: { room: ROOM_ARG, ...props }, required: ["room", ...t.inputSchema.required], additionalProperties: false }, annotations: t.annotations };
+}
+/** The agent key's catalog: its own four tools, then every room tool with room. */
+export function mcpAgentCatalog(): McpTool[] {
+  const own = [
+    mcpTool(
+      "list_rooms",
+      "The rooms on your agent key: each room's name, your name there, when it was added, and whether the room has since refused your invite (state refused, with its code). It asks no room and joins nothing; whats_waiting looks at the rooms themselves.",
+      {}, [], false,
+    ),
+    mcpTool(
+      "whats_waiting",
+      "What waits on you in every room on your key, in one call: for each room you have joined, what room_state.awaiting_you holds (each item with its mcp_call, room included) and how many messages others posted since your last post. It only looks: it joins no room and marks you seen nowhere. At most once " + pollGap(AGENT_GLANCE_GAP_S) + ".",
+      {}, [], false,
+    ),
+    mcpTool(
+      "add_room",
+      "Put one more room on your key with that room's agent invite token (the text after #invite= in your invite link, or the token in your note). It looks the invite up and joins nothing; your first other call there joins. A person's invite is refused. Then delete your own copy of the token, unless you still need it for a REST call or a wake.",
+      { room: { type: "string", description: "The room's name, as in your invite link." }, token: { type: "string", description: "Your agent invite token for that room." } },
+      ["room", "token"], false,
+    ),
+    mcpTool(
+      "remove_room",
+      "Take one room off your key: the key forgets that room's invite. Your seat stays (you are still a member); to leave the room for good, call leave_room first.",
+      { room: ROOM_ARG }, ["room"], false,
+    ),
+  ];
+  const look = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
+  const hints: Record<string, NonNullable<McpTool["annotations"]>> = {
+    list_rooms: look,
+    whats_waiting: look,
+    add_room: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    remove_room: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  };
+  return own.map((t): McpTool => ({ name: t.name, title: AGENT_TOOL_TITLES[t.name], description: t.description, inputSchema: t.inputSchema, annotations: hints[t.name] }))
+    .concat(mcpCatalog().map(withRoom));
+}
+let agentBuilt: { tools: McpTool[], digest: string, names: Set<string> } | null = null;
+/** The agent catalog, its digest and its names, built once per isolate (as mcpCatalogBuilt). */
+export function mcpAgentCatalogBuilt() {
+  if (!agentBuilt) { const tools = mcpAgentCatalog(); agentBuilt = { tools, digest: mcpCatalogDigest(tools), names: new Set(tools.map((t) => t.name)) }; }
+  return agentBuilt;
+}
+/** Whether a tools/call at the agent key's address names one of its tools (membership, as mcpHasTool). */
+export function mcpHasAgentTool(name: string) {
+  return mcpAgentCatalogBuilt().names.has(name);
+}
 /** @param obj a tool's result */
 export function mcpOk(obj: unknown) {
   const o = obj && typeof obj === "object" ? obj : { value: obj };
@@ -699,12 +790,15 @@ const MCP_BY_PATH: Array<[RegExp, string, boolean]> = [
 ];
 /** An awaiting_you item's call as a tool call: the body without from
  *  (the credential names the caller), the item's id first where the
- *  tool takes one, and as for the owner key. null for a call no tool makes. */
-export function mcpCallOf(item: AwaitingItem, as?: string): McpCall | null {
+ *  tool takes one, and as for the owner key. null for a call no tool makes.
+ *  @param room the room, first among the arguments, for the agent key's
+ *    address (POST /api/mcp), where every room tool takes it */
+export function mcpCallOf(item: AwaitingItem, as?: string, room?: string): McpCall | null {
   const p = item.call.path.replace(/^\/api\/rooms\/[^/]+\//, "");
   const hit = MCP_BY_PATH.find(([re]) => re.test(p));
   if (!hit) return null;
   const args: Record<string, unknown> = {};
+  if (room) args.room = room;
   if (hit[2] && item.id !== undefined) args.id = item.id;
   for (const [k, v] of Object.entries(item.call.body)) if (k !== "from") args[k] = v;
   if (as) args.as = as;
@@ -713,10 +807,11 @@ export function mcpCallOf(item: AwaitingItem, as?: string): McpCall | null {
 /** room_state as an MCP result carries it: each awaiting_you item with its
  *  mcp_call beside its call. Added after the block was cut to
  *  STATE_MAX_BYTES, so the cap drops no item for it; REST and the stream
- *  never carry it. A copy: the block passed in is left as it was. */
-export function withMcpCalls<T extends RoomState | undefined>(s: T, as?: string): T {
+ *  never carry it. A copy: the block passed in is left as it was.
+ *  @param room set on the agent key's address: each call names the room */
+export function withMcpCalls<T extends RoomState | undefined>(s: T, as?: string, room?: string): T {
   if (!s || !s.awaiting_you) return s;
-  return { ...s, awaiting_you: s.awaiting_you.map((i) => { const m = mcpCallOf(i, as); return m ? { ...i, mcp_call: m } : i; }) };
+  return { ...s, awaiting_you: s.awaiting_you.map((i) => { const m = mcpCallOf(i, as, room); return m ? { ...i, mcp_call: m } : i; }) };
 }
 /**
  * @param s base64, or a data: URL
@@ -745,11 +840,16 @@ function needFrom(from: string | null | undefined): asserts from is string {
  * @param from who the call acts as
  * @param name the tool
  * @param args the tool's arguments, as the client sent them
+ * @param opts agent: the call came through an agent key (POST /api/mcp):
+ *   get_members gives out no invite link or note, the caller's own
+ *   included, and each mcp_call names the room
  */
-export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null, invited_by?: string | null, invited?: number, joined?: number }, from: string | null | undefined, name: string, args: Body | null | undefined, token?: string | null) {
+export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null, invited_by?: string | null, invited?: number, joined?: number }, from: string | null | undefined, name: string, args: Body | null | undefined, token?: string | null, opts?: { agent: true }) {
   const A: Body = args || {};
   // the name the owner key acts as, for each awaiting_you item's mcp_call
   const as = owner ? from || undefined : undefined;
+  // through an agent key every room tool takes the room: the calls name it
+  const callRoom = opts && opts.agent ? room : undefined;
   switch (name) {
     case "whoami": {
       // /me's fields (an invite caller is always active here: this call opened it), plus
@@ -757,7 +857,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (owner) return { room: room, name: from || null, kind: acc.kind || null, status: null, invited_by: null, invited: null, joined: null, invite_only: true, owner: true };
       return { room: room, name: from || null, kind: acc.kind || null, status: "active", invited_by: acc.invited_by || null, invited: acc.invited || null, joined: acc.joined || null, invite_only: true, owner: false };
     }
-    case "get_room_state": needFrom(from); return withMcpCalls(await stub.roomState(from, room), as);
+    case "get_room_state": needFrom(from); return withMcpCalls(await stub.roomState(from, room), as, callRoom);
     case "list_messages": {
       // a cursor that is not a whole number is refused: parseInt read a
       // literal LAST_ID as 0, the room's oldest message
@@ -765,7 +865,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (after === undefined) throw new Error(CURSOR_REFUSAL);
       const limit = clamp(bodyNumber(A.limit, "limit", true) || MESSAGES_PAGE, 1, 100);
       const r = await stub.list(after, limit, 0, from || "", room);
-      if ("room_state" in r) r.room_state = withMcpCalls(r.room_state, as);
+      if ("room_state" in r) r.room_state = withMcpCalls(r.room_state, as, callRoom);
       return Object.assign({ room: room, you: from || undefined }, r);
     }
     case "list_attachments": {
@@ -795,8 +895,8 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const msg = await stub.postKeyed(cid, from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       if (!msg) throw new Error("That message was deleted while its attachment was being stored; nothing was posted");
       if ("status" in msg) throw new Error(msg.error);
-      if ("repeat" in msg) return Object.assign({ room: room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as) });
-      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as) });
+      if ("repeat" in msg) return Object.assign({ room: room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as, callRoom) });
+      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as, callRoom) });
     }
     case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
     case "publish_message": {
@@ -807,7 +907,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (text !== undefined && acc.kind === "agent" && isPlaceholderMessage(text)) throw new Error(PLACEHOLDER_TEXT);
       const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, text);
       if (refused(r)) throw new Error(r.error);
-      return Object.assign({ room: room }, r.msg, { room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as) });
+      return Object.assign({ room: room }, r.msg, { room_state: withMcpCalls(await stateAfterWrite(stub, from, room), as, callRoom) });
     }
     case "react": {
       needFrom(from);
@@ -824,7 +924,11 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const avq: Record<string, string> = {};
       const sign = list.members.some((x: RoomMember) => x.avatar_version) ? await mediaSigner(env, room) : null;
       if (sign) for (const x of list.members) if (x.avatar_version) avq[x.name] = sign(String(x.name).toLowerCase(), "avatar");
-      return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name], !owner && acc.kind === "agent" ? token || "" : null)) });
+      // through an agent key: a token no row holds, so no row gets a link or
+      // a note, whatever the member's kind (the owner can make an agent's
+      // invite a person's) - a key never gives out a room's token
+      const asAgent = opts && opts.agent ? "" : !owner && acc.kind === "agent" ? token || "" : null;
+      return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name], asAgent)) });
     }
     // who the call is, as a messages read says it (none for the owner key)
     case "get_board": return Object.assign({ room: room }, !owner && from ? { you: from, you_kind: acc.kind, joined: acc.joined } : {}, await stub.welcome(room));

@@ -108,4 +108,31 @@ export const TestHookMethods = {
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_ticket_ttl_ms', ?)", String(Math.max(0, Math.floor(Number(ms) || 0))));
     return { test_ticket_ttl_ms: this.ticketTtlMs() };
   },
+
+  // The agent keys' numbers, lowered for the API suite, on the
+  // AGENT_QUOTA_ROOM object only (table aqt, made only under TEST_HOOKS):
+  // per_ip, per_day and per_room cap new keys (agentReserve), glance_gap_ms
+  // is whats_waiting's gap (routes/agent.ts). A value of 0 or none is the
+  // constant; null clears them all.
+  agentTestLimits(): Record<string, number> {
+    if (!this.env || !this.env.TEST_HOOKS) return {};
+    if (!this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'aqt'").toArray().length) return {};
+    const out: Record<string, number> = {};
+    for (const r of this.sql.exec<{ k: string, n: number }>("SELECT k, n FROM aqt").toArray()) out[r.k] = r.n;
+    return out;
+  },
+
+  setTestAgentLimits(o: unknown) {
+    if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
+    if (this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name IN ('m', 'ak')").toArray().length) return { error: "Not the agent quota object" };
+    this.sql.exec("CREATE TABLE IF NOT EXISTS aqt (k TEXT PRIMARY KEY, n INTEGER NOT NULL)");
+    if (o === null) this.sql.exec("DELETE FROM aqt");
+    else if (o && typeof o === "object") {
+      for (const k of ["per_ip", "per_day", "per_room", "glance_gap_ms"]) {
+        const v = (o as Record<string, unknown>)[k];
+        if (v !== undefined) this.sql.exec("INSERT OR REPLACE INTO aqt (k, n) VALUES (?, ?)", k, Math.max(0, Math.floor(Number(v) || 0)));
+      }
+    }
+    return { agent_limits: this.agentTestLimits() };
+  },
 } satisfies ThisType<Room>;

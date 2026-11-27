@@ -28,6 +28,7 @@ import type { MessageMethods } from "../worker/room/messages.js";
 import type { GameMachineryMethods } from "../worker/room/games.js";
 import type { TestHookMethods } from "../worker/room/test-hooks.js";
 import type { MuseMethods } from "../worker/room/muse.js";
+import type { AgentMethods } from "../worker/room/agent.js";
 import type { Room } from "../worker/room/Room.js";
 
 // Room's methods live in one object per area, installed on the class with
@@ -60,7 +61,8 @@ declare module "../worker/room/Room.js" {
     typeof MessageMethods &
     typeof GameMachineryMethods &
     typeof MuseMethods &
-    typeof TestHookMethods, never> {
+    typeof TestHookMethods &
+    typeof AgentMethods, never> {
     // In-memory locks the method objects set on the instance (not storage).
     /** Sketch & Guess matches whose Referee is judging right now (sgJudgeNow). */
     sgJudging?: Set<number>;

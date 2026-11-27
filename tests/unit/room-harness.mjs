@@ -5,11 +5,13 @@ import { DatabaseSync } from "node:sqlite";
 import { Room } from "../../worker/room/Room.ts";
 
 /**
- * @param {{ put?: (key: string) => Promise<void> | void, before?: (op: string, key: string) => Promise<void> | void, after?: (op: string, key: string) => Promise<void> | void, env?: object }} [hooks]
+ * @param {{ put?: (key: string) => Promise<void> | void, before?: (op: string, key: string) => Promise<void> | void, after?: (op: string, key: string) => Promise<void> | void, env?: object, bare?: boolean }} [hooks]
  *   put runs inside every MEDIA.put, before the object is stored; before and
  *   after run around every storage call (op: put, get, head, delete, create,
  *   part, abort, complete), so a test can hold one call while others run, or make
- *   it throw; env adds bindings and variables to the Room's env
+ *   it throw; env adds bindings and variables to the Room's env; bare leaves
+ *   the object as a name no room was created under is (no storage at all),
+ *   as an agent key's identity and the quota objects start
  */
 export function makeRoom(hooks = {}) {
   const db = new DatabaseSync(":memory:");
@@ -99,7 +101,7 @@ export function makeRoom(hooks = {}) {
   const REQUESTS = { put: async () => {}, get: async () => null };
   const env = { REQUESTS, ...(hooks.env || {}), MEDIA };
   const room = new Room(ctx, env);
-  room.create();
+  if (!hooks.bare) room.create();
   const one = (q, ...p) => db.prepare(q).get(...p);
   const all = (q, ...p) => db.prepare(q).all(...p);
   return {

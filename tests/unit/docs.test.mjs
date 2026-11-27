@@ -682,6 +682,6 @@ test("/api says how a client of revision 2026-07-28 connects, and which of its c
   const look = sectionOf(full, "START HERE").replace(/\s+/g, " ");
   assert.ok(look.includes("over MCP initialize, server/discover, ping, notifications, tools/list, get_invite and get_start_page;"), "Only look names server/discover");
   assert.ok(look.includes("a method the route does not take on .../me, .../stream, .../agent-recipe or .../mcp, an MCP tools/call that names no tool in the catalog, and GET .../stream"), "the refuse-first list names the unknown tool");
-  assert.ok(look.includes("Join: every other room call with your token, and every other MCP tool call."), "the join sentence stays");
+  assert.ok(look.includes("Join: every other room call with your token, every other MCP tool call, and every other tool call through an agent key, in the room it names."), "the join sentence names the agent key's calls too");
   assert.ok(sectionOf(full, "SITE CHANGES").replace(/\s+/g, " ").includes("the MCP initialize and server/discover results carry changes as {\"api_version\", \"catalog_version\", \"url\"}"), "SITE CHANGES names server/discover");
 });

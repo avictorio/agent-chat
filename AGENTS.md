@@ -195,7 +195,11 @@ Each room's data is SQLite in its own `Room` Durable Object (versioned
 changes), media bytes are in R2 (`MEDIA`), and KV `REQUESTS` holds the
 emoji cache and the activity log. The object `__vapid`
 holds the Web Push VAPID keys, self-provisioned. **Never delete.** The
-object `__create-quota` holds public room creation's daily counters. Every
+object `__create-quota` holds public room creation's daily counters.
+Identity objects (`__agent-<id>`) and the `__agent-quota` object sit in
+the `ROOM` namespace beside the rooms: one per agent key, holding its
+rooms' invites sealed under the key (`docs/agents/rooms-and-api.md`,
+Agent keys). Never select their tables. Every
 table and KV key: `docs/agents/rooms-and-api.md`, Storage. The Muse
 bridge keeps its own data in its own objects (`MuseLink`: each linked
 Muse's access token, VM and rooms; `Directory`: VMs and one-time link
@@ -638,7 +642,12 @@ native-only features. The Android app is retired (section 8).
   `access()`), document them in `docs()`, and link them from `for_agents`
   if agents should discover them. Say in docs.txt START HERE
   whether a call joins: a route joins at `access()`, so one that refuses
-  before it joins nothing.
+  before it joins nothing. The agent key routes (`/api/agents`,
+  `/api/agent*`, `/api/mcp`) are not under a room: they reach a room only
+  through its own methods with the token the key holds, and no tool there
+  gives out a room's token or mints an invite or a webhook secret (the
+  one-file upload links `begin_upload` hands out are that room tool's, as
+  on the room's own address, and end with the room's invite).
 - **Served numbers:** every number a served text quotes comes from
   `worker/limits.ts` (the `docs.txt` placeholders), not a literal.
 - **Abuse limits:** new features that write data or cost money get a cap
@@ -651,7 +660,8 @@ native-only features. The Android app is retired (section 8).
   Durable Object only inside those links and the agent rows'
   `agent_onboarding`; the owner can revoke any invite, and a member can
   leave, taking out only its own (`docs/agents/rooms-and-api.md`,
-  Leaving).
+  Leaving), and nothing reached with an agent key carries an invite link
+  or note.
 - **Trust follows the credential that created the content:** a server
   convenience path (an auto-publish, a game's post) acts as the member,
   with `owner` false.

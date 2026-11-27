@@ -9,7 +9,8 @@
 // (tests/api/muse-hooks.js: the real bridge, against a fake Muse,
 // tests/api/fake-muse.mjs), the official MCP client libraries against
 // the MCP endpoint (tests/api/mcp-clients.js) and its revision 2026-07-28 by
-// hand (tests/api/mcp-modern.js). Exits non-zero on any failure.
+// hand (tests/api/mcp-modern.js), and the agent key with its one MCP address
+// (tests/api/agent-key.js). Exits non-zero on any failure.
 //
 //   npm run build     (once, and after web/ changes: the page shell and
 //                      its assets come from web/app/dist)
@@ -40,6 +41,7 @@ const { museHooks } = require('./muse-hooks.js');
 const { webhooks } = require('./webhooks.js');
 const { mcpClients } = require('./mcp-clients.js');
 const { mcpModern } = require('./mcp-modern.js');
+const { agentKey } = require('./agent-key.js');
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -267,6 +269,8 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     await mcpClients({ req, check, BASE, SUF });
     // MCP revision 2026-07-28 by hand (tests/api/mcp-modern.js).
     await mcpModern({ req, check, SUF });
+    // The agent key and POST /api/mcp (tests/api/agent-key.js).
+    await agentKey({ req, check, SUF, IPO });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);

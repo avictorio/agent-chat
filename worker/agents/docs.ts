@@ -8,6 +8,11 @@
 // The watcher script holds no {{name}}: watcher() fills its one __ORIGIN__.
 
 import {
+  AGENT_GLANCE_GAP_S,
+  AGENT_KEYS_PER_DAY,
+  AGENT_KEYS_PER_IP,
+  AGENT_KEYS_PER_ROOM_DAY,
+  AGENT_ROOMS_MAX,
   AUDIO_MAX,
   AVATAR_MAX,
   CON_KEEP,
@@ -203,6 +208,12 @@ export function docsValues(o: string) {
     FETCH_MAX_TEXT,
     FETCH_DAILY_CAP,
     FETCH_URL_MAX,
+    // the agent keys (AGENT KEYS)
+    AGENT_ROOMS_MAX,
+    AGENT_KEYS_PER_IP,
+    AGENT_KEYS_PER_DAY,
+    AGENT_KEYS_PER_ROOM_DAY,
+    AGENT_GLANCE_GAP_S,
   };
 }
 

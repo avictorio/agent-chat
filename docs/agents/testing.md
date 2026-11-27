@@ -47,7 +47,18 @@ Playwright); `tests/fixtures/` holds the files they share.
   version to its SHA-256 (`rooms-and-api.md`, Wake recipe); the API
   suite runs it once against its own server. `check-config.test.mjs` runs
   `check:config` against a live config of its own (a fake connector
-  helper under a scratch home; skipped without `python3`).
+  helper under a scratch home; skipped without `python3`). The agent
+  key's tests (`agent-*.test.mjs`) run its routes over a Room namespace of
+  harness objects (`agent-world.mjs`: every name a `Room` on node:sqlite,
+  a bare one, `makeRoom({bare: true})`, where no room was made, each behind
+  a stub that answers as RPC does and records every method asked):
+  the key and its sealing (`agent-key`), the identity object and its
+  guards (`agent-object`), what it stores (`agent-sealing`), real rooms
+  through the key (`agent-rooms`), the REST routes' order
+  (`agent-route`), the MCP address and the same calls asked of a room
+  through either address (`agent-mcp`), the catalog and its pinned
+  (version, digest) pairs (`agent-catalog`), and the size of
+  `whats_waiting` on `AGENT_ROOMS_MAX` full rooms (`agent-glance-size`).
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
   in the same `npm run test:unit`, with the same hook, and need no
   network and no Python. `bridge.test.mjs` runs the bridge's router and
@@ -87,7 +98,13 @@ Playwright); `tests/fixtures/` holds the files they share.
   v1 (`@modelcontextprotocol/sdk`) and v2 (`@modelcontextprotocol/client`:
   default, which opens with initialize, and "auto" and pinned to
   2026-07-28, which speak that revision); `tests/api/mcp-modern.js` sends
-  that revision's requests and refusals by hand. The libraries live in
+  that revision's requests and refusals by hand; the same libraries
+  connect to the agent key's address too. `tests/api/agent-key.js` makes
+  a key from throwaway rooms' invites and runs it there, the caps
+  included (the per-room one at its constant; the per-network and
+  site-wide ones and `whats_waiting`'s gap lowered by `POST
+  /api/test-hooks/agent-limits`, which only `TEST_HOOKS` arms), and
+  times `whats_waiting` over `AGENT_ROOMS_MAX` rooms. The libraries live in
   `tests/mcp-clients/` with exact versions and a lockfile, a package of
   its own so the deploy build installs none of them: run
   `npm ci --prefix tests/mcp-clients` once, or the suite fails saying so.
@@ -132,6 +149,16 @@ Playwright); `tests/fixtures/` holds the files they share.
   `server.js` passes with `--var` and nothing live sets; under it no mail
   is sent either (an address starting `sent-` counts as accepted, any
   other as refused).
+- **The differential check:** `node tests/api/differential.js
+  OTHER_CHECKOUT` starts a local server from another checkout (an
+  earlier commit's, `git archive` into a scratch folder with a link to
+  this `node_modules` and a copy of `web/app/dist`) and one from this,
+  sends both the same fixed list of requests (every per-room MCP request
+  in each credential state and one `tools/call` per tool, the start page,
+  the looks, members, messages, `/api/changes`, `/api`, `/llms.txt`) and
+  compares status, type and body with what differs per run masked (and
+  this checkout's listed doc edits and new notices taken out). Run it
+  before a push that must leave existing answers alone.
 - **A one-off script against its own local server** (a bug repro, a
   probe): `node tests/api/server.js run path/to/script.js` starts a
   server on a free port, runs the script with `BASE` and `OWNER` (the
@@ -214,7 +241,11 @@ holds an old column, a stray pointer, a legacy row), use the Cloudflare
 API: list the Room namespace's objects, then run SQL on each through the
 Durable Object `query/v2` endpoint. Run SELECTs only: `query/v2` also
 accepts writes. Never select `inv` tokens or `cfg` values. Objects of
-deleted rooms hold only Cloudflare's metadata table.
+deleted rooms hold only Cloudflare's metadata table. The namespace also
+holds an identity object per agent key (tables `ak` and `aks`: never
+select them) and `__agent-quota` (table `aq`, its counters), beside
+`__vapid` and the other quota objects; an object with no `m` table is no
+room (`rooms-and-api.md`, Agent keys).
 
 ---
 

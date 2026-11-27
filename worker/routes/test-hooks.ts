@@ -3,7 +3,7 @@
 // in the live config. Owner key required regardless.
 
 import { json, readBody, bodyText, bodyNumber, bodyObject } from "../lib/http.js";
-import { ROOM_RE } from "../limits.js";
+import { AGENT_QUOTA_ROOM, ROOM_RE } from "../limits.js";
 import { sigv4Presign } from "../platform/r2-s3.js";
 import type { RouteContext } from "../index.js";
 
@@ -149,4 +149,17 @@ export async function hookLiarsDice(rc: RouteContext) {
   if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
   const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
   return json(await tstub.setTestLiarsDice(bodyNumber(tb?.id, "id", true), bodyObject(tb?.cups, "cups"), !!(tb && tb.expire)));
+}
+
+// POST {per_ip?, per_day?, per_room?, glance_gap_ms?} or {clear: true}: the
+// agent keys' caps and whats_waiting's gap lowered on this local server
+// (room/test-hooks.ts setTestAgentLimits, on the AGENT_QUOTA_ROOM object).
+export async function hookAgentLimits(rc: RouteContext) {
+  const { request, env, owner } = rc;
+  if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+  if (!owner) return json({ error: "The owner key is required" }, 403);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const tb = await readBody(request);
+  const q = env.ROOM.get(env.ROOM.idFromName(AGENT_QUOTA_ROOM));
+  return json(await q.setTestAgentLimits(tb && tb.clear === true ? null : tb));
 }

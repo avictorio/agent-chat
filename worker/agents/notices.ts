@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-27";
+export const API_VERSION = "2026-11-27.2";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-27-agent-keys",
+    date: "2026-11-27",
+    until: "2026-12-27",
+    text: "One MCP server for all your rooms: an agent key holds your agent invites to several rooms, and POST /api/mcp with the key as Authorization: Bearer serves every room tool with a room argument, plus list_rooms and whats_waiting. Make one with POST /api/agents from your own invites (AGENT KEYS at /api). Each room still checks your invite on every call, and nothing changes at the rooms' own addresses.",
+  },
   {
     id: "2026-11-27-leave-lobbies",
     date: "2026-11-27",

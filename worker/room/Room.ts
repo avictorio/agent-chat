@@ -36,6 +36,7 @@ import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
 import { MuseMethods } from "./muse.js";
 import type { MuseHookView } from "./muse.js";
+import { AgentMethods, isIdentity } from "./agent.js";
 import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { AwaitingItem, GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
@@ -152,6 +153,19 @@ export type SkRow = { id: number, ts: number, added_by: string, title: string, d
 export type DcRow = { id: number, ts: number, added_by: string, title: string, note: string | null, signers: string, updated: number };
 /** A COUNT(*) AS n query's row. */
 export type CountRow = { n: number };
+/** ak: an agent key's identity (room/agent.ts), one row in an object no
+ *  room name reaches: when it was made, its list's version (one more per
+ *  write, compared on every swap), client (empty for an agent key) and the
+ *  list of its rooms, sealed (lib/agentkey.ts). */
+export type AkRow = { k: number, created: number, ver: number, client: string | null, ring: string };
+/** aks: one credential of an identity (a slot): its kind, the verifier of
+ *  its secret, the data key wrapped under it, when it was made; expires,
+ *  used, bind and next stay empty for an agent key. */
+export type AksRow = { slot: string, kind: string, verifier: string, wrapped: string | null, created: number, expires: number | null, used: number | null, bind: string | null, next: string | null };
+/** aq: one creation counter of agent keys (AGENT_QUOTA_ROOM): its key (a
+ *  network's or a room's hash, or the site's, and the window), the window,
+ *  the count. */
+export type AqRow = { k: string, w: string, n: number };
 /** A live stream subscriber (fetch): the filter it asked for, the state
  *  block it was last sent, and how to write to it or end it. */
 export type StreamClient = { token: string, owner: boolean, name: string, kinds: Set<string> | null, games: Set<number> | null, stateSub: boolean,
@@ -425,6 +439,8 @@ export class Room extends DurableObject {
   declare roomName?: string;
   /** test hook: how long each R2 call waits first (withR2Delay) */
   declare testR2DelayMs?: number;
+  /** when this identity's whats_waiting last ran (room/agent.ts agentGlanceTake): memory only */
+  declare agentGlanceAt?: number;
   /** True while destroy() is deleting the room's storage. */
   destroying = false;
   /** How many times destroy() has begun in this instance's life: the
@@ -490,8 +506,10 @@ export class Room extends DurableObject {
     if (!this.alive(gen)) throw goneError();
   }
 
+  // An object that holds an agent key's identity (room/agent.ts) is never
+  // made a room, nor a room's object an identity (agentMake refuses).
   create() {
-    if (this.ready || this.destroying) return false;
+    if (this.ready || this.destroying || isIdentity(this.sql)) return false;
     this.ensureSchema();
     this.ready = true;
     return true;
@@ -580,6 +598,7 @@ export class Room extends DurableObject {
   // name was checked, so a refused request still killed the first
   // creator's link.
   createGenesis(name: string): { existed: true } | { pending: true, retry_after: number } | { created: true, invite: { token: string } | null } {
+    if (isIdentity(this.sql)) return { existed: true };
     const c = this.genesisCheck();
     if (c.state === "taken") return { existed: true };
     if (c.state === "pending") return { pending: true, retry_after: c.retry_after };
@@ -1048,3 +1067,4 @@ Object.assign(Room.prototype, LightCyclesTickMethods);
 Object.assign(Room.prototype, GameMachineryMethods);
 Object.assign(Room.prototype, MuseMethods);
 Object.assign(Room.prototype, TestHookMethods);
+Object.assign(Room.prototype, AgentMethods);

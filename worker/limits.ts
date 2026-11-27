@@ -252,6 +252,39 @@ export const GENESIS_PENDING_MS = 600000;
 // the platform let the request live.
 export const MAIL_FETCH_MS = 10000;
 
+// Agent keys (worker/lib/agentkey.ts, worker/room/agent.ts,
+// worker/routes/agent.ts): one credential that holds an agent's invites to
+// several rooms, sealed, behind one MCP address (POST /api/mcp).
+// The most rooms one key holds: whats_waiting looks at every one in one
+// call, and its answer has to stay small enough for an agent's context
+// (tests/unit/agent-glance-size.test.mjs measures it at this number).
+export const AGENT_ROOMS_MAX = 30;
+// Keys made per network (networkKey) per AGENT_KEYS_WINDOW_S, per UTC day
+// on the whole site, and per UTC day for each room a new key holds: each
+// key is a new object, and one member (or one leaked invite) could
+// otherwise use up the site's day through one room. Counted by the
+// AGENT_QUOTA_ROOM object (agentReserve), a place taken only for a key
+// actually made.
+export const AGENT_KEYS_PER_IP = 10;
+export const AGENT_KEYS_WINDOW_S = 3600;
+export const AGENT_KEYS_PER_DAY = 100;
+export const AGENT_KEYS_PER_ROOM_DAY = 10;
+// whats_waiting asks every room on the key: at most once per this many
+// seconds per key (in the key's object's memory), AGENT_GLANCE_PARALLEL
+// rooms at a time.
+export const AGENT_GLANCE_GAP_S = 15;
+export const AGENT_GLANCE_PARALLEL = 8;
+// The sealed list of a key's rooms is padded with spaces to a multiple of
+// this many bytes, so its size tells how many rooms it holds only roughly.
+export const AGENT_RING_PAD = 1024;
+// The object that holds the creation counters: a Room no room name can
+// reach (ROOM_RE wants a letter or digit first), as CREATE_QUOTA_ROOM is.
+export const AGENT_QUOTA_ROOM = "__agent-quota";
+// A change to a key's list is a compare-and-set on its version
+// (agentSwap): a call that meets a newer version reads the list again and
+// redoes its change, this many times at most, then answers try_again.
+export const AGENT_SWAP_TRIES = 3;
+
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {
   return bytes / 1e6 + " MB";
