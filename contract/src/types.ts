@@ -480,6 +480,20 @@ export interface AgentKeyRoomRemoved {
   note: string;
 }
 
+/** POST /api/agent/rooms/leave: the agent left the room for good (as
+ *  leave_room answers: who left, when; room_deleted is always false, since
+ *  this address never deletes a room), off_key whether the room is off the
+ *  key now, and a note on what the key holds. A refusal carries room, and
+ *  for last_member unopened. */
+export interface AgentKeyRoomLeft {
+  room: string;
+  name: string;
+  left: number;
+  room_deleted: false;
+  off_key: boolean;
+  note: string;
+}
+
 /** DELETE /api/agent: the key is cut; the rooms it held (those that had
  *  refused its invite included), the Muse wakes it set up that were turned
  *  off and the rooms that did not confirm theirs are off (null: the key's

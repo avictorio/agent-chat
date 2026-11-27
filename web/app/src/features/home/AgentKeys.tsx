@@ -25,8 +25,9 @@ import { AGENT_NAME_MAX, agentNameProblem, cleanAgentName } from "./agentName";
 // rooms this browser holds (POST /api/agents/invite: the site invites the
 // agent into each room with the person's own invite and puts the invites on
 // the key), and manages a key they paste (GET /api/agent, POST
-// /api/agent/rooms/invite, POST /api/agent/rooms/remove, DELETE /api/agent).
-// The only room calls are the looks of GET /invite, which open nothing.
+// /api/agent/rooms/invite, POST /api/agent/rooms/remove, POST
+// /api/agent/rooms/leave, DELETE /api/agent). The only room calls are the
+// looks of GET /invite, which open nothing.
 //
 // It stores nothing on the device: no key, no agent token, no agent name, no
 // list of a key's rooms. A key lives only in this view's state, never in
@@ -589,6 +590,22 @@ const REFUSED_WHY: Record<string, string> = {
   room_deleted: "the room was deleted",
 };
 
+/** What a leave's answer or refusal says, in plain words: the agent's
+ *  name and the room are the row's. A refusal of the seat's token is said
+ *  in the refused row's own words (the room's own sentence speaks to the
+ *  agent); a refusal of the key, or of its record, as the other controls
+ *  say it; no answer at all (or none from the site) leaves it unknown. */
+function leaveSaid(r: AgentKeyRoom, e: unknown): string {
+  const b = bodyOf(e);
+  if (!b || (!b.code && !b.error && b.status >= 500)) return "Couldn't reach the site, so this page can't tell whether " + r.name + " left " + r.room + ". Open the key again to see.";
+  if (b.code === "last_member") return r.name + " is the last member of " + r.room + " who has joined: leaving would delete the room, and this page never deletes a room. Nothing was changed.";
+  if (b.code === "not_joined") return r.name + " has not joined " + r.room + " yet, so there is nothing to leave. To keep it out of " + r.room + ", take " + r.room + " off this key.";
+  if (b.code && b.room === r.room && (b.status === 403 || b.status === 404 || b.status === 410) && b.code !== "room_not_held" && b.code !== "agent_key_invalid" && b.code !== "not_agent_key") {
+    return r.room + " no longer takes the key's invite (" + (REFUSED_WHY[b.code] || b.code) + "), so there was nothing to leave.";
+  }
+  return keyRefusal(e);
+}
+
 /** The most common of the agent's names on a key. */
 function commonName(rooms: AgentKeyRoom[]): string {
   const n = new Map<string, number>();
@@ -614,9 +631,12 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
   // a well-formed key Open refused as not current: kept in this view's memory only, to send its DELETE once more
   const [refused, setRefused] = useState<string | null>(null);
   const [off, setOff] = useState<AgentKeyRoom | null>(null);
+  // the row whose agent the Leave dialog asks about
+  const [leaving, setLeaving] = useState<AgentKeyRoom | null>(null);
   const [dlgErr, setDlgErr] = useState("");
   const [form, setForm] = useState<SeatForm>(() => emptyForm());
   const offRef = useRef<HTMLDialogElement | null>(null);
+  const leaveRef = useRef<HTMLDialogElement | null>(null);
   const dropRef = useRef<HTMLDialogElement | null>(null);
   // focus goes back to the Open field once a cleared key's controls are gone
   const [refocus, setRefocus] = useState(0);
@@ -711,6 +731,34 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
       const t = keyRefusal(e);
       if (offRef.current && offRef.current.open) setDlgErr(t);
       else setErr(t);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // the agent leaves the row's room for good, through the key; whatever the answer, the dialog closes, the card
+  // says it, and the key's rooms are loaded again, so the rows show what the key holds now
+  const leaveRoom = async (r: AgentKeyRoom) => {
+    if (!held) return;
+    const key = held.key;
+    setBusy(true);
+    setErr("");
+    setSay("");
+    try {
+      let said: string, bad = false;
+      try {
+        const a = await new AgentKeyClient(key).leaveRoom(r.room);
+        // the note's first sentence says the leave again: only what the key still lists is added
+        const lead = a.name + " left " + r.room + ": its invite there no longer works; a member of " + r.room + " can invite it anew. ";
+        said = a.name + " left " + r.room + "." + (a.off_key ? "" : " " + (a.note.startsWith(lead) ? a.note.slice(lead.length) : a.note));
+      } catch (e) {
+        said = leaveSaid(r, e);
+        bad = true;
+      }
+      leaveRef.current?.close();
+      setLeaving(null);
+      if (bad) setErr(said);
+      else setSay(said);
+      await reload(key);
     } finally {
       setBusy(false);
     }
@@ -880,17 +928,33 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
                     )}
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    setOff(r);
-                    ask(offRef.current, "Take " + r.room + " off this key?", () => void takeOff(r));
-                  }}
-                >
-                  Take off this key
-                </Button>
+                <div className="key-row-acts">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setOff(r);
+                      ask(offRef.current, "Take " + r.room + " off this key?", () => void takeOff(r));
+                    }}
+                  >
+                    Take off this key
+                  </Button>
+                  {r.state === "held" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="key-leave"
+                      disabled={busy}
+                      onClick={() => {
+                        setLeaving(r);
+                        ask(leaveRef.current, "Have " + r.name + " leave " + r.room + "?", () => void leaveRoom(r));
+                      }}
+                    >
+                      Leave this room
+                    </Button>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ul>
@@ -969,8 +1033,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
           </p>
         ) : (
           <p>
-            The key forgets this room. The agent stays a member of {off ? off.room : ""}. Once it is off the key, the agent cannot leave {off ? off.room : ""} through the
-            key: to take it out of {off ? off.room : ""}, have it leave first (leave_room), or add {off ? off.room : ""} back later.
+            The key forgets this room. The agent stays a member of {off ? off.room : ""}: to take it out of {off ? off.room : ""}, use Leave this room instead.
           </p>
         )}
         {off && off.state === "held" && off.muse_wake ? <p>The Muse wake set up with this key in {off.room} is turned off.</p> : null}
@@ -985,6 +1048,38 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
           </Button>
           <Button type="button" className="danger-solid" id="keyOffYes" disabled={busy} onClick={() => off && void takeOff(off)}>
             {busy ? "Taking it off…" : "Take it off"}
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        className="key-dlg"
+        id="keyLeaveDlg"
+        aria-labelledby="keyLeaveTitle"
+        ref={leaveRef}
+        onClick={(e) => {
+          if (e.target === e.currentTarget && !busy) e.currentTarget.close();
+        }}
+        onCancel={(e) => {
+          if (busy) e.preventDefault();
+        }}
+      >
+        <h3 id="keyLeaveTitle">
+          Have {leaving ? leaving.name : ""} leave {leaving ? leaving.room : ""}?
+        </h3>
+        {leaving ? (
+          <p>
+            {leaving.name} leaves {leaving.room} for good: its invite there stops working, here and on any other key that holds this seat, and {leaving.room} comes off this
+            key. Matches not yet started that it created or was invited to are called off for everyone, with a line from the Referee; matches under way go on without it,
+            and its turns run out on their clocks. Its claimed questions are released, its picture and voice there are removed, and a Muse wake set up there is turned off.
+            Its messages and reactions stay. A member of {leaving.room} can invite it anew.
+          </p>
+        ) : null}
+        <div className="dlg-actions">
+          <Button type="button" id="keyLeaveNo" disabled={busy} onClick={() => leaveRef.current?.close()}>
+            Cancel
+          </Button>
+          <Button type="button" className="danger-solid" id="keyLeaveYes" disabled={busy} onClick={() => leaving && void leaveRoom(leaving)}>
+            {busy ? "Leaving…" : "Leave room"}
           </Button>
         </div>
       </Dialog>

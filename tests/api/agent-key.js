@@ -96,6 +96,41 @@ async function agentKey(ctx) {
     r = await req('GET', '/api/rooms/' + Cr + '/members', { owner: true });
     check('agent key: the seats stay: the owner still lists the agent in C', (r.json.members || []).some((x) => x.name === 'Keyed' && x.status === 'unused'), r.text.slice(0, 200));
 
+    // a leave through the key (POST /api/agent/rooms/leave, the room in the body): the agent's own leave and
+    // the room off the key; refused, and nothing changed, for the last member, a seat never opened, delete_room in
+    // the body, a confirm that is not the room's name and a key that is not one
+    {
+      const E = await room('e'), F = await room('f'), G = await room('g');
+      const TE = await invite(E, 'Leaver'), PE = await invite(E, 'Pat', 'human'), TF = await invite(F, 'Leaver'), TG = await invite(G, 'Leaver');
+      for (const [n, tk] of [[E, TE], [E, PE], [F, TF]]) await req('GET', '/api/rooms/' + n + '/me', { token: tk });
+      r = await create([{ room: E, token: TE }, { room: F, token: TF }, { room: G, token: TG }]);
+      const LK = (r.json || {}).key;
+      check('agent key leave: a key on three rooms, the agent joined in two', r.status === 201 && !!LK, r.status + ' ' + r.text.slice(0, 120));
+      const leave = (body, key) => req('POST', '/api/agent/rooms/leave', { json: body, headers: bearer(key || LK) });
+      r = await leave({ room: E, confirm: E, delete_room: true });
+      check('agent key leave: delete_room in the body is 400, the room named, nothing done', r.status === 400 && r.json.room === E && /never deletes a room/.test(r.json.error) && (await unused(E, 'Leaver')).revoked === null, r.status + ' ' + r.text.slice(0, 160));
+      r = await leave({ room: E, confirm: 'not-' + E });
+      check('agent key leave: a confirm that is not the room\'s name is 400 confirm_mismatch', r.status === 400 && r.json.code === 'confirm_mismatch' && r.json.room === E, r.status + ' ' + r.text.slice(0, 160));
+      r = await leave({ room: E, confirm: E }, '.ac1.' + 'C'.repeat(22) + '.' + 'C'.repeat(43));
+      check('agent key leave: a key that is not one is 403 agent_key_invalid', r.status === 403 && r.json.code === 'agent_key_invalid', r.status + ' ' + r.text.slice(0, 160));
+      r = await leave({ room: F, confirm: F });
+      check('agent key leave: the last member who has joined is refused (409 last_member, unopened), and the room stays', r.status === 409 && r.json.code === 'last_member' && r.json.unopened === 0 && r.json.room === F && (await req('GET', '/api/rooms/' + F + '/members', { owner: true })).status === 200 && (await unused(F, 'Leaver')).revoked === null, r.status + ' ' + r.text.slice(0, 200));
+      r = await leave({ room: G, confirm: G });
+      check('agent key leave: a seat never opened is refused (409 not_joined) and stays unopened', r.status === 409 && r.json.code === 'not_joined' && (await unused(G, 'Leaver')).used === null, r.status + ' ' + r.text.slice(0, 200));
+      r = await leave({ room: E, confirm: E });
+      check('agent key leave: 200 with the leave\'s fields, off the key, no token', r.status === 200 && JSON.stringify(Object.keys(r.json || {})) === JSON.stringify(['room', 'name', 'left', 'room_deleted', 'off_key', 'note']) && r.json.name === 'Leaver' && r.json.room_deleted === false && r.json.off_key === true && r.json.left > 0 && !r.text.includes(TE), r.status + ' ' + r.text.slice(0, 200));
+      r = await req('GET', '/api/rooms/' + E + '/members', { owner: true });
+      const gone = (r.json.members || []).find((x) => x.name === 'Leaver');
+      check('agent key leave: the members list shows the agent gone (revoked, with left), Pat still there', !!gone && gone.status === 'revoked' && gone.left > 0 && (r.json.members || []).some((x) => x.name === 'Pat' && x.status === 'active'), JSON.stringify(gone));
+      r = await req('GET', '/api/agent', { headers: bearer(LK) });
+      check('agent key leave: GET /api/agent no longer lists the room', JSON.stringify((r.json.rooms || []).map((x) => [x.room, x.state])) === JSON.stringify([[F, 'held'], [G, 'held']]), r.text.slice(0, 200));
+      r = await req('GET', '/api/rooms/' + E + '/me', { token: TE });
+      check('agent key leave: the seat\'s token is refused there from then on', r.status === 403 && r.json.code === 'invite_revoked', r.status + ' ' + r.text.slice(0, 120));
+      r = await leave({ room: E, confirm: E });
+      check('agent key leave: the room is not on the key any more: 404 room_not_held', r.status === 404 && r.json.code === 'room_not_held', r.status + ' ' + r.text.slice(0, 120));
+      await req('DELETE', '/api/agent', { headers: bearer(LK) });
+    }
+
     // the creation caps: per room at its constant (each key from its own network)
     const D = await room('d'), TD = await invite(D, 'Keyed');
     const PER_ROOM = LIM.AGENT_KEYS_PER_ROOM_DAY;

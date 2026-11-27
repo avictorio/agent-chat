@@ -282,7 +282,7 @@ import { bridgeWorld } from "./bridge-world.mjs";
 import { agentRemoveRoute, agentRoute } from "../../worker/routes/agent.ts";
 import { museNotJoined } from "../../worker/room/muse.ts";
 import { dropNote, wakeNotSettled, wakeStillSetting } from "../../worker/agents/onboarding.ts";
-import { AGENT_WAKE_ITEMS_MAX, AGENT_WAKE_LINK_MAX, AGENT_WAKE_RETRY_MS, AGENT_WAKE_SET_MS, AGENT_WAKE_SKEW_MS } from "../../worker/limits.ts";
+import { AGENT_SWAP_TRIES, AGENT_WAKE_ITEMS_MAX, AGENT_WAKE_LINK_MAX, AGENT_WAKE_RETRY_MS, AGENT_WAKE_SET_MS, AGENT_WAKE_SKEW_MS } from "../../worker/limits.ts";
 
 /** what a key's identity stores: its slot's kind and its list's entries, the
  *  sealed list opened as the Worker opens it; null once nothing is stored */
@@ -989,7 +989,9 @@ test("a Muse link longer than AGENT_WAKE_LINK_MAX is neither recorded on the key
     const mark = k.w.asked.length;
     const r = await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key));
     assert.deepEqual(result(r).structuredContent, { claimed: true, results: ["lima", "oslo"].map((room) => ({ room, ok: false, status: 502, code: "link_unusable", error: wakeLinkUnusable(room) })) });
-    assert.equal(wakeLinkUnusable("lima"), "The link to your person's Muse that this code gave could not be used through your key, so nothing was set in lima. The code was used: ask your person to connect the gadget again for a new one.");
+    // a new code from the same gadget gives the same link: the sentence sends the agent to the room's own registration instead
+    assert.equal(wakeLinkUnusable("lima"), "The link to your person's Muse that this code gave cannot be used through an agent key, so nothing was set in lima, and the code was used. A new code from the same gadget gives the same link: to have lima wake that Muse, register it with lima's own token instead (POST /api/muse/hooks, MUSE DELIVERY at /api).");
+    assert.doesNotMatch(wakeLinkUnusable("lima"), /connect the gadget again|for a new one/);
     assert.ok(!k.w.asked.slice(mark).some((a) => a.method === "museSetHookLook" || a.method === "agentSwap"), "no set sent, nothing written");
     assert.deepEqual(await storedOf(k.w, k.key), before);
     assert.deepEqual([hookIn(k.w, "lima"), hookIn(k.w, "oslo")], [null, null]);
@@ -1669,5 +1671,62 @@ test("the disconnect, the take-off and muse_register register their work with wa
     assert.ok(first.ok, "DELETE /api/agent: before the cut");
   } finally {
     k.b.restore();
+  }
+});
+
+// A disconnect whose writes keep meeting a record other DELETEs of the key
+// changed: when the write on its last try finds the record gone, one more
+// cut says so, and the answer is the complete disconnect; when the list
+// still moves, the 503 says the key is cut already and DELETE again
+// finishes, and it does.
+import { dropBusy } from "../../worker/agents/onboarding.ts";
+test("a disconnect's write on its last try that finds the record gone answers the complete disconnect; one whose list kept moving answers 503 try_again saying the key is cut already, and DELETE again finishes", async () => {
+  {
+    const k = await museKeyed(["lima"]);
+    try {
+      k.w.harness("lima").room.access(k.tok.lima, false);
+      assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
+      const obj = k.w.harness(k.id).room, realDrop = obj.agentDrop.bind(obj);
+      let drops = 0, inner = false, other = null;
+      // two stale answers stand for two other DELETEs' remainder writes; on the third try another DELETE deletes the record
+      obj.agentDrop = async (...a) => {
+        if (inner) return realDrop(...a);
+        if (++drops <= 2) return { ok: false, code: "stale" };
+        inner = true;
+        other = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
+        inner = false;
+        return realDrop(...a);
+      };
+      const first = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
+      delete obj.agentDrop;
+      assert.equal(drops, AGENT_SWAP_TRIES, "the record went on the last try");
+      assert.deepEqual(other.json, { deleted: true, rooms: ["lima"], muse_wakes_removed: [], muse_wakes_left: [], note: dropNote([]) }, "the other DELETE deleted the record");
+      assert.deepEqual([first.status, first.json], [200, { deleted: true, rooms: ["lima"], muse_wakes_removed: ["lima"], muse_wakes_left: [], note: dropNote([]) }], "this call took lima's hook off on its first try");
+      assert.equal(hookIn(k.w, "lima"), null, "and the wake is off");
+      assert.equal((await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })))).json.code, "agent_key_invalid", "nothing is left to finish");
+    } finally {
+      k.b.restore();
+    }
+  }
+  {
+    const k = await museKeyed(["lima"]);
+    try {
+      k.w.harness("lima").room.access(k.tok.lima, false);
+      assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
+      const obj = k.w.harness(k.id).room;
+      obj.agentDrop = async () => ({ ok: false, code: "stale" });
+      const r = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
+      delete obj.agentDrop;
+      assert.deepEqual([r.status, r.json, r.headers.get("Retry-After")], [503, { error: dropBusy(), code: "try_again" }, "1"]);
+      assert.match(dropBusy(), /^This key is disconnected already: it works nowhere now\./);
+      assert.match(dropBusy(), /DELETE \/api\/agent again with this key finishes it\.$/);
+      assert.equal((await read(agentRoute(k.w.rc("GET", "/api/agent", { headers: auth(k.key) })))).json.code, "agent_key_invalid", "the key is cut, as the answer says");
+      const again = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
+      assert.deepEqual([again.status, again.json.muse_wakes_left, again.json.note], [200, [], dropNote([])], "DELETE again finishes");
+      assert.equal(hookIn(k.w, "lima"), null);
+      assert.equal(await storedOf(k.w, k.key), null, "the record is gone");
+    } finally {
+      k.b.restore();
+    }
   }
 });

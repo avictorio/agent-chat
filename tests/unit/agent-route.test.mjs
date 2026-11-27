@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, read, agentInvite } from "./agent-world.mjs";
-import { agentCreateRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
+import { agentCreateRoute, agentLeaveRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
 import { AGENT_KEY_INVALID, AGENT_KEY_MISSING, NOT_AGENT_KEY, agentKeyNote } from "../../worker/agents/onboarding.ts";
 import { AGENT_KEYS_PER_DAY, AGENT_KEYS_PER_IP, AGENT_KEYS_PER_ROOM_DAY, AGENT_KEYS_WINDOW_S, AGENT_QUOTA_ROOM, AGENT_ROOMS_MAX } from "../../worker/limits.ts";
 import { hashKey, networkKey } from "../../worker/lib/address.ts";
@@ -197,6 +197,7 @@ test("the key check of every /api/agent route: no key 401, a room token 403, any
     ["DELETE /api/agent", (h) => agentRoute(w.rc("DELETE", "/api/agent", { headers: h }))],
     ["POST /api/agent/rooms", (h) => agentRoomsRoute(w.rc("POST", "/api/agent/rooms", { headers: h, json: { rooms: [{ room: "lima", token: tok.lima }] } }))],
     ["POST /api/agent/rooms/remove", (h) => agentRemoveRoute(w.rc("POST", "/api/agent/rooms/remove", { headers: h, json: { room: "lima" } }))],
+    ["POST /api/agent/rooms/leave", (h) => agentLeaveRoute(w.rc("POST", "/api/agent/rooms/leave", { headers: h, json: { room: "lima", confirm: "lima" } }))],
   ];
   const refusals = [
     [{}, 401, "agent_key_missing", AGENT_KEY_MISSING, false],

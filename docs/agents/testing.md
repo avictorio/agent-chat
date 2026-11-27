@@ -70,7 +70,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   registration (no wait), an outstanding recording at the skew margin's
   edge, a registration whose own write never goes through, a set whose
   answer is lost (after and before it ran), a link longer than a key
-  records, two DELETEs of one key at once, a settling write that loses
+  records, two DELETEs of one key at once (and a write on the last try
+  that finds the record gone, or a list that keeps moving: the 503 that
+  says the key is cut), a settling write that loses
   its compare-and-set and looks again,
   the two clocks seconds apart either way, an answer with no clock, the
   bound, an older room whose invites' names fold alike and that room put
@@ -80,7 +82,15 @@ Playwright); `tests/fixtures/` holds the files they share.
   second DELETE), and the work registered with `waitUntil` before its
   first write, which `agent-world.mjs` records as `waitedBeforeWrite`; a
   room's clock is set there by replacing that room object's `museNow`,
-  which its three hook methods read, so no variable is needed), the catalog and its pinned
+  which its three hook methods read, so no variable is needed), a leave
+  through the key (`agent-leave`: every refusal before the leave asks no
+  room and writes nothing, `delete_room` refused in every form, what the
+  leave does in the room with Cartesia stood in for, the wake off in a
+  room whose invites' names fold alike, a wake not confirmed off kept for
+  a take-off, the last member and a protected room, a seat never opened,
+  the key's list changed under the leave, a room deleted meanwhile, and
+  `waitUntil` registered before the room is asked to leave, read off the
+  order `agent-world.mjs` records), the catalog and its pinned
   (version, digest) pairs (`agent-catalog`), the size of
   `whats_waiting` on `AGENT_ROOMS_MAX` full rooms and the sealed list
   with every entry at the wake bound (`agent-glance-size`), a
@@ -96,7 +106,8 @@ Playwright); `tests/fixtures/` holds the files they share.
   every answer, the drop saying which link is on after it), the record's
   guard, its three writes as pure functions and a bounded exhaustive
   model over them (`agent-wakes`: the guard refusing a write that drops
-  another call's recording, or prunes one not expired; two registrations
+  another call's recording, or prunes one not expired, and letting a mark
+  and a person's add's rollback through, which take nothing off; two registrations
   of one link or two,
   sets taken, refused, thrown or never run, own writes, tidies and a
   take-off in every order, lost compare-and-sets; at every state a hook
@@ -146,7 +157,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   a key from throwaway rooms' invites and runs it there, the caps
   included (the per-room one at its constant; the per-network and
   site-wide ones and `whats_waiting`'s gap lowered by `POST
-  /api/test-hooks/agent-limits`, which only `TEST_HOOKS` arms), and
+  /api/test-hooks/agent-limits`, which only `TEST_HOOKS` arms), leaves a
+  room through the key (`POST /api/agent/rooms/leave`: the members list
+  and the key after it, the two 409s, the 400s, a wrong key), and
   times `whats_waiting` over `AGENT_ROOMS_MAX` rooms; `tests/api/agent-person.js`
   makes keys with a person's invites (the check, a check that is not a
   boolean, the answer's fields, the seats the owner sees,

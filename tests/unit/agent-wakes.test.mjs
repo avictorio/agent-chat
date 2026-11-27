@@ -58,6 +58,26 @@ test("the guard checks recordings too: one may leave only as the caller's own or
   assert.throws(() => keepsWakes(7, [on], [], [seenAt(7, 10, "other")], ["r"]), /may still reach/);
 });
 
+// The two writes that take nothing off (wakes.ts): a mark keeps an
+// entry's links as they are; a failed person's add's rollback takes off its
+// own entries that hold no link and puts back each entry it replaced as it
+// was before, links and recordings included: the guard lets both through
+// with no observation at all, and refuses a rollback that would take a link
+// or a recording off.
+test("a mark and a person's add's rollback take no link or recording off: the guard lets them through with no observation; the rollback may put back a link the replacing write had settled off; one that takes a link or a recording off is refused", () => {
+  const X = { link: "link-x", recs: [{ id: "r1", deadline: 1000 }] };
+  const was = entry([X], "tok-old");
+  const mine = { ...entry(null, "tok-new"), name: "Other" };
+  // the mark: the same entry, refused, its links as they are
+  assert.doesNotThrow(() => keepsWakes(7, [entry([X])], [{ ...entry([X]), state: "refused", code: "invite_revoked", at: 5 }], []));
+  // the rollback: the add's own entry (no link) off, the entry it replaced back as it was before, its link and recording included
+  assert.doesNotThrow(() => keepsWakes(7, [mine], [was], []));
+  assert.doesNotThrow(() => keepsWakes(7, [mine, entry(null, "tok-z")], [entry(null, "tok-z")], []), "an own entry with no link taken off, nothing put back");
+  // a rollback that took a link or a recording off the list it read would be refused
+  assert.throws(() => keepsWakes(7, [{ ...mine, hooks: [X] }], [was], []), /no observation/);
+  assert.throws(() => keepsWakes(7, [{ ...mine, hooks: [X] }], [{ ...mine, hooks: [{ link: "link-x", recs: [] }] }], []), /neither its call's own nor expired/);
+});
+
 test("the list's three writes as pure functions: a recording before a set (at most AGENT_WAKE_ITEMS_MAX links and recordings), a call's own write takes off its own id only, a settling write keeps the hook's link and what may still land and prunes what has expired", () => {
   let rooms = [entry(null)];
   // two recordings of one link in the same millisecond: two ids

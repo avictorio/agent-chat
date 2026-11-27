@@ -35,11 +35,17 @@
 //   room again. The settling writes: the disconnect's remainder and its
 //   deletion; muse_register at the bound and in its tidy; the person's add
 //   before any invite; and, by the same rule, a take-off, which takes the
-//   whole entry off, and an add over a refused entry, which replaces it,
-//   each only when every link of it leaves on its observation.
-// Two writes keep the record as it is: a room marked refused keeps its
-// links; and a failed person's add, rolling back, puts back the entry it
-// replaced as it was, links included (it takes no link or recording off).
+//   whole entry off, an add over a refused entry, which replaces it, and
+//   the write after a leave through the key, which takes the left seat's
+//   entry off, each only when every link of it leaves on its observation
+//   (else the leave's write marks the entry left, its links kept).
+// Two writes take no link or recording off: a room marked refused keeps its
+// links as they are; and a failed person's add, rolling back, takes off its
+// own entries that hold no link (one a registration recorded a wake on
+// since stays) and puts back each entry it replaced as it was before the
+// add replaced it, links and recordings included, so it may put back on
+// the record a link the replacing write had settled off (a link on the
+// record says only that a hook of it may be on).
 // Nothing else takes a link off. Why it is enough: a recording missing from
 // the list at v had answered before v was written, so its set ran in the
 // room before the observation; a recording on the list at v has either

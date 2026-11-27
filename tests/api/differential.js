@@ -17,16 +17,16 @@
 // api_version (the API's version moves with every announced change).
 // /api/changes is compared with the notices only this checkout has left
 // out, /api and /llms.txt with this checkout's own edits taken out again,
-// and the agent key's answers with this checkout's changed sentences, the
-// disconnect's new fields and the agent catalog's version, digest and new
-// tool taken out (ADDED_SECTIONS, CHANGED_SECTIONS, EXPECTED_DOC_EDITS,
-// EXPECTED_SENTENCE_EDITS and agentMcpMasked below: a change that edits
-// those on purpose lists its edits there), and the retry time of a
-// counter's window, which moves with the run, masked on the answers that
-// carry one (MOVING_RETRY); a note names each part left out wherever the
-// two copies differ there; the app shell's
-// Content-Security-Policy may differ only by CSP_ADDED, and a path this
-// checkout adds (NEW_PATHS) must have been the other's unknown-path 404.
+// and the agent key's answers with this checkout's changed sentences taken
+// out (ADDED_SECTIONS, CHANGED_SECTIONS, EXPECTED_DOC_EDITS and
+// EXPECTED_SENTENCE_EDITS below: a change that edits those on purpose lists
+// its edits there, each against the checkout it is compared with), and the
+// retry time of a counter's window, which moves with the run, masked on the
+// answers that carry one (MOVING_RETRY); a note names each part left out
+// wherever the two copies differ there; the app shell's
+// Content-Security-Policy may differ only by CSP_ADDED on the answers
+// CSP_CHANGED names, and a path this checkout adds (NEW_PATHS) must have
+// been the other's unknown-path 404.
 // Everything else must be identical.
 //
 //   node tests/api/differential.js /path/to/earlier-checkout
@@ -47,37 +47,21 @@ if (!OTHER) { console.error('usage: node tests/api/differential.js /path/to/earl
  *  (up to the next section's heading) before the compare. */
 const ADDED_SECTIONS = [];
 /** The sections of /api this checkout rewrites, by heading: taken out of
- *  both copies before the compare (AGENT KEYS gains the person's way and
- *  muse_register). */
+ *  both copies before the compare (AGENT KEYS gains the leave through the
+ *  key). */
 const CHANGED_SECTIONS = ['AGENT KEYS (ONE MCP SERVER FOR ALL YOUR ROOMS)'];
 /** The edits this checkout makes to /api and /llms.txt, taken out of its
  *  copy before the compare: [the text this checkout serves, the text the
  *  other serves], filled with the origin and the limits as served (fill). */
 const EXPECTED_DOC_EDITS = [
-  ['      VOICES), POST /api/agents and the /api/agent routes (AGENT KEYS), POST /api/agents/invite\n      and POST /api/agent/rooms/invite (a person inviting an agent onto a key with their own\n      invite), muse_register on the agent key\'s address, and POST .../leave and MCP leave_room\n      (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.', '      VOICES), POST /api/agents and the /api/agent routes (AGENT KEYS), and POST .../leave and MCP\n      leave_room (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.'],
-  ['    not_person_invite\n                     403  an invite the room stores as an agent\'s (or with no kind) offered as the\n                          inviter of an agent key\'s seat\n    seat_in_use      409  the agent seat of that name you invited is already in use: reuse "any"\n                          takes it (AGENT KEYS)\n', ''],
-  ['                          time, or a room has not confirmed that the Muse wake your key set up\n                          there is off, or a registration through your key whose outcome there\n                          is not on your key\'s record yet may still reach it; wait the\n                          Retry-After seconds and send it again\n    answer_lost      503  muse_register: the room\'s answer to setting your Muse wake was lost,\n                          so it may be on there or not; your key keeps it on its record (taking\n                          the room off or disconnecting turns it off either way): register\n                          again with a new code to be sure\n    link_unusable    502  muse_register: the link to your person\'s Muse that the code gave\n                          cannot be used through an agent key; nothing was set', '                          time; wait the Retry-After seconds and send it again'],
-  ['                          using it is all it takes); the call did not open it. muse_register:\n                          a room you have not joined yet, skipped', '                          using it is all it takes); the call did not open it'],
-  ['  agent key, call muse_register at {{origin}}/api/mcp instead (AGENT KEYS): it needs no room\n  token. With your room tokens:', '  agent key, keep your room tokens for this call:'],
-  ['AGENT KEYS at {{origin}}/api. Your person can also make one for you on the site\'s home page.', 'AGENT KEYS at {{origin}}/api.'],
+  ['      invite), muse_register on the agent key\'s address, and POST .../leave, MCP leave_room\n      (LEAVING THE ROOM) and POST /api/agent/rooms/leave (a leave through an agent key: AGENT\n      KEYS), which refuse an invite never opened and leave it unopened.', '      invite), muse_register on the agent key\'s address, and POST .../leave and MCP leave_room\n      (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.'],
+  ['                          cannot be used through an agent key; nothing was set, and the code\n                          was used (a new code from the same gadget gives the same link):\n                          register with the room\'s own token instead (MUSE DELIVERY)\n', '                          cannot be used through an agent key; nothing was set\n'],
 ];
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as
  *  above. */
-const EXPECTED_SENTENCE_EDITS = [
-  ['Make one with POST /api/agents from your own agent invites, or ask your person to make one on the site\'s home page, under Agent keys (AGENT KEYS at /api).', 'Make one with POST /api/agents from your own agent invites (AGENT KEYS at /api).'],
-  ['Tell your person; a new key can be made from your agent invites, or by your person on the site\'s home page.', 'Tell your person; a new key can be made from your agent invites.'],
-  ['(the watcher\'s rooms.txt, a webhook; a Muse wake needs none: muse_register)', '(the watcher\'s rooms.txt, a webhook, POST /api/muse/hooks)'],
-  ['This key works nowhere now, and the Muse wakes it set up are off. Every seat stays', 'This key works nowhere now. Every seat stays'],
-  ['Every seat stays as it was: you are still a member of each of these rooms that still takes your invite,', 'Every seat stays: you are still a member of these rooms,'],
-  ['every tool but list_rooms, whats_waiting, add_room, remove_room and muse_register takes room', 'every tool but list_rooms, whats_waiting, add_room and remove_room takes room'],
-  ['never join a room, nor do leave_room and muse_register;', 'never join a room, nor does leave_room;'],
-  ['{{origin}}/api/agents, and a person can make one for it on the site\'s home page, under Agent keys (AGENT KEYS at {{origin}}/api).', '{{origin}}/api/agents (AGENT KEYS at {{origin}}/api).'],
-  ['a new key can be made from your agent invites, or by your person on the site\'s home page (AGENT KEYS at {{origin}}/api).', 'a new key can be made from your agent invites (AGENT KEYS at {{origin}}/api).'],
-  [' For a Muse wake, call muse_register at {{origin}}/api/mcp with your person\'s gadget code instead: it needs no token.', ''],
-  ['The key forgets {{room2}}, which no longer takes its invite: nothing else changes there.', 'Your seat stays: you are still a member of {{room2}}. To leave it for good, call leave_room through the key, or use the room\'s own address.'],
-];
+const EXPECTED_SENTENCE_EDITS = [];
 /** The answers whose retry time is the seconds left in a counter's window,
  *  which moves with the run (the two servers are asked a while apart): that
  *  number masked in both copies, the Retry-After header and the body's
@@ -88,29 +72,13 @@ let LIM;
 /** Response headers that differ per run or per connection, left out of the compare. */
 const VOLATILE_HEADERS = new Set(['date', 'content-length', 'connection', 'keep-alive', 'transfer-encoding', 'cf-ray', 'server', 'report-to', 'nel', 'alt-svc']);
 /** The answers whose Content-Security-Policy this checkout extends (the app
- *  shell, served by page()), and how. */
-const CSP_CHANGED = new Set(['page /', 'page /r/ROOM']);
+ *  shell, served by page()), and how: none against a checkout whose policy
+ *  has it already. */
+const CSP_CHANGED = new Set();
 const CSP_ADDED = "; frame-ancestors 'self'";
 /** Paths this checkout adds, which the other answered as an unknown path:
  *  sent to both, the other's answer checked to be that 404, not compared. */
-const NEW_PATHS = new Set(['new POST /api/agents/invite', 'new POST /api/agent/rooms/invite']);
-
-/** An answer of the agent key's address with the agent catalog's version
- *  and digest masked in both copies (they move with the new tool), and in
- *  this checkout's copy the new tool left out of tools/list. */
-function agentMcpMasked(text, mine) {
-  let j;
-  try { j = JSON.parse(text); } catch { return text; /* not JSON: compared as it is */ }
-  const r = j && j.result;
-  if (r && typeof r === 'object') {
-    if (r.catalog) r.catalog = { version: '<AGENT_CATALOG>', digest: '<AGENT_CATALOG>' };
-    if (r.serverInfo && r.serverInfo.name === 'agent-chat-agent') r.serverInfo.version = '<AGENT_CATALOG>';
-    const m = r._meta && r._meta['io.modelcontextprotocol/serverInfo'];
-    if (m && m.name === 'agent-chat-agent') m.version = '<AGENT_CATALOG>';
-    if (mine && Array.isArray(r.tools)) r.tools = r.tools.filter((t) => t.name !== 'muse_register');
-  }
-  return JSON.stringify(j);
-}
+const NEW_PATHS = new Set(['new POST /api/agent/rooms/leave, delete_room', 'new POST /api/agent/rooms/leave, a room the key marks left']);
 
 /** One run of the fixed list against a server: each request's label and
  *  answer, and the set-up calls that did not do what the list assumes. */
@@ -309,8 +277,11 @@ async function scenario(srv, muse, suf) {
   await send('agent mcp tools/call leave_room', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'leave_room', arguments: { room, confirm: room } }) });
   await send('agent mcp tools/call list_rooms, after the leave', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'list_rooms', arguments: {} }) });
   await send('agent mcp tools/call whoami, after the leave', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'whoami', arguments: { room } }) });
-  await send('new POST /api/agents/invite', 'POST', '/api/agents/invite', { json: { name: 'DiffNew', rooms: [{ room, inviter_token: per }], check: true }, headers: net });
-  await send('new POST /api/agent/rooms/invite', 'POST', '/api/agent/rooms/invite', { headers: kh, json: { name: 'DiffNew', rooms: [{ room: room2, inviter_token: per }], check: true } });
+  await send('agent POST /api/agents/invite, a check', 'POST', '/api/agents/invite', { json: { name: 'DiffNew', rooms: [{ room, inviter_token: per }], check: true }, headers: net });
+  await send('agent POST /api/agent/rooms/invite, a check', 'POST', '/api/agent/rooms/invite', { headers: kh, json: { name: 'DiffNew', rooms: [{ room: room2, inviter_token: per }], check: true } });
+  // a leave through the key, refused before it asks any room, so nothing changes on either server
+  await send('new POST /api/agent/rooms/leave, delete_room', 'POST', '/api/agent/rooms/leave', { headers: kh, json: { room, confirm: room, delete_room: true } });
+  await send('new POST /api/agent/rooms/leave, a room the key marks left', 'POST', '/api/agent/rooms/leave', { headers: kh, json: { room, confirm: room } });
   // the disconnect with a room the key holds that refused its invite (the agent left it)
   must('agent: disconnected', (await send('agent DELETE /api/agent', 'DELETE', '/api/agent', { headers: kh })).status === 200);
   await send('agent GET /api/agent, disconnected', 'GET', '/api/agent', { headers: kh });
@@ -405,18 +376,6 @@ function masked(text, tokens) {
           ty = ty.split(n).join(w).split(JSON.stringify(n).slice(1, -1)).join(JSON.stringify(w).slice(1, -1));
           if (ty !== before) leftOut('changed sentence ' + (e + 1) + ' (' + JSON.stringify(n.trim().slice(0, 56)) + '...)', y.label);
         });
-        // the disconnect's two new fields
-        const before = ty;
-        ty = ty.replace('"muse_wakes_removed":[],"muse_wakes_left":[],', '');
-        if (ty !== before) leftOut('the disconnect\'s fields muse_wakes_removed and muse_wakes_left', y.label);
-        if (y.label.startsWith('agent mcp')) {
-          const mx = agentMcpMasked(tx, false), my = agentMcpMasked(ty, true);
-          if (mx !== tx || my !== ty) {
-            const raw = (t) => { try { return JSON.stringify(JSON.parse(t)); } catch { return t; } };
-            if (raw(tx) !== raw(ty)) leftOut('the agent catalog\'s version and digest, and the tool muse_register', y.label);
-          }
-          tx = mx; ty = my;
-        }
       }
       if (y.label === '/llms.txt') EXPECTED_DOC_EDITS.forEach(([now, was], e) => { const n = fill(now); if (ty.includes(n)) { ty = ty.replace(n, fill(was)); leftOut('docs edit ' + (e + 1) + ' (' + JSON.stringify(n.trim().slice(0, 56)) + '...)', y.label); } });
       if (y.label === '/api/changes') {
@@ -463,6 +422,6 @@ function masked(text, tokens) {
   // each part left out of the compare, where the two copies differ there, and on which answers
   for (const [part, labels] of left) console.log('note left out ' + part + ': on ' + labels.length + ' answer' + (labels.length === 1 ? '' : 's') + ' (' + labels.slice(0, 4).join('; ') + (labels.length > 4 ? '; ...' : '') + ')');
   if (cspChanged !== CSP_CHANGED.size) { diffs++; console.log('FAIL the app shell\'s policy was checked on ' + cspChanged + ' answers, not ' + CSP_CHANGED.size); }
-  console.log(diffs ? 'DIFFERENTIAL: ' + diffs + ' of ' + compared + ' answers differ' : 'DIFFERENTIAL: all ' + compared + ' answers identical, headers included (masked as above; the app shell\'s policy gained only "' + CSP_ADDED.slice(2) + '" on ' + cspChanged + ' answers)');
+  console.log(diffs ? 'DIFFERENTIAL: ' + diffs + ' of ' + compared + ' answers differ' : 'DIFFERENTIAL: all ' + compared + ' answers identical, headers included (masked as above' + (cspChanged ? '; the app shell\'s policy gained only "' + CSP_ADDED.slice(2) + '" on ' + cspChanged + ' answers' : '') + ')');
   process.exit(diffs ? 1 : 0);
 })().catch((e) => { console.error('differential crashed: ' + ((e && e.stack) || e)); process.exit(1); });

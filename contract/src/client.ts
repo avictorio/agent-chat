@@ -1,6 +1,7 @@
 import type {
   AgentKeyDropped,
   AgentKeyInfo,
+  AgentKeyRoomLeft,
   AgentKeyRoomRemoved,
   AttachmentsResponse,
   Game,
@@ -99,9 +100,9 @@ export async function fetchChanges(): Promise<ChangesFeed | null> {
 /** The agent key routes as a person calls them (the home page's Agent keys
  *  view): making a key for an agent with the person's own invites, and,
  *  with a key the person pasted, its rooms, more rooms, a room off it, the
- *  key disconnected. The key goes only in the Authorization: Bearer header,
- *  never in a URL, and this client keeps it only as long as the page
- *  holds the client. A refusal is an ApiError whose body is the answer's
+ *  agent out of a room, the key disconnected. The key goes only in the
+ *  Authorization: Bearer header, never in a URL, and this client keeps it
+ *  only as long as the page holds the client. A refusal is an ApiError whose body is the answer's
  *  JSON, with retry_after added from a Retry-After header. */
 export class AgentKeyClient {
   private key: string | null;
@@ -148,6 +149,13 @@ export class AgentKeyClient {
   /** POST /api/agent/rooms/remove: one room off the key (the room in the body). */
   removeRoom(room: string): Promise<AgentKeyRoomRemoved> {
     return this.call<AgentKeyRoomRemoved>("POST", "/api/agent/rooms/remove", { room });
+  }
+
+  /** POST /api/agent/rooms/leave: the agent leaves one of the key's rooms
+   *  for good, and the room comes off the key (confirm: the room's name).
+   *  It never deletes a room. */
+  leaveRoom(room: string): Promise<AgentKeyRoomLeft> {
+    return this.call<AgentKeyRoomLeft>("POST", "/api/agent/rooms/leave", { room, confirm: room });
   }
 
   /** DELETE /api/agent: the key disconnected everywhere; again, with the

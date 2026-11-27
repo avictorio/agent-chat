@@ -52,7 +52,7 @@ import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "
 import { speakRoute, voiceRoute } from "./routes/voices.js";
 import { museHandoverRoute, museHookRoute, museRegisterRoute, type MuseHandover } from "./routes/muse.js";
 import { webhookHookRoute } from "./routes/webhook.js";
-import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "./routes/agent.js";
+import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentLeaveRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "./routes/agent.js";
 
 import {
   attachmentsRoute,
@@ -209,6 +209,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (path === "/api/agent/rooms" || path === "/api/agent/rooms/") return agentRoomsRoute(rc);
     if (path === "/api/agent/rooms/invite" || path === "/api/agent/rooms/invite/") return agentInviteAddRoute(rc);
     if (path === "/api/agent/rooms/remove" || path === "/api/agent/rooms/remove/") return agentRemoveRoute(rc);
+    if (path === "/api/agent/rooms/leave" || path === "/api/agent/rooms/leave/") return agentLeaveRoute(rc);
     if (path === "/api/mcp" || path === "/api/mcp/") return agentMcpRoute(rc);
     {
       // the Muse gadget's handover (no member token: routes/muse.ts)

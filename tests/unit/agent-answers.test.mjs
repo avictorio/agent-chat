@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, read, agentInvite } from "./agent-world.mjs";
-import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
+import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentLeaveRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
 import { mcpAgentCatalog } from "../../worker/agents/mcp.ts";
 import { newAgentKey } from "../../worker/lib/agentkey.ts";
 
@@ -96,6 +96,10 @@ test("no answer reached with a key carries a room's token, an invite link or an 
     agentRoomsRoute(w.rc("POST", "/api/agent/rooms", { headers: auth, json: { rooms: [{ room: "nowhere", token: tok.rome }] } })),
     agentRemoveRoute(w.rc("POST", "/api/agent/rooms/remove", { headers: auth, json: { room: "rome" } })),
     agentRemoveRoute(w.rc("POST", "/api/agent/rooms/remove", { headers: auth, json: { room: "rome" } })),
+    // a leave through the key: a room the key marks left, one not on it, delete_room refused
+    agentLeaveRoute(w.rc("POST", "/api/agent/rooms/leave", { headers: auth, json: { room: "lima", confirm: "lima" } })),
+    agentLeaveRoute(w.rc("POST", "/api/agent/rooms/leave", { headers: auth, json: { room: "nowhere", confirm: "nowhere" } })),
+    agentLeaveRoute(w.rc("POST", "/api/agent/rooms/leave", { headers: auth, json: { room: "lima", confirm: "lima", delete_room: true } })),
     agentRoute(w.rc("GET", "/api/agent", { headers: { Authorization: "Bearer " + tok.lima } })),
     agentRoute(w.rc("GET", "/api/agent", { headers: { Authorization: "Bearer " + newAgentKey().key } })),
     agentCreateRoute(w.rc("POST", "/api/agents", { json: { rooms: [{ room: "lima", token: tok.lima }] } })),

@@ -233,7 +233,52 @@ export function wakeLost(room: string) {
 /** A room muse_register did not record or set because the code's Muse link
  *  is not one a key records (longer than AGENT_WAKE_LINK_MAX). */
 export function wakeLinkUnusable(room: string) {
-  return "The link to your person's Muse that this code gave could not be used through your key, so nothing was set in " + room + ". The code was used: ask your person to connect the gadget again for a new one.";
+  return "The link to your person's Muse that this code gave cannot be used through an agent key, so nothing was set in " + room + ", and the code was used. A new code from the same gadget gives the same link: to have " + room + " wake that Muse, register it with " + room + "'s own token instead (POST /api/muse/hooks, MUSE DELIVERY at /api).";
+}
+/** DELETE /api/agent when its writes kept meeting a record that other
+ *  disconnects of the key changed (AGENT_SWAP_TRIES times): the key is cut
+ *  by then, and the same DELETE again finishes. */
+export function dropBusy() {
+  return "This key is disconnected already: it works nowhere now. Other disconnects of it ran at the same time, so this one could not finish turning off the Muse wakes it set up: DELETE /api/agent again with this key finishes it.";
+}
+
+// POST /api/agent/rooms/leave (routes/agent.ts agentLeaveRoute): what the
+// person who holds the key reads; NAME is the agent's name in R.
+
+/** "delete_room" in the body, with any value: the route never deletes a room. */
+export const LEAVE_NO_DELETE = "This address never deletes a room, so it takes no \"delete_room\": the agent, as the room's last member, can leave and delete it itself with the leave_room tool and \"delete_room\": true. Nothing was changed.";
+/** The last member of R who has joined: leaving would delete R, which this route never does; unopened: the invites not yet opened there. */
+export function leaveLastMember(name: string, room: string, unopened: number) {
+  const ends = unopened ? ", and " + (unopened === 1 ? "the invite not yet opened would stop" : "the " + unopened + " invites not yet opened would stop") + " working" : "";
+  return name + " is the last member of " + room + " who has joined, so leaving would delete the room and everything in it" + ends + ". This address never deletes a room: the agent can leave and delete it itself with leave_room and \"delete_room\": true. Nothing was changed.";
+}
+/** A seat never opened: nothing to leave, and the call opened nothing. */
+export function leaveNotJoined(name: string, room: string) {
+  return name + " has not joined " + room + ", so there is nothing to leave, and this call did not open its invite. To keep " + name + " out of " + room + ", take " + room + " off this key; only the site's owner can withdraw the unused invite.";
+}
+/** An entry the key already marks refused, answered from the record (no room asked). */
+export function leaveEntryRefused(room: string, code: string) {
+  return room + " no longer takes this key's invite (" + code + "): take it off with POST /api/agent/rooms/remove.";
+}
+/** The room was deleted (the leave found it gone). */
+export function leaveRoomGone(room: string) {
+  return room + " has been deleted, so there is nothing to leave: take it off this key with POST /api/agent/rooms/remove.";
+}
+/** What a leave's key holds now: off (R is off it), marked (listed as
+ *  left), marked_wake (listed as left, with a Muse wake the key could not
+ *  confirm is off), listed (neither write went through: still listed as
+ *  held), cut (the key was disconnected meanwhile), other (R is on the key
+ *  again, with another invite). */
+export type LeaveKept = "off" | "marked" | "marked_wake" | "listed" | "cut" | "other";
+/** A leave's note: that NAME left R, then what the key holds now. */
+export function leaveNote(name: string, room: string, kept: LeaveKept) {
+  const left = name + " left " + room + ": its invite there no longer works; a member of " + room + " can invite it anew. ";
+  if (kept === "off") return left + room + " is off this key.";
+  if (kept === "marked") return left + room + " is still listed on this key as left; take it off with POST /api/agent/rooms/remove.";
+  if (kept === "marked_wake") return left + "This key could not yet confirm that the Muse wake it set up in " + room + " is off, so " + room + " is still listed on this key as left; taking it off (POST /api/agent/rooms/remove) tries again.";
+  if (kept === "listed") return left + room + " is still listed on this key; the key's next call to " + room + " marks it as left.";
+  if (kept === "cut") return left + "This key was disconnected meanwhile.";
+  return left + room + " is on this key again, with another invite.";
 }
 /** A room muse_register did not register this time, and why; spent: the
  *  gadget's code was claimed, so registering again needs a new one. */

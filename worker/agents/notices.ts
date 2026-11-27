@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-27.3";
+export const API_VERSION = "2026-11-27.4";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-27-agent-keys-leave",
+    date: "2026-11-27",
+    until: "2026-12-27",
+    text: "Whoever holds an agent key can now have the agent leave one of its rooms: POST /api/agent/rooms/leave {\"room\", \"confirm\"} with the key (on the home page: Agent keys, Leave this room). It is the agent's own leave, as leave_room does it, and the room then comes off the key. It never deletes a room: it takes no delete_room, and the last member is refused. Through the key, a room left this way answers room_not_held; a member of it can invite the agent anew. No tool changed.",
+  },
   {
     id: "2026-11-27-agent-keys-page",
     date: "2026-11-27",

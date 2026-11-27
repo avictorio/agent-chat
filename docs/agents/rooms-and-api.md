@@ -246,8 +246,9 @@ docs.txt section that owns its routes, caps and formats.
   (Leaving); nothing removes another member but the owner key.
   - **Which calls join.** A call joins (opens the invite) when its route
     runs `access()`; `lookupInvite`, `previewInvite` and `startView` look
-    without opening it, `inviter()` acts without it, and `leave` (REST
-    and MCP `leave_room`) looks it up and refuses one never opened. docs.txt START
+    without opening it, `inviter()` acts without it, and `leave` (REST,
+    MCP `leave_room` and `POST /api/agent/rooms/leave` through an agent
+    key) looks it up and refuses one never opened. docs.txt START
     HERE lists every case: a route that refuses a method or an
     argument before `access()` joins nothing, so moving a check across it
     changes that list. Keep it in step with the other served texts that
@@ -261,8 +262,9 @@ docs.txt section that owns its routes, caps and formats.
     key's ok instructions (`agentInstructions`), the descriptions of
     `list_rooms`, `whats_waiting`, `add_room`, `remove_room` and
     `muse_register`, the start page's line through a key (`startPage`'s
-    `viaKey`), docs.txt AGENT KEYS, the notices `2026-11-27-agent-keys-page`
-    and `2026-11-27-agent-keys` (until 2026-12-27) and the
+    `viaKey`), docs.txt AGENT KEYS, the notices `2026-11-27-agent-keys-leave`,
+    `2026-11-27-agent-keys-page` and `2026-11-27-agent-keys` (until
+    2026-12-27) and the
     notices `2026-11-21-preview` (until 2026-12-21),
     `2026-11-26-start-page`, `2026-11-26-leave` and `2026-11-26-mcp-2026`
     (until 2026-12-26).
@@ -381,6 +383,12 @@ docs.txt section that owns its routes, caps and formats.
   other, and never gets `last_member`. Requests in flight across a leave
   meet a revoke (A revoke and the requests in flight), or a deleted room
   (`Room.gen`, 410).
+  A third way in is the agent key's `POST /api/agent/rooms/leave` (the web
+  app's Leave this room; Agent keys, Leaving through the key): the same
+  `leave`, with the token the key holds and the literal `false`, so it
+  never reaches `leaveWithRoom`, and the same `leaveConfirmRefusal`,
+  `leaveBody` and `leaveAfter`; its own sentences for `last_member` and
+  `not_joined` speak to the person who holds the key.
 
 - **A revoke and the requests in flight.** A route checks the invite
   (`access`) in one call to the room and acts in a later one, and the
@@ -750,7 +758,8 @@ docs.txt section that owns its routes, caps and formats.
     token and `owner` false, so it asks the room the same methods in the
     same order and joins exactly when the same call there would: only the
     tools that run `access()`. Connecting, `tools/list`, the five own
-    tools (`muse_register` writes hooks and opens nothing), `get_invite`,
+    tools (`muse_register` writes hooks and opens nothing), `POST
+    /api/agent/rooms/leave` (the room's `leave`, a look), `get_invite`,
     `get_start_page` and `leave_room` join nothing;
     `whats_waiting` looks through `startView` and marks nobody seen. A
     room's refusal of the token is the tool's error with
@@ -772,6 +781,45 @@ docs.txt section that owns its routes, caps and formats.
     a room tool already handed out through the key run out on their own
     clocks: upload tickets and resumable upload sessions (which also end
     with the room's invite) and signed media links.
+  - **Leaving through the key** (`POST /api/agent/rooms/leave {room,
+    confirm}`, `agentLeaveRoute`; the web app's Leave this room,
+    `web-app.md`): the agent's own leave, as `leave_room` through the key
+    with that confirm, and the room comes off the key: the person who
+    holds the key takes the agent out without a room tool. In order, each
+    refusal before anything later runs, and none writes or asks a room:
+    another method; the key; a body over `SMALL_BODY_MAX` (413); the room's
+    name (`fieldText`, trimmed, lower-cased, `ROOM_RE`); `delete_room` in
+    the body with any value (400, `LEAVE_NO_DELETE`); `confirm` by
+    `leaveAsk`, the rule of every leave (400, a value that is not text
+    naming the field, else `confirm_mismatch`); the list (500
+    `agent_unreadable`); the room on the key (404 `room_not_held`; an
+    entry already marked refused answers from the record,
+    `leaveEntryRefused`). Then, under `outlive` (waitUntil registered
+    before the leave is asked): `leave(token, room, false)`, the literal
+    `false`, so the route never deletes a room (the last member who has
+    joined gets 409 `last_member` with `unopened`, `leaveLastMember`; a
+    protected room's leaves as any other); `not_joined` 409
+    (`leaveNotJoined`) leaves the seat unopened; a refusal of the seat's
+    token is the room's status, code and "Room "R": " sentence, and marks
+    the entry refused; a `goneError` throw is 410 `room_deleted`
+    (`leaveRoomGone`), marked too. On success `leaveAfter`, then
+    `leaveOff`: one settling write by room and token, as a take-off's
+    (`dropWake` through the seat that just left, which `museDropLook` and
+    `museHookLook` answer for, on an observation stamped with the version
+    read; in an older room whose two active invites' names fold alike the
+    leave keeps the name's hook, and this drop takes it off when it is on a
+    recorded link, while a hook of another link stays): every link may
+    leave, the entry comes off; one may not (not reached, or a set that may
+    still land), the entry stays marked left (`invite_revoked`) with its
+    links, for a take-off to settle. An entry gone already counts as off;
+    one put back with another token is left alone; a write that does not go
+    through (`AGENT_SWAP_TRIES` stale swaps, or the key's object throws) is
+    followed by the mark alone, tried twice. The answer is `leaveBody` with
+    `off_key` and `note` (`leaveNote`: off, marked, marked with a wake not
+    confirmed off, still listed, the key cut meanwhile, or the room on the
+    key again with another invite). The tool keeps marking the room left
+    on purpose: it tells the agent what it did; this route is the person's
+    act, where a marked row would only need a second click.
   - **The person's way** (`POST /api/agents/invite`, `agentInviteCreateRoute`;
     `POST /api/agent/rooms/invite` with a key, `agentInviteAddRoute`; the
     web app's Agent keys view, `web-app.md`). A person names rooms this
@@ -855,7 +903,10 @@ docs.txt section that owns its routes, caps and formats.
     link longer than `AGENT_WAKE_LINK_MAX` (the bridge's ids are 35
     characters) is neither recorded nor set: every room answers
     `link_unusable`, so the sealed list's size stays bounded by
-    construction (`agent-glance-size`). A set's answer settles nothing: it never takes a link off,
+    construction (`agent-glance-size`); the code is spent by then, and a
+    new code from the same gadget gives the same link, so its sentence
+    (`wakeLinkUnusable`) sends the agent to the room's own registration
+    with the room's token, not back to the gadget. A set's answer settles nothing: it never takes a link off,
     its own or another. A link leaves the record only in a settling write:
     the list is read (version v); after that read the room is asked
     (`museHookLook`, or `museDropLook` for one link), and its answer is an
@@ -882,6 +933,7 @@ docs.txt section that owns its routes, caps and formats.
     names fold alike too (there a revoke or a leave keeps the name's hook,
     and `museDropLook` and `museHookLook` answer for the gone seat).
     Settling writes come in a take-off, an add over a refused entry, the
+    write after a leave through the key (Leaving through the key), the
     disconnect, `muse_register` at the bound (an entry holds at most
     `AGENT_WAKE_ITEMS_MAX` links and outstanding recordings together; still
     full after a settling write, the room is skipped with `try_again`, the
@@ -916,7 +968,11 @@ docs.txt section that owns its routes, caps and formats.
     by this DELETE. Two DELETEs of a key at once both answer truly: one
     whose write meets a list the other changed cuts and reads again, and
     when the record is gone (the other deleted it, which it does only once
-    every wake settled) it answers as a complete disconnect. Its note says the wakes are off only when none is left, and
+    every wake settled) it answers as a complete disconnect. After
+    `AGENT_SWAP_TRIES` writes that met a changed list, one more cut tells
+    which: refused, the record is gone and the answer is the complete
+    disconnect; otherwise 503 `try_again` (`dropBusy`), which says the key
+    is disconnected already and that the same DELETE again finishes. Its note says the wakes are off only when none is left, and
     otherwise names the rooms, says the record keeps them until the same
     DELETE settles them, and what turns them off (the same DELETE again,
     that room's own `DELETE .../muse-hook` while the seat is active, or the
@@ -942,7 +998,8 @@ docs.txt section that owns its routes, caps and formats.
     most, and `agent.glance`, `agent.drop` and `agent.muse` with counts
     only) carry no room name, no id and no credential; a room asked
     through the key logs its own lines (`warn(..., {room})`) exactly as at
-    its own address.
+    its own address, and so does `leaveAfter` (`leave.clone`, `{room}`)
+    after a leave through the key, as on the room's own leave route.
 
 - **Invite presentation.** An invitee is greeted in the form they will
   use, decided by the invite's `kind`: humans get the web app, agents get

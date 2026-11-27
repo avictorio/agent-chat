@@ -2,7 +2,8 @@
 // on a fake API of its own: the rooms this browser holds, each looked at
 // with GET /invite; the agent routes (POST /api/agents/invite with and
 // without check, GET /api/agent, POST /api/agent/rooms/invite, POST
-// /api/agent/rooms/remove, DELETE /api/agent). Every state of the view,
+// /api/agent/rooms/remove, POST /api/agent/rooms/leave, DELETE /api/agent).
+// Every state of the view,
 // each at desktop and phone width, light and dark, with a screenshot
 // (keys-<state>-<desktop|phone>-<light|dark>.png); then what the view must
 // never do: ask a room more than a look, store anything on the device, keep
@@ -58,7 +59,7 @@ const VARIANTS = [
  * One scenario on a page of its own, through the fake API.
  * o.rooms: the rooms this browser holds (room -> token); o.api: the route
  * answers ({invite(body, ctx), info(ctx), add(body, ctx), remove(body, ctx),
- * drop(ctx), looks}); fn(page, S) runs it. S.calls lists every API request
+ * leave(body, ctx), drop(ctx), looks}); fn(page, S) runs it. S.calls lists every API request
  * (method, path, the credential headers), S.store the device's storage keys
  * before the view ran.
  */
@@ -107,6 +108,7 @@ async function scenario(name, o, fn) {
     if (p === '/api/agent' && m === 'GET') return call('info');
     if (p === '/api/agent/rooms/invite' && m === 'POST') return call('add', body);
     if (p === '/api/agent/rooms/remove' && m === 'POST') return call('remove', body);
+    if (p === '/api/agent/rooms/leave' && m === 'POST') return call('leave', body);
     if (p === '/api/agent' && m === 'DELETE') return call('drop');
     S.unhandled.push(m + ' ' + p);
     return route.fulfill({ status: 404, body: 'nf' });
@@ -478,8 +480,8 @@ async function worker() {
     await paste(page, KEY);
     await page.waitForSelector('#keyOpened', { timeout: 5000 });
     must((await text(page, '#keyMeta')) === 'Made Nov 11 · 3 of 30 rooms', await text(page, '#keyMeta'));
-    must((await row(page, 'keyHeldRooms', 'family-trip')) === "family-trip as Scout, added Nov 17 On this key Muse wake set up with this key Take off this key", await row(page, 'keyHeldRooms', 'family-trip'));
-    must((await row(page, 'keyHeldRooms', 'book-club')) === 'book-club as Scout, added Nov 17 On this key Take off this key', await row(page, 'keyHeldRooms', 'book-club'));
+    must((await row(page, 'keyHeldRooms', 'family-trip')) === "family-trip as Scout, added Nov 17 On this key Muse wake set up with this key Take off this key Leave this room", await row(page, 'keyHeldRooms', 'family-trip'));
+    must((await row(page, 'keyHeldRooms', 'book-club')) === 'book-club as Scout, added Nov 17 On this key Take off this key Leave this room', await row(page, 'keyHeldRooms', 'book-club'));
     must((await row(page, 'keyHeldRooms', 'old-room')) === "old-room as Scout, added Nov 11 This room no longer takes the key's invite (revoked, or the agent left) since Nov 18 Take off this key", await row(page, 'keyHeldRooms', 'old-room'));
     // Add rooms lists the rooms not on the key, the name filled in
     must(JSON.stringify(await page.$$eval('#keyAddRooms li', (l) => l.map((x) => x.dataset.room))) === '["trip-two"]', 'the rooms not on the key');
@@ -514,7 +516,8 @@ async function worker() {
     await page.click('#keyHeldRooms li[data-room="family-trip"] button');
     await page.waitForSelector('#keyOffDlg[open]', { timeout: 3000 });
     must((await text(page, '#keyOffTitle')) === 'Take family-trip off this key?', await text(page, '#keyOffTitle'));
-    must((await text(page, '#keyOffDlg')).includes('The key forgets this room. The agent stays a member of family-trip. Once it is off the key, the agent cannot leave family-trip through the key: to take it out of family-trip, have it leave first (leave_room), or add family-trip back later. The Muse wake set up with this key in family-trip is turned off.'), await text(page, '#keyOffDlg'));
+    must((await text(page, '#keyOffDlg')).includes('The key forgets this room. The agent stays a member of family-trip: to take it out of family-trip, use Leave this room instead. The Muse wake set up with this key in family-trip is turned off.'), await text(page, '#keyOffDlg'));
+    must(!/leave_room/.test(await text(page, '#keyOffDlg')), 'no tool named to a person');
     must(await page.$eval('#keyOffDlg', (d) => d.getAttribute('aria-labelledby') === 'keyOffTitle'), 'labelled by its title');
   });
   await state('takeoff-busy', { rooms: MINE, api: { ...OPEN, remove: async () => ({ status: 503, headers: { 'Retry-After': '1' }, body: { error: W.wakeNotSettled('family-trip'), code: 'try_again', room: 'family-trip' } }) } }, async (page) => {
@@ -581,6 +584,144 @@ async function worker() {
     await page.waitForFunction(() => !document.querySelector('#keyHeldRooms li[data-room="family-trip"]'), null, { timeout: 5000 });
     const rm = S.calls.find((c) => c.p === '/api/agent/rooms/remove');
     must(rm.m === 'POST' && rm.body.room === 'family-trip' && rm.auth === 'Bearer ' + KEY, 'the room in the body, the key in the header');
+  });
+  // ---- Leave this room: the agent's own leave through the key ----
+  /** a key whose rooms are INFO until the leave, then after(rooms) */
+  const leaving = (answer, after) => ({
+    info: async (S) => ({ body: S.left && after ? { ...INFO, rooms: after(INFO.rooms) } : INFO }),
+    leave: async (body, S) => { S.left = true; return typeof answer === 'function' ? answer(body) : answer; },
+  });
+  const LEFT = (room, kept) => ({ body: { room, name: 'Scout', left: NOW, room_deleted: false, off_key: kept === 'off', note: W.leaveNote('Scout', room, kept) } });
+  const askLeave = async (page, room) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    await page.click('#keyHeldRooms li[data-room="' + room + '"] .key-leave');
+    await page.waitForSelector('#keyLeaveDlg[open]', { timeout: 3000 });
+  };
+  /** the leave asked and answered: the dialog closed, and the key's rooms loaded again after the leave */
+  const leaveAnswered = async (page, S, room) => {
+    await askLeave(page, room);
+    await page.click('#keyLeaveYes');
+    await page.waitForFunction(() => !document.getElementById('keyLeaveDlg').open, null, { timeout: 5000 });
+    await until(() => S.calls.some((c, i) => c.p === '/api/agent' && c.m === 'GET' && i > S.calls.findIndex((x) => x.p === '/api/agent/rooms/leave')));
+    await page.waitForFunction(() => !document.querySelector('#keyHeldRooms button[disabled]'), null, { timeout: 5000 });
+    const lv = S.calls.filter((c) => c.p === '/api/agent/rooms/leave');
+    must(lv.length === 1 && lv[0].m === 'POST' && JSON.stringify(lv[0].body) === JSON.stringify({ room, confirm: room }) && lv[0].auth === 'Bearer ' + KEY, 'one leave, the room and its confirm in the body, the key in the header: ' + JSON.stringify(lv));
+    const after = S.calls.findIndex((c) => c.p === '/api/agent/rooms/leave');
+    must(S.calls.slice(after + 1).some((c) => c.p === '/api/agent' && c.m === 'GET'), 'the key loaded again after the answer');
+  };
+  await state('leave-dialog', { rooms: MINE, api: OPEN }, async (page) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    // on rows the key holds only
+    must(!!(await page.$('#keyHeldRooms li[data-room="family-trip"] .key-leave')) && !!(await page.$('#keyHeldRooms li[data-room="book-club"] .key-leave')), 'held rows have Leave this room');
+    must(!(await page.$('#keyHeldRooms li[data-room="old-room"] .key-leave')), 'a refused row keeps only Take off this key');
+    must((await text(page, '#keyHeldRooms li[data-room="old-room"] .key-row-acts')) === 'Take off this key', await text(page, '#keyHeldRooms li[data-room="old-room"] .key-row-acts'));
+    must((await text(page, '#keyHeldRooms li[data-room="book-club"] .key-row-acts')) === 'Take off this key Leave this room', await text(page, '#keyHeldRooms li[data-room="book-club"] .key-row-acts'));
+    await page.click('#keyHeldRooms li[data-room="family-trip"] .key-leave');
+    await page.waitForSelector('#keyLeaveDlg[open]', { timeout: 3000 });
+    must((await text(page, '#keyLeaveTitle')) === 'Have Scout leave family-trip?', await text(page, '#keyLeaveTitle'));
+    must((await text(page, '#keyLeaveDlg')) === 'Have Scout leave family-trip? Scout leaves family-trip for good: its invite there stops working, here and on any other key that holds this seat, and family-trip comes off this key. Matches not yet started that it created or was invited to are called off for everyone, with a line from the Referee; matches under way go on without it, and its turns run out on their clocks. Its claimed questions are released, its picture and voice there are removed, and a Muse wake set up there is turned off. Its messages and reactions stay. A member of family-trip can invite it anew. Cancel Leave room', await text(page, '#keyLeaveDlg'));
+    must(await page.$eval('#keyLeaveDlg', (d) => d.getAttribute('aria-labelledby') === 'keyLeaveTitle'), 'labelled by its title');
+    must(JSON.stringify(await page.$$eval('#keyLeaveDlg .dlg-actions button', (bs) => bs.map((b) => [b.id, b.classList.contains('danger-solid')]))) === JSON.stringify([['keyLeaveNo', false], ['keyLeaveYes', true]]), 'Cancel, then the danger button last');
+    // both controls fit the row (stacked on a phone, not cut off)
+    const fit = await page.$eval('#keyHeldRooms li[data-room="family-trip"]', (li) => [...li.querySelectorAll('.key-row-acts button')].every((b) => { const r = b.getBoundingClientRect(), l = li.getBoundingClientRect(); return r.left >= l.left - 1 && r.right <= l.right + 1; }));
+    must(fit, 'both buttons inside the row');
+    // the row's text keeps its width: on a phone the controls go on a line of their own below it
+    const widths = await page.$$eval('#keyHeldRooms li', (lis) => lis.map((li) => [li.dataset.room, Math.round(li.querySelector('.key-row-main').getBoundingClientRect().width), Math.round(li.getBoundingClientRect().width)]));
+    for (const [room, main, li] of widths) must(main >= Math.min(240, li), room + ': the text is ' + main + ' px wide in a row of ' + li);
+  }, '#keyHeldRooms');
+  await state('leave-done', { rooms: MINE, api: leaving(LEFT('family-trip', 'off'), (rooms) => rooms.filter((r) => r.room !== 'family-trip')) }, async (page, S) => {
+    await leaveAnswered(page, S, 'family-trip');
+    await page.waitForFunction(() => !document.querySelector('#keyHeldRooms li[data-room="family-trip"]'), null, { timeout: 5000 });
+    must((await text(page, '#keyHeldSay')) === 'Scout left family-trip.', await text(page, '#keyHeldSay'));
+    must(!(await page.$('#keyHeldErr')), 'no alert');
+  }, '#keyHeld');
+  await state('leave-kept', { rooms: MINE, api: leaving(LEFT('family-trip', 'marked_wake'), (rooms) => rooms.map((r) => (r.room === 'family-trip' ? { ...r, state: 'refused', code: 'invite_revoked', at: NOW } : r))) }, async (page, S) => {
+    await leaveAnswered(page, S, 'family-trip');
+    await page.waitForFunction(() => !document.querySelector('#keyHeldRooms li[data-room="family-trip"] .key-leave'), null, { timeout: 5000 });
+    must((await text(page, '#keyHeldSay')) === 'Scout left family-trip. This key could not yet confirm that the Muse wake it set up in family-trip is off, so family-trip is still listed on this key as left; taking it off (POST /api/agent/rooms/remove) tries again.', await text(page, '#keyHeldSay'));
+    must((await row(page, 'keyHeldRooms', 'family-trip')).includes("This room no longer takes the key's invite (revoked, or the agent left)"), 'the row as the key holds it now: ' + (await row(page, 'keyHeldRooms', 'family-trip')));
+  }, '#keyHeld');
+  // every other note of a leave the key still lists: the server's words after "NAME left R."
+  for (const kept of ['marked', 'listed', 'cut', 'other']) {
+    await scenario('keys-leave-' + kept, { rooms: MINE, api: leaving(LEFT('book-club', kept), (rooms) => rooms) }, async (page, S) => {
+      await leaveAnswered(page, S, 'book-club');
+      const lead = 'Scout left book-club: its invite there no longer works; a member of book-club can invite it anew. ';
+      must(W.leaveNote('Scout', 'book-club', kept).startsWith(lead), 'the note starts with the leave');
+      must((await text(page, '#keyHeldSay')) === 'Scout left book-club. ' + W.leaveNote('Scout', 'book-club', kept).slice(lead.length), kept + ': ' + (await text(page, '#keyHeldSay')));
+    });
+  }
+  await state('leave-last-member', { rooms: MINE, api: leaving({ status: 409, body: { error: W.leaveLastMember('Scout', 'book-club', 2), code: 'last_member', room: 'book-club', unopened: 2 } }) }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must((await text(page, '#keyHeldErr')) === 'Scout is the last member of book-club who has joined: leaving would delete the room, and this page never deletes a room. Nothing was changed.', await text(page, '#keyHeldErr'));
+    must(!!(await page.$('#keyHeldRooms li[data-room="book-club"] .key-leave')), 'the row as it was');
+  }, '#keyHeld');
+  await state('leave-not-joined', { rooms: MINE, api: leaving({ status: 409, body: { error: W.leaveNotJoined('Scout', 'book-club'), code: 'not_joined', room: 'book-club' } }) }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must((await text(page, '#keyHeldErr')) === 'Scout has not joined book-club yet, so there is nothing to leave. To keep it out of book-club, take book-club off this key.', await text(page, '#keyHeldErr'));
+  }, '#keyHeld');
+  // the seat's token refused, or the room deleted: the row turns refused, in the refused row's own words, never the room's sentence to the agent
+  const refusedAfter = (code) => (rooms) => rooms.map((r) => (r.room === 'book-club' ? { ...r, state: 'refused', code, at: NOW } : r));
+  await state('leave-refused', { rooms: MINE, api: leaving({ status: 403, body: { error: 'Room "book-club": You left this room with this invite, so it will not work again. A member of the room can invite you anew.', code: 'invite_revoked', room: 'book-club' } }, refusedAfter('invite_revoked')) }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must((await text(page, '#keyHeldErr')) === "book-club no longer takes the key's invite (revoked, or the agent left), so there was nothing to leave.", await text(page, '#keyHeldErr'));
+    must(!/You left/.test(await text(page, '#keyHeld')), 'not the sentence that speaks to the agent');
+    await page.waitForFunction(() => !document.querySelector('#keyHeldRooms li[data-room="book-club"] .key-leave'), null, { timeout: 5000 });
+    must((await row(page, 'keyHeldRooms', 'book-club')).includes("This room no longer takes the key's invite (revoked, or the agent left)"), 'a refused row now');
+  }, '#keyHeld');
+  for (const [tag, code, status, error, why] of [['deleted', 'room_deleted', 410, W.leaveRoomGone('book-club'), 'the room was deleted'], ['invalid', 'invite_invalid', 403, 'Room "book-club": This invite link isn\'t valid for this room.', 'no longer valid there'], ['marked-deleted', 'room_deleted', 410, W.leaveEntryRefused('book-club', 'room_deleted'), 'the room was deleted']]) {
+    await scenario('keys-leave-refused-' + tag, { rooms: MINE, api: leaving({ status, body: { error, code, room: 'book-club' } }, refusedAfter(code)) }, async (page, S) => {
+      await leaveAnswered(page, S, 'book-club');
+      must((await text(page, '#keyHeldErr')) === "book-club no longer takes the key's invite (" + why + '), so there was nothing to leave.', code + ': ' + (await text(page, '#keyHeldErr')));
+    });
+  }
+  await state('leave-unreadable', { rooms: MINE, api: leaving({ status: 500, body: { error: W.AGENT_UNREADABLE, code: 'agent_unreadable', room: 'book-club' } }) }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must((await text(page, '#keyHeldErr')) === "This key's record could not be read, so its rooms can't be shown. The key itself was not refused.", await text(page, '#keyHeldErr'));
+  }, '#keyHeld');
+  await state('leave-refused-key', { rooms: MINE, api: { ...leaving({ status: 403, body: { error: W.AGENT_KEY_INVALID, code: 'agent_key_invalid' } }), info: async (S) => (S.left ? { status: 403, body: { error: W.AGENT_KEY_INVALID, code: 'agent_key_invalid' } } : { body: INFO }) } }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
+  }, '#keyHeld');
+  await state('leave-network', { rooms: MINE, api: leaving('network'), allowConsole: /Failed to load resource|ERR_FAILED/ }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must((await text(page, '#keyHeldErr')) === "Couldn't reach the site, so this page can't tell whether Scout left book-club. Open the key again to see.", await text(page, '#keyHeldErr'));
+  }, '#keyHeld');
+  // a failure with no answer from the site (the edge's own error page) is no answer either
+  await scenario('keys-leave-no-answer', { rooms: MINE, api: leaving({ status: 502, body: '<html>bad gateway</html>' }) }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must((await text(page, '#keyHeldErr')) === "Couldn't reach the site, so this page can't tell whether Scout left book-club. Open the key again to see.", await text(page, '#keyHeldErr'));
+  });
+  // the keyboard: Enter opens, focus is in the dialog, Cancel then Leave room, Escape closes it and focus goes back to the button
+  await scenario('keys-leave-keyboard', { rooms: MINE, api: OPEN }, async (page) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    await page.focus('#keyHeldRooms li[data-room="book-club"] .key-leave');
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#keyLeaveDlg[open]', { timeout: 3000 });
+    must(await page.evaluate(() => document.getElementById('keyLeaveDlg').contains(document.activeElement)), 'focus in the dialog');
+    const order = [];
+    for (let i = 0; i < 3; i++) { order.push(await page.evaluate(() => document.activeElement && document.activeElement.id)); await page.keyboard.press('Tab'); }
+    must(order.includes('keyLeaveNo') && order.includes('keyLeaveYes') && order.indexOf('keyLeaveNo') < order.lastIndexOf('keyLeaveYes'), 'Cancel, then Leave room: ' + JSON.stringify(order));
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.getElementById('keyLeaveDlg').open, null, { timeout: 3000 });
+    must(await page.evaluate(() => document.activeElement && document.activeElement.matches('#keyHeldRooms li[data-room="book-club"] .key-leave')), 'focus back on the button');
+    // Cancel closes it too, and asks nothing
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#keyLeaveDlg[open]', { timeout: 3000 });
+    await page.click('#keyLeaveNo');
+    await page.waitForFunction(() => !document.getElementById('keyLeaveDlg').open, null, { timeout: 3000 });
+    return { order };
+  });
+  // a browser without dialogs asks with confirm, the dialog's title as its question
+  await scenario('keys-leave-no-dialog', { rooms: MINE, api: leaving(LEFT('book-club', 'off'), (rooms) => rooms.filter((r) => r.room !== 'book-club')) }, async (page) => {
+    await page.evaluate(() => { HTMLDialogElement.prototype.showModal = undefined; window.__asked = []; window.confirm = (q) => { window.__asked.push(q); return true; }; });
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    await page.click('#keyHeldRooms li[data-room="book-club"] .key-leave');
+    await page.waitForFunction(() => /Scout left book-club\./.test(document.getElementById('keyHeldSay')?.textContent || ''), null, { timeout: 5000 });
+    must(JSON.stringify(await page.evaluate(() => window.__asked)) === '["Have Scout leave book-club?"]', 'confirm with the same question: ' + JSON.stringify(await page.evaluate(() => window.__asked)));
   });
   await state('disconnect-dialog', { rooms: MINE, api: OPEN }, async (page) => {
     await paste(page, KEY);
