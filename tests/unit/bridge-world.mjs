@@ -38,12 +38,14 @@ export async function bridgeWorld() {
   let n = 0;
   return {
     env, logs, call, paths,
-    /** a gadget's handover: its link id and its one-time code, unclaimed */
-    async connect() {
-      n++;
-      const c = await call("/connect", { sealed: await seal({ accessToken: "tok-muse-" + n, nodeId: "gadget-unit" }, keys.publicKey), termsVersion: "v1" });
+    /** a gadget's handover: its link id and its one-time code, unclaimed;
+     *  again (a gadget this gave before) hands that gadget over once more,
+     *  as its Add rooms does: the same link, a new code */
+    async connect(again) {
+      const i = again ? again.n : ++n;
+      const c = await call("/connect", { sealed: await seal({ accessToken: "tok-muse-" + i, nodeId: "gadget-unit" }, keys.publicKey), termsVersion: "v1" });
       if (c.status !== 200) throw new Error("connect: " + JSON.stringify(c.body));
-      return { code: c.body.code, link: c.body.museLinkId };
+      return { code: c.body.code, link: c.body.museLinkId, n: i };
     },
     /** how many rooms the bridge counts for a link */
     async rooms(link) { return (await call("/status", { museLinkId: link })).body.rooms; },

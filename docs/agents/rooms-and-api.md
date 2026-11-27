@@ -689,8 +689,8 @@ docs.txt section that owns its routes, caps and formats.
     when added, and `held` or `refused` with the room's code) is sealed
     with AES-256-GCM under the data key (and, for a room where the key set
     up a Muse wake, that wake's record, `hooks`: each link id and its
-    deadline, which no answer carries: `muse_wake` says the key records
-    one), its additional data the
+    outstanding recordings, which no answer carries: `muse_wake` says the
+    entry has a link on its record), its additional data the
     identity's id and the list's version, padded with spaces to
     `AGENT_RING_PAD` bytes. Every crypto step runs in the Worker; the
     object compares verifiers and swaps the list on its version
@@ -837,67 +837,88 @@ docs.txt section that owns its routes, caps and formats.
     refuse; a room never joined is skipped (`not_joined`: a wake would join
     it, and `muse_register` joins nothing); the claim once (`museClaim`,
     `routes/muse.ts`, which the REST route uses too). **The record**
-    (`AgentEntry.hooks`, each `{link, deadline}`): each accepted room's
-    link is written on its entry with its deadline (`AGENT_WAKE_SET_MS`
-    after the record; a link recorded already keeps the later deadline)
-    before the room is asked to set it (`museSetHookLook`,
-    `AGENT_GLANCE_PARALLEL` rooms at a time), and the set carries the
-    deadline: the room refuses, by its own clock, a set that reaches it
-    after it (`too_late`), setting nothing. Every answer of the room's
-    three hook methods carries the room's clock (`now`, `museNow`). A link
-    comes off the record on a room's answer only, by one rule: the room
-    refused that link's own set, or the answer shows no hook of that link
-    there (another link's hook, a webhook, no hook, no row for the token,
-    the room gone) and its room clock is past the link's deadline, so no
-    set of it can still arrive; a set of another link that the room took
-    is such an answer for every link whose deadline its clock has passed.
-    An answer with no clock settles nothing. Nothing else takes a link off:
-    not a replaced or removed entry (its links are settled first, or the
-    call answers `try_again` and changes nothing), not a rollback (a failed
-    add puts the entry it replaced back, links included), not a throw, a
-    Worker that stops midway, a lost race, or the Worker's own clock, which
-    only says when to ask again. Every write of the list goes through one
-    check (`keepsWakes`): a recorded link missing after it must be named
-    with the room's answer that settled it, or the write throws and nothing
-    is written. A call whose own set the room took puts its link back if it
-    went meanwhile. An entry records at most `AGENT_WAKE_LINKS_MAX` links:
-    at the bound, `muse_register` first settles them by that rule against
-    the room's hook and clock (`museHookLook`) and skips the room
-    (`try_again`, the code not spent on it) when that leaves no room for
-    one more. Two registrations at once both answer truly (each set
-    happened; the wake on is a recorded one). So a wake the key set up is
-    on in a room only while its link is on the record, in an older room
-    whose two active invites' names fold alike too (there a revoke or a
-    leave keeps the name's hook, and `museDropLook` and `museHookLook`
-    answer for the gone seat). `DELETE /api/agent` is two steps. The cut
-    (`agentCut`): the key's slot is marked cut, and from then on the key
-    opens nothing (every route and `/api/mcp` refuse it as they refuse a
-    key that does not exist) but this same DELETE. Then every recorded
-    link is turned off (`AGENT_GLANCE_PARALLEL` rooms at a time, a throw
-    asked once more after `AGENT_WAKE_RETRY_MS`, a link whose deadline is
-    still to come by the room's clock asked again once it has passed,
-    waiting at most `AGENT_WAKE_SET_MS`). All settled: the record is
-    deleted (`agentDrop`). Some not: the cut record is rewritten to hold
-    only those rooms' entries with their unsettled links (`agentRemain`),
-    and `DELETE /api/agent` again with the same key tries them again. The
-    answer, the second one's too, says `muse_wakes_removed` and
-    `muse_wakes_left` (a room that threw twice, sent no clock, kept a
-    deadline still to come, or refused in any way but "no such seat" or
-    "room gone", as one still on older code would for a gone seat); its
-    note says the wakes are off only when none is left, and otherwise names
-    the rooms and what turns them off (the same DELETE again, that room's
-    own `DELETE .../muse-hook` while the seat is active, or the gadget's
-    Disconnect). A list that does not open is still disconnected, its
-    record deleted (`muse_wakes_left: null`). A registration whose key is
-    cut meanwhile turns off what it set. `remove_room` and `POST
+    (`AgentEntry.hooks`, `worker/lib/wakes.ts`): per link, the list of its
+    outstanding recordings, each `{id, deadline}`. A recording is one
+    attempt to set one link in one room: an id of its own (random), the
+    link, and a deadline `AGENT_WAKE_SET_MS` after the record. It goes on
+    the entry before its set is sent (`museSetHookLook`,
+    `AGENT_GLANCE_PARALLEL` rooms at a time); its set is sent at most once,
+    never again (a set that throws is not retried), and the room refuses
+    it after its deadline by the room's own clock (`too_late`, setting
+    nothing). A link's presence means "a hook of this link may be on"; a
+    link with an empty list is one whose every set has answered. A call's
+    own write after its sets takes off only its own recording ids, of the
+    sets the room answered (ok or refused alike); one whose set threw stays
+    outstanding. A set's answer settles nothing: it never takes a link off,
+    its own or another. A link leaves the record only in a settling write:
+    the list is read (version v); after that read the room is asked
+    (`museHookLook`, or `museDropLook` for one link), and its answer is an
+    observation: the room's clock T and the Muse link H the seat's hook is
+    on after the call, or none (a room with no row for the token, or gone,
+    is an observation with no hook; an answer with no clock is none); then
+    a compare-and-set write from version v takes off each link X != H whose
+    outstanding recordings at v all have `deadline + AGENT_WAKE_SKEW_MS <
+    T` (an empty list at once), and prunes recordings so expired from the
+    links that stay. A write that meets a newer version throws its
+    observations away and asks the room again. Nothing else takes a link
+    off, and every write of the list goes through one check (`keepsWakes`):
+    a link missing after it must come with an observation of its entry
+    stamped with the version replaced, whose H is another link and by whose
+    T each of its outstanding recordings has expired. Why it holds: a
+    recording missing from the list at v had answered before v was
+    written, so its set ran before the observation; one on the list at v
+    has either expired before T by the room's own clock (the room refuses
+    it after) or blocks the removal; nothing can be recorded between v and
+    the write. It assumes a set is sent once, and a room's clock that runs
+    back no further than `AGENT_WAKE_SKEW_MS` (a room object restarted on
+    another machine). So a wake the key set up is on in a room only while
+    its link is on the record, in an older room whose two active invites'
+    names fold alike too (there a revoke or a leave keeps the name's hook,
+    and `museDropLook` and `museHookLook` answer for the gone seat).
+    Settling writes come in a take-off, an add over a refused entry, the
+    disconnect, `muse_register` at the bound (an entry holds at most
+    `AGENT_WAKE_ITEMS_MAX` links and outstanding recordings together; still
+    full after a settling write, the room is skipped with `try_again`, the
+    code not spent on it), and a tidy at the end of `muse_register`: one
+    look after its own write at each room whose entry holds a link other
+    than the one its set left on (its own too after a refusal), and one
+    settling write from the version it wrote, which changes nothing if it
+    throws or meets a newer list. Each looks before it drops anything:
+    while a recording may still reach the room (a registration that has
+    not answered, still running or cut short) nothing is dropped, a
+    take-off and an add answer `try_again` (503 with `Retry-After`; the tool
+    error over MCP) and the disconnect waits for it, at most
+    `AGENT_WAKE_SET_MS + AGENT_WAKE_SKEW_MS`, then looks again. After a
+    registration that finished nothing is outstanding, so nothing waits.
+    `DELETE /api/agent` is two steps. The cut (`agentCut`): the key's slot
+    is marked cut, and from then on the key opens nothing (every route and
+    `/api/mcp` refuse it as they refuse a key that does not exist) but this
+    same DELETE. Then, on that read of the list, each room's wakes are
+    looked at, dropped and settled (`AGENT_GLANCE_PARALLEL` rooms at a
+    time, a throw asked once more after `AGENT_WAKE_RETRY_MS`). All
+    settled: the record is deleted (`agentDrop`, compare-and-set on the
+    version read). Some not: the cut record is rewritten to hold only those
+    rooms' entries with the links that stay (`agentRemain`), and it stays
+    so, sealed, until `DELETE /api/agent` with the same key settles them;
+    nothing else removes a cut record. The answer, the second one's too,
+    says `muse_wakes_removed` and `muse_wakes_left` (a room that threw
+    twice, sent no clock, kept a recording that may still land, or refused
+    in any way but "no such seat" or "room gone", as one still on older
+    code would for a gone seat), a room in one of the two, never both:
+    left when any of its links stays, removed when all left and a hook was
+    taken off; its note says the wakes are off only when none is left, and
+    otherwise names the rooms, says the record keeps them until the same
+    DELETE settles them, and what turns them off (the same DELETE again,
+    that room's own `DELETE .../muse-hook` while the seat is active, or the
+    gadget's Disconnect). A list that does not open is still disconnected,
+    its record deleted (`muse_wakes_left: null`). A registration whose key
+    is cut meanwhile turns off the hooks it set. `remove_room` and `POST
     /api/agent/rooms/remove`, and an add that puts a refused room back with
     another invite (`add_room`, `POST /api/agent/rooms`, `POST
-    /api/agent/rooms/invite`), first ask the room's clock (`museHookLook`):
-    while a recorded link's deadline is still to come they answer
-    `try_again` (503 with `Retry-After`; the tool error over MCP) and turn
-    nothing off; then they turn every recorded link off, and take the room
-    off or replace its entry only once the room has answered for each; a
-    room that did not stays on the key with its wake as it was
+    /api/agent/rooms/invite`, which does it in a settling write of its own
+    before any invite), take the room off or replace its entry only when
+    every link of it leaves on the room's observation; a room that does
+    not let them stays on the key with its wake as it was
     (`try_again`). A wake counts as the
     key's only while the room's hook is a Muse hook on a recorded link: a
     hook the agent set with the room's own token on another link stays (on
@@ -1413,7 +1434,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `mq` | items waiting for a Muse hook (`MqRow`): a number from one room-wide counter (the hook's cursor follows it), the kind, and the frame's data. At most `MUSE_QUEUE_MAX` per hook. Schema step 7. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
-| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`. `DELETE /api/agent` first marks the slot's `kind` `cut` (from then on the key opens nothing but that DELETE); once every Muse wake its list records is off it deletes the identity whole (`deleteAll`), and until then the cut record holds only the entries of the rooms whose wakes did not settle, with those links, and goes with the DELETE that settles them (the same key, sent again). A person's creation that fails deletes its identity too; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
+| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`. `DELETE /api/agent` first marks the slot's `kind` `cut` (from then on the key opens nothing but that DELETE); once every Muse wake its list records is off it deletes the identity whole (`deleteAll`), and until then the cut record holds only the entries of the rooms whose wakes did not settle (their tokens and links, sealed), and stays until a DELETE with the same key settles them (the web app's Agent keys view offers that DELETE again, in the page, and when Open refuses the key); nothing else removes a cut record. A person's creation that fails deletes its identity too; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
 | (object `__agent-quota`, `AGENT_QUOTA_ROOM`) | table `aq`: new agent keys' counters, one row per cap key (`net:<hash>:<hour>`, `all:<day>`, `room:<hash>:<day>`) with its window and count; rows of past windows go when the next creation comes in (`agentReserve`); a check only reads them (`agentPeek`). |
 
 ### KV keys (`REQUESTS` namespace)

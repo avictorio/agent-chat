@@ -6,13 +6,14 @@
 // invite never opened is refused not_joined and set no hook; a set replaces
 // a webhook and a hook on another link (that link loses the room at the
 // bridge); a drop removes only a Muse hook on the same link, and keeps a
-// webhook and another link's; the drop and the look answer for a revoked
-// or left seat too, which matters in an older room where two active
-// invites' names fold alike (a revoke keeps their shared hook); a token the
-// room never had is refused; the look says which link the hook is on and
-// writes nothing; a set carries its deadline, which the room keeps by its
-// own clock, and every answer carries that clock; and the bridge hears each
-// hook set and each removed (its room count). Run with `npm run test:unit`.
+// webhook and another link's, and says which link is on after it; the drop
+// and the look answer for a revoked or left seat too, which matters in an
+// older room where two active invites' names fold alike (a revoke keeps
+// their shared hook); a token the room never had is refused; the look says
+// which link the hook is on and writes nothing; a set carries its
+// deadline, which the room keeps by its own clock, and every answer carries
+// that clock; and the bridge hears each hook set and each removed (its room
+// count). Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
@@ -44,7 +45,7 @@ test("museSetHookLook and museDropLook leave every inv column of the member's ro
     assert.equal(set.name, "Ada");
     assert.ok(!JSON.stringify(set).includes(link), "the answer has no link id");
     const drop = h.room.museDropLook("tok-Ada", link);
-    assert.deepEqual(noNow(drop), { ok: true, removed: true });
+    assert.deepEqual(noNow(drop), { ok: true, removed: true, link: null }, "removed, and no hook on after it");
     assert.deepEqual(invRow(h, "Ada"), before, "the drop wrote nothing in inv");
     assert.equal(hookOf(h, "Ada"), null);
     await h.settled();
@@ -66,7 +67,7 @@ test("an invite never opened is refused not_joined, stays unopened, and gets no 
     assert.deepEqual(invRow(h, "Bo"), before);
     assert.equal(invRow(h, "Bo").used, null);
     assert.equal(hookOf(h, "Bo"), null);
-    assert.deepEqual(noNow(h.room.museDropLook(tok, link)), { ok: true, removed: false }, "nothing to drop");
+    assert.deepEqual(noNow(h.room.museDropLook(tok, link)), { ok: true, removed: false, link: null }, "nothing to drop");
   } finally {
     b.restore();
   }
@@ -80,11 +81,11 @@ test("a drop removes only a Muse hook on the same link: a webhook and another li
     const one = await b.connect(), two = await b.connect();
     // a hook the agent set itself, with the room's own token, on another link
     assert.equal(h.room.museSetHook("tok-Ada", two.link, "main", R).ok, true);
-    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: false });
+    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: false, link: two.link }, "it says which link is on after it");
     assert.deepEqual(hookOf(h, "Ada"), { kind: "muse", link: two.link, url: null, routing: "main", enabled: 1 }, "another link's hook stays");
     // a webhook stays too
     assert.equal(h.room.webhookSet("tok-Ada", "https://hooks.example.org/x", "secret", R).ok, true);
-    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: false });
+    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: false, link: null }, "a webhook is no Muse link");
     assert.equal(hookOf(h, "Ada").kind, "webhook");
     // a set through the key replaces the webhook
     assert.equal(h.room.museSetHookLook("tok-Ada", one.link, "agent-chat", R, LATER).ok, true);
@@ -96,7 +97,7 @@ test("a drop removes only a Muse hook on the same link: a webhook and another li
     assert.equal(h.room.museSetHookLook("tok-Ada", one.link, "agent-chat", R, LATER).ok, true);
     await h.settled();
     assert.equal(await b.rooms(two.link), 0, "the replaced link was told the room is gone");
-    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: true });
+    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: true, link: null });
   } finally {
     b.restore();
   }
@@ -111,7 +112,7 @@ test("a revoked seat: the set refuses it, the drop and the look answer for it; a
     assert.equal(h.room.museSetHookLook("tok-Ada", link, "agent-chat", R, LATER).ok, true);
     h.room.revoke("tok-Ada");
     assert.equal(hookOf(h, "Ada"), null, "the revoke took the hook");
-    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", link)), { ok: true, removed: false }, "the drop answers for the revoked seat: nothing there");
+    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", link)), { ok: true, removed: false, link: null }, "the drop answers for the revoked seat: nothing there");
     assert.equal(h.room.museSetHookLook("tok-Ada", link, "agent-chat", R, LATER).code, "invite_revoked");
     assert.deepEqual(noNow(h.room.museHookLook("tok-Ada")), { ok: true, link: null }, "the look answers for the revoked seat: no hook there");
     assert.equal(h.room.museDropLook("tok-nobody", link).code, "invite_invalid");
@@ -154,15 +155,15 @@ for (const how of ["revoked by the owner", "left"]) {
       const before = seat();
       // the hook the other invite set itself, on another link, is not the key's: it stays
       assert.equal(h.room.museSetHook("tok-scout-lower-0000000", two.link, "main", R).ok, true);
-      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: false });
+      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: false, link: two.link });
       assert.deepEqual(hooksAll(h), [{ member: "scout", kind: "muse", link: two.link }]);
       // so does its webhook
       assert.equal(h.room.webhookSet("tok-scout-lower-0000000", "https://hooks.example.org/x", "s", R).ok, true);
-      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: false });
+      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: false, link: null });
       assert.equal(hooksAll(h)[0].kind, "webhook");
       // the key's link back on that name, as it was right after the revoke: the drop removes it
       assert.equal(h.room.museSetHook("tok-scout-lower-0000000", one.link, "agent-chat", R).ok, true);
-      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: true });
+      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: true, link: null });
       assert.deepEqual(hooksAll(h), []);
       assert.deepEqual(seat(), before, "the gone seat's row as it was: nothing opened, used or seen");
       await h.settled();
@@ -205,7 +206,7 @@ test("the bridge hears the hook set (museReportRoom) and the hook removed (museR
     assert.equal(h.room.museSetHookLook("tok-Ada", link, "agent-chat", R, LATER).ok, true);
     await museReportRoom(museBridge(b.env), link, R, true);
     assert.equal(await b.rooms(link), 1, "counted once the caller reports it");
-    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", link)), { ok: true, removed: true });
+    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", link)), { ok: true, removed: true, link: null });
     await h.settled();
     assert.equal(await b.rooms(link), 0, "the drop told the bridge");
     // the members list shows the delivery while it is on, and not after
@@ -228,7 +229,7 @@ test("a set carries its deadline and the room keeps it by its own clock: just be
     let r = h.room.museSetHookLook("tok-Ada", link, "agent-chat", R, clock);
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.equal(r.now, clock, "the room's clock in the answer");
-    assert.deepEqual(h.room.museDropLook("tok-Ada", link), { ok: true, removed: true, now: clock });
+    assert.deepEqual(h.room.museDropLook("tok-Ada", link), { ok: true, removed: true, link: null, now: clock });
     // one millisecond after it: refused, nothing set, nothing read of the seat
     clock += 1;
     r = h.room.museSetHookLook("tok-Ada", link, "agent-chat", R, clock - 1);

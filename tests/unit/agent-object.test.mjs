@@ -93,7 +93,9 @@ test("agentCut marks the key cut and hands back the list as it stands; a cut key
   assert.deepEqual(h.room.agentRemain("key", V, 2, "ring-left"), { ok: true });
   assert.deepEqual(h.room.agentCut("key", V), { ok: true, wrapped: "wrapped-dk", ver: 3, ring: "ring-left" });
   assert.deepEqual(await h.room.agentDrop("key", W), { ok: false }, "a wrong verifier drops nothing");
-  assert.deepEqual(await h.room.agentDrop("key", V), { ok: true });
+  assert.deepEqual(await h.room.agentDrop("key", V, 2), { ok: false, code: "stale" }, "a drop from a version the list has moved on from drops nothing");
+  assert.deepEqual(tables(h), ["ak", "aks"]);
+  assert.deepEqual(await h.room.agentDrop("key", V, 3), { ok: true }, "from the version it read");
   assert.deepEqual(tables(h), []);
   assert.deepEqual(h.room.agentCut("key", V), { ok: false }, "a key fully gone");
   assert.deepEqual(await h.room.agentDrop("key", V), { ok: false }, "a second drop finds nothing");

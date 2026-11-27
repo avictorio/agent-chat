@@ -154,11 +154,17 @@ export const AgentMethods = {
   },
 
   /** The identity deleted, all of it: a cut key's once every Muse wake its
-   *  list names is off, or a key a failed creation made. The slot is
-   *  deleted in the same synchronous step as the check, so nothing opens it
-   *  after; then the rest of the storage goes. */
-  async agentDrop(slot: string, verifier: string): Promise<{ ok: true } | { ok: false }> {
+   *  list names is off (ver: the list's version its disconnect read; stale
+   *  when the list has moved since, and nothing is deleted), or a key a
+   *  failed creation made. The slot is deleted in the same synchronous step
+   *  as the check, so nothing opens it after; then the rest of the storage
+   *  goes. */
+  async agentDrop(slot: string, verifier: string, ver?: number): Promise<{ ok: true } | { ok: false, code?: "stale" }> {
     if (!slotOk(this.sql, slot, verifier, null)) return { ok: false };
+    if (ver !== undefined && ver !== null) {
+      const a = this.sql.exec<Pick<AkRow, "ver">>("SELECT ver FROM ak WHERE k = 1").toArray()[0];
+      if (a && a.ver !== Number(ver)) return { ok: false, code: "stale" };
+    }
     this.sql.exec("DELETE FROM aks");
     await this.ctx.storage.deleteAll();
     return { ok: true };

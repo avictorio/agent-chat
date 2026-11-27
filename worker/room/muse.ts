@@ -232,11 +232,12 @@ export const MuseMethods = {
   // opened is refused, and the agent joins first with any call that joins.
   //
   // Every answer of the three, a refusal included, carries the room's clock
-  // (now, museNow): the key's record (routes/agent.ts) takes a link off on
-  // an answer that shows no hook of that link only when the room's clock in
-  // it is past the link's deadline, and museSetHookLook refuses, by that
-  // same clock, a set that reaches the room after its deadline, so no set of
-  // the link can arrive after such an answer.
+  // (now, museNow), and the look's and the drop's carry the Muse link the
+  // hook is on: an observation, on which the key's record (lib/wakes.ts)
+  // takes a link off only when each of its outstanding recordings has a
+  // deadline that clock has passed (by AGENT_WAKE_SKEW_MS); museSetHookLook
+  // refuses, by that same clock, a set that reaches the room after its
+  // deadline, so no set of the link can arrive after such an observation.
 
   /** The room's clock, as the three hook methods an agent key calls read it. */
   museNow(): number {
@@ -277,25 +278,29 @@ export const MuseMethods = {
    *  hooks are filed by the folded name, so in an older room holding both
    *  "Scout" and "scout" a wake the key set up outlives its seat. A token
    *  the room has no row for is refused (invite_invalid), as by
-   *  lookupInvite. It says nothing of the seat but whether a hook went. */
-  museDropLook(token: string, link: string): ({ ok: true, removed: boolean } | Refusal) & { now: number } {
+   *  lookupInvite. It says nothing of the seat but whether a hook went and
+   *  the Muse link the hook filed under that name is on after the call
+   *  (null: none, or a webhook), as museHookLook says it. */
+  museDropLook(token: string, link: string): ({ ok: true, removed: boolean, link: string | null } | Refusal) & { now: number } {
     const now = this.museNow();
     if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };
     const s = this.museSeatName(token);
     if (!s.ok) return { ...s, now };
-    const h = this.museRow(nameFold(s.name));
-    if (!h || h.kind !== "muse" || h.link !== String(link)) return { ok: true, removed: false, now };
+    const member = nameFold(s.name);
+    const h = this.museRow(member);
+    if (!h || h.kind !== "muse" || h.link !== String(link)) return { ok: true, removed: false, link: h && h.kind === "muse" ? h.link : null, now };
     this.museDrop(s.name);
     this.notifyMembers(s.name);
-    return { ok: true, removed: true, now };
+    const after = this.museRow(member);
+    return { ok: true, removed: true, link: after && after.kind === "muse" ? after.link : null, now };
   },
 
   /** The Muse link of the hook filed under the token's member's name (null:
    *  no hook, or a webhook), a look that writes nothing, for every seat the
-   *  room has a row for, as museDropLook answers: how muse_register settles
-   *  the wakes a key recorded in this room before it records one more, and
-   *  how a take-off or a replaced entry learns, by the room's clock, whether
-   *  every link it recorded can be settled before it turns any off. */
+   *  room has a row for, as museDropLook answers: the observation on which
+   *  the key's record (lib/wakes.ts) settles the links it holds for this
+   *  room, at muse_register's bound and after it, and before a take-off, a
+   *  replaced entry or a disconnect turns any wake off. */
   museHookLook(token: string): ({ ok: true, link: string | null } | Refusal) & { now: number } {
     const now = this.museNow();
     if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };

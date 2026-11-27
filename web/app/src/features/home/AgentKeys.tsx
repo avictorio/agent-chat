@@ -611,6 +611,8 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
   // a disconnect that left Muse wakes: the cut key, kept in this view's memory only, so DELETE can be sent again
   const [again, setAgain] = useState<string | null>(null);
   const [retried, setRetried] = useState(false);
+  // a well-formed key Open refused as not current: kept in this view's memory only, to send its DELETE once more
+  const [refused, setRefused] = useState<string | null>(null);
   const [off, setOff] = useState<AgentKeyRoom | null>(null);
   const [dlgErr, setDlgErr] = useState("");
   const [form, setForm] = useState<SeatForm>(() => emptyForm());
@@ -643,6 +645,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
     setSay("");
     setDropped(null);
     setAgain(null);
+    setRefused(null);
     const k = paste.trim();
     if (!k) return;
     if (k.charAt(0) !== ".") return setErr(NOT_KEY);
@@ -654,6 +657,37 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
       setForm(emptyForm(commonName(info.rooms)));
     } catch (ex) {
       setErr(keyRefusal(ex));
+      // a disconnected key whose Muse wakes were not all confirmed off is refused too: offer its DELETE again
+      const b = bodyOf(ex);
+      if (b && b.code === "agent_key_invalid") setRefused(k);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // DELETE with a key Open refused: on a disconnected key with wakes left it tries them again (and may wait for a
+  // registration still running); on a key the site does not know it changes nothing and answers the same refusal
+  const finish = async () => {
+    if (!refused) return;
+    setBusy(true);
+    setErr("");
+    setSay("Trying this key's Muse wakes again… this can take up to half a minute.");
+    try {
+      const d = await new AgentKeyClient(refused).disconnect();
+      setSay("");
+      // nothing here says which rooms still take the key's invite, so no membership is named
+      setDropped({ ...d, rooms: [] });
+      setAgain(d.muse_wakes_left && d.muse_wakes_left.length ? refused : null);
+      setRetried(true);
+      setRefused(null);
+      setPaste("");
+      setRefocus((n) => n + 1);
+    } catch (ex) {
+      setSay("");
+      const b = bodyOf(ex);
+      if (b && b.code === "agent_key_invalid") {
+        setRefused(null);
+        setErr("Nothing was turned off: the site knows no disconnected key like this one with Muse wakes left (it was mistyped, or it is fully disconnected already).");
+      } else setErr(keyRefusal(ex));
     } finally {
       setBusy(false);
     }
@@ -765,7 +799,10 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
           autoCapitalize="off"
           disabled={busy}
           value={paste}
-          onChange={(e) => setPaste(e.currentTarget.value)}
+          onChange={(e) => {
+            setPaste(e.currentTarget.value);
+            setRefused(null);
+          }}
         />
         <Button type="submit" disabled={busy || !paste.trim()}>
           Open
@@ -774,6 +811,15 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
       {err ? (
         <p className="hint bad" id="keyHeldErr" role="alert">
           {err}
+        </p>
+      ) : null}
+      {refused && !held ? (
+        <p className="hint" id="keyFinish">
+          If you disconnected this key and the page said some rooms did not confirm their Muse wakes were off, this turns them off now; it
+          changes nothing for a key that was mistyped or is fully disconnected.{" "}
+          <LinkButton type="button" id="keyFinishGo" disabled={busy} onClick={() => void finish()}>
+            Turn off its Muse wakes
+          </LinkButton>
         </p>
       ) : null}
       {/* the section's one live region: progress and results, the disconnect's included */}

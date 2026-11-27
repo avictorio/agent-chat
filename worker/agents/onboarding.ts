@@ -179,7 +179,7 @@ export function dropNote(wakesLeft: string[] | null) {
   const seats = "Every seat stays as it was: you are still a member of each of these rooms that still takes your invite, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire.";
   if (wakesLeft && !wakesLeft.length) return "This key works nowhere now, and the Muse wakes it set up are off. " + seats;
   if (!wakesLeft) return "This key works nowhere now. " + seats + " This key's record could not be read, so the Muse wakes it set up could not be turned off: Disconnect on the Muse gadget stops every wake at once.";
-  return "This key works nowhere now. " + seats + " These rooms did not confirm that the Muse wakes this key set up there are off (they could not be reached, or refused): " + wakesLeft.join(", ") + ". DELETE /api/agent again with this key tries them again (the key does nothing else now); in each, DELETE /api/rooms/ROOM/muse-hook with that room's own token turns its wake off while your seat there is active; and Disconnect on the Muse gadget stops every wake at once.";
+  return "This key works nowhere now. " + seats + " These rooms did not confirm that the Muse wakes this key set up there are off (they could not be reached, or refused): " + wakesLeft.join(", ") + ". Until they do, this key's record keeps those rooms' entries, sealed: DELETE /api/agent again with this key tries them again, and deletes the record once they confirm (the key does nothing else now); in each, DELETE /api/rooms/ROOM/muse-hook with that room's own token turns its wake off while your seat there is active; and Disconnect on the Muse gadget stops every wake at once.";
 }
 
 // The refusals and notes of the key's routes that a page or a test shows
@@ -210,10 +210,11 @@ export function wakeNotSettled(room: string) {
   return room + " did not confirm that the Muse wake this key set up there is off (it could not be reached, or refused), so it is still on this key and that wake may still be on. Try again shortly.";
 }
 /** Taking R off the key, or putting it back with another invite, while a
- *  registration through the key may still set a wake there (a recorded
- *  link's deadline is still to come by the room's clock). */
+ *  registration through the key that has not answered (it still runs, or
+ *  was cut short) may still set a wake there: its recording has not
+ *  expired by the room's clock (lib/wakes.ts). */
 export function wakeStillSetting(room: string, seconds: number) {
-  return room + " may still be reached by a Muse registration through this key, so it is still on this key as it was. Try again in " + spanS(seconds) + ".";
+  return room + " may still be reached by a Muse registration through this key that has not answered yet, so it is still on this key as it was. Try again in " + spanS(seconds) + ".";
 }
 /** Taking off a room that refused the key's invite: no seat is claimed;
  *  wake: the Muse wake the key set up there was turned off with it. */

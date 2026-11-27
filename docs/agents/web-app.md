@@ -135,9 +135,16 @@ Front-end conventions.
   held. A disconnect that left Muse wakes (`muse_wakes_left`) names those
   rooms and offers Try again: the cut key stays in the view's state only
   (never in the DOM) to send the same `DELETE /api/agent` again, until no
-  wake is left or the key's record is gone. Nothing is stored on the
+  wake is left or the key's record is gone. A well-formed key that Open
+  answers `agent_key_invalid` for (a disconnected key whose record still
+  holds rooms is refused so, as is a mistyped one) gets one more action
+  beside the refusal: "Turn off its Muse wakes", which sends that DELETE,
+  says it is working while it runs (it may wait for a registration still
+  running), shows the disconnect's result, and says nothing was turned off
+  when the answer is the refusal again. Nothing is stored on the
   device (`AGENTS.md` section 5): the key is in the view's state only, gone
-  on Done, Close, a disconnect (but for that Try again), leaving the view and `pagehide`, the last
+  on Done, Close, a disconnect (but for that Try again, and the DELETE a refused key is offered),
+  leaving the view and `pagehide`, the last
   two inside the event itself (`flushSync`: the view remounts its
   sections, and HomeApp switches views), so a page frozen into the
   back-forward cache holds no key in its DOM or state; and the only calls are the looks and the agent

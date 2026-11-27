@@ -456,12 +456,8 @@ async function worker() {
     await paste(page, '.ac2.not-a-key');
     must((await text(page, '#keyHeldErr')) === 'That is not an agent key: one starts with .ac1. and is 71 characters long.', await text(page, '#keyHeldErr'));
     must(!S.calls.some((c) => c.p === '/api/agent'), 'checked here first: no request');
+    must(!(await page.$('#keyFinish')), 'a key that is not well formed is offered no DELETE');
     must(await page.$eval('#keyPaste', (i) => i.type === 'text' && i.autocomplete === 'off' && i.spellcheck === false && i.getAttribute('autocapitalize') === 'off'), 'the field offers no saving');
-  }, '#keyHeld');
-  await state('refused-key', { rooms: MINE, api: { info: async () => ({ status: 403, body: { error: W.AGENT_KEY_INVALID, code: 'agent_key_invalid' } }) } }, async (page) => {
-    await paste(page, KEY);
-    await page.waitForSelector('#keyHeldErr', { timeout: 5000 });
-    must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
   }, '#keyHeld');
   await state('unreadable', { rooms: MINE, api: { info: async () => ({ status: 500, body: { error: W.AGENT_UNREADABLE, code: 'agent_unreadable' } }) } }, async (page) => {
     await paste(page, KEY);
@@ -572,7 +568,7 @@ async function worker() {
     await page.waitForSelector('#keyOffDlg[open]', { timeout: 3000 });
     await page.click('#keyOffYes');
     await page.waitForSelector('#keyOffDlg [role=alert]', { timeout: 5000 });
-    must((await text(page, '#keyOffDlg [role=alert]')) === 'family-trip may still be reached by a Muse registration through this key, so it is still on this key as it was. Try again in 12 seconds.', await text(page, '#keyOffDlg [role=alert]'));
+    must((await text(page, '#keyOffDlg [role=alert]')) === 'family-trip may still be reached by a Muse registration through this key that has not answered yet, so it is still on this key as it was. Try again in 12 seconds.', await text(page, '#keyOffDlg [role=alert]'));
     must(await page.$eval('#keyOffDlg', (d) => d.open) && !!(await page.$('#keyHeldRooms li[data-room="family-trip"]')), 'the dialog stays open, the room on the list');
   });
   await scenario('keys-takeoff-done', { rooms: MINE, api: { info: async (S) => ({ body: S.removed ? { ...INFO, rooms: INFO.rooms.slice(1) } : INFO }), remove: async (body, S) => { S.removed = true; return { body: { room: body.room, removed: true, muse_wake_removed: true, note: 'x' } }; } } }, async (page, S) => {
@@ -646,6 +642,47 @@ async function worker() {
     must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
     must(!(await page.$('#keyDropAgain')), 'no Try again once the key is gone');
   });
+  // a disconnected key whose record still holds rooms is refused by Open as any unknown key: the view offers its DELETE again
+  const REFUSED_KEY = { info: async () => ({ status: 403, body: { error: W.AGENT_KEY_INVALID, code: 'agent_key_invalid' } }) };
+  await state('refused-key', { rooms: MINE, api: REFUSED_KEY }, async (page, S) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyFinish', { timeout: 5000 });
+    must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
+    must((await text(page, '#keyFinish')) === 'If you disconnected this key and the page said some rooms did not confirm their Muse wakes were off, this turns them off now; it changes nothing for a key that was mistyped or is fully disconnected. Turn off its Muse wakes', await text(page, '#keyFinish'));
+    must(!S.calls.some((c) => c.m === 'DELETE'), 'nothing sent until asked');
+  }, '#keyHeld');
+  await state('refused-key-done', { rooms: MINE, api: { ...REFUSED_KEY, drop: async (S) => { S.drops = (S.drops || 0) + 1; await new Promise((r) => setTimeout(r, 400)); return { body: { deleted: true, rooms: ['family-trip'], muse_wakes_removed: ['family-trip'], muse_wakes_left: [], note: W.dropNote([]) } }; } } }, async (page, S) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyFinishGo', { timeout: 5000 });
+    await page.click('#keyFinishGo');
+    await page.waitForFunction(() => /Trying this key's Muse wakes again/.test(document.getElementById('keyHeldSay')?.textContent || ''), null, { timeout: 3000 });
+    must(await page.$eval('#keyFinishGo', (b) => b.disabled), 'the button waits while it works');
+    await page.waitForSelector('#keyDropped', { timeout: 5000 });
+    must((await text(page, '#keyDropped')) === 'Disconnected. The Muse wakes this key set up are off.', await text(page, '#keyDropped'));
+    const drops = S.calls.filter((c) => c.m === 'DELETE' && c.p === '/api/agent');
+    must(drops.length === 1 && drops[0].auth === 'Bearer ' + KEY, 'the DELETE, with the key');
+    must(!(await page.$('#keyFinish')) && !(await page.$('#keyDropAgain')), 'nothing more to offer');
+    must(await page.$eval('#keyPaste', (i) => i.value) === '', 'the key cleared from the field');
+  }, '#keyHeld');
+  await scenario('keys-refused-key-left', { rooms: MINE, api: { ...REFUSED_KEY, drop: async (S) => { S.drops = (S.drops || 0) + 1; return { body: S.drops === 1 ? { deleted: true, rooms: ['family-trip'], muse_wakes_removed: [], muse_wakes_left: ['family-trip'], note: W.dropNote(['family-trip']) } : { deleted: true, rooms: ['family-trip'], muse_wakes_removed: ['family-trip'], muse_wakes_left: [], note: W.dropNote([]) } }; } } }, async (page, S) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyFinishGo', { timeout: 5000 });
+    await page.click('#keyFinishGo');
+    await page.waitForSelector('#keyDropAgain', { timeout: 5000 });
+    must((await text(page, '#keyDropped')) === 'Disconnected. These rooms did not confirm that the Muse wakes this key set up there are off: family-trip. Try again turns them off once they answer; Disconnect on the Muse gadget stops every wake at once.', await text(page, '#keyDropped'));
+    await page.click('#keyDropAgain');
+    await page.waitForFunction(() => !document.getElementById('keyDropAgain'), null, { timeout: 5000 });
+    must((await text(page, '#keyDropped')) === 'Disconnected. The Muse wakes this key set up are off.', await text(page, '#keyDropped'));
+    must(S.calls.filter((c) => c.m === 'DELETE').every((c) => c.auth === 'Bearer ' + KEY) && S.drops === 2, 'two DELETEs with the key');
+  });
+  await state('refused-key-unknown', { rooms: MINE, api: { ...REFUSED_KEY, drop: async () => ({ status: 403, body: { error: W.AGENT_KEY_INVALID, code: 'agent_key_invalid' } }) } }, async (page) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyFinishGo', { timeout: 5000 });
+    await page.click('#keyFinishGo');
+    await page.waitForFunction(() => /Nothing was turned off/.test(document.getElementById('keyHeldErr')?.textContent || ''), null, { timeout: 5000 });
+    must((await text(page, '#keyHeldErr')) === 'Nothing was turned off: the site knows no disconnected key like this one with Muse wakes left (it was mistyped, or it is fully disconnected already).', await text(page, '#keyHeldErr'));
+    must(!(await page.$('#keyFinish')) && !(await page.$('#keyDropped')), 'no offer left, and no result line');
+  }, '#keyHeld');
   await scenario('keys-disconnect-unreadable', { rooms: MINE, api: { ...OPEN, drop: async () => ({ body: { deleted: true, rooms: [], muse_wakes_removed: [], muse_wakes_left: null, note: W.dropNote(null) } }) } }, async (page) => {
     await paste(page, KEY);
     await page.waitForSelector('#keyOpened', { timeout: 5000 });

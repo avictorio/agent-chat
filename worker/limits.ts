@@ -290,18 +290,24 @@ export const AGENT_SWAP_TRIES = 3;
 // reported as left on.
 export const AGENT_WAKE_RETRY_MS = 1000;
 // The Muse wakes a key set up in a room (muse_register) are recorded on the
-// room's entry, each link with its deadline before the room is asked to set
-// it: AGENT_WAKE_SET_MS after the record, by the Worker's clock. The room
-// refuses, by its own clock, a set that reaches it after the deadline, so a
-// link comes off the entry only on a room's answer: its refusal of that
-// link's own set, or an answer that shows no hook of it and carries a room
-// clock past its deadline (routes/agent.ts, "the record"). The Worker's
-// clock only says when to ask: a disconnect waits for
-// a deadline still to come at most this long, then asks again. An entry
-// records at most AGENT_WAKE_LINKS_MAX links: one wake and a registration's
-// new link, with room for one more whose set threw.
+// room's entry (worker/lib/wakes.ts): each attempt to set a link is a
+// recording with its deadline, AGENT_WAKE_SET_MS after the record by the
+// Worker's clock, and the room refuses, by its own clock, a set that
+// reaches it after the deadline. A link leaves the entry only in a settling
+// write, on an observation of the room made after the list was read, when
+// each outstanding recording of it has a deadline more than
+// AGENT_WAKE_SKEW_MS before the observation's room clock: the margin for a
+// room object restarted on a machine whose clock is behind. The Worker's
+// clock only says when to ask: a disconnect waits for a recording still
+// outstanding at most AGENT_WAKE_SET_MS + AGENT_WAKE_SKEW_MS, then asks
+// again. An entry holds at most AGENT_WAKE_ITEMS_MAX links and outstanding
+// recordings together (a link and a recording each count one): a wake that
+// is on, a registration's new link and its recording, and another link
+// whose set threw, with its recording; at the bound a settling write comes
+// first. This also bounds the sealed list's size (agent-glance-size test).
 export const AGENT_WAKE_SET_MS = 15000;
-export const AGENT_WAKE_LINKS_MAX = 3;
+export const AGENT_WAKE_SKEW_MS = 2000;
+export const AGENT_WAKE_ITEMS_MAX = 5;
 
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {

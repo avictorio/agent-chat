@@ -61,16 +61,20 @@ Playwright); `tests/fixtures/` holds the files they share.
   through either address (`agent-mcp`, which also runs `muse_register`, the
   disconnect's and the take-off's wakes against the Muse bridge in the
   same process: `bridge-world.mjs`, and the record of those wakes: a set
-  that throws, a Worker that stops between the record and the set, two
-  registrations at once, a set the room holds past another's final write
-  (at its deadline and one millisecond after), a look at the deadline and
-  past it, the two clocks seconds apart either way, an answer with no
-  clock, a second gadget, the bound, an older room whose invites' names
-  fold alike and that room put back on the key by each of the three adds,
-  the guard every write of the list goes through (`keepsWakes`), the cut
-  key (refused everywhere as an unknown key, its record after a disconnect
-  that left wakes, a Worker that stops after the cut or between two rooms,
-  the second DELETE), and the work registered with `waitUntil` before its
+  that throws (not sent again), a Worker that stops before its own write,
+  two registrations at once, one gadget's link recorded twice in every
+  order of the two sets and the two writes, two gadgets whose earlier set
+  writes last, a set the room holds past another's write (at its
+  deadline and one millisecond after), a refused first registration and
+  its tidy, a take-off and a disconnect right after a finished
+  registration (no wait), an outstanding recording at the skew margin's
+  edge, a settling write that loses its compare-and-set and looks again,
+  the two clocks seconds apart either way, an answer with no clock, the
+  bound, an older room whose invites' names fold alike and that room put
+  back on the key by each of the three adds, the cut key (refused
+  everywhere as an unknown key, its record after a disconnect that left
+  wakes, a Worker that stops after the cut or between two rooms, the
+  second DELETE), and the work registered with `waitUntil` before its
   first write, which `agent-world.mjs` records as `waitedBeforeWrite`; a
   room's clock is set there by replacing that room object's `museNow`,
   which its three hook methods read, so no variable is needed), the catalog and its pinned
@@ -86,7 +90,12 @@ Playwright); `tests/fixtures/` holds the files they share.
   three hook methods (`agent-hooks`: the member's `inv` row the same
   before and after, a gone seat in a room whose invites' names fold
   alike, a set's deadline kept by the room's clock and that clock in
-  every answer) and the Agent keys view's
+  every answer, the drop saying which link is on after it), the record's
+  guard, its three writes as pure functions and a bounded exhaustive
+  model over them (`agent-wakes`: two registrations of one link or two,
+  sets taken, refused, thrown or never run, own writes, tidies and a
+  take-off in every order, lost compare-and-sets; at every state a hook
+  that is on has its link recorded) and the Agent keys view's
   name check against the server's (`agent-name`).
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
   in the same `npm run test:unit`, with the same hook, and need no

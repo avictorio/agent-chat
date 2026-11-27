@@ -15,6 +15,7 @@ import {
   AGENT_KEYS_WINDOW_S,
   AGENT_ROOMS_MAX,
   AGENT_WAKE_SET_MS,
+  AGENT_WAKE_SKEW_MS,
   AUDIO_MAX,
   AVATAR_MAX,
   CON_KEEP,
@@ -220,6 +221,7 @@ export function docsValues(o: string) {
     AGENT_KEYS_PER_ROOM_DAY,
     AGENT_GLANCE_GAP_S,
     AGENT_WAKE_SET: span(AGENT_WAKE_SET_MS / 1000),
+    AGENT_WAKE_SKEW: span(AGENT_WAKE_SKEW_MS / 1000),
   };
 }
 

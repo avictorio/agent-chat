@@ -483,7 +483,7 @@ export interface AgentKeyRoomRemoved {
 /** DELETE /api/agent: the key is cut; the rooms it held (those that had
  *  refused its invite included), the Muse wakes it set up that were turned
  *  off and the rooms that did not confirm theirs are off (null: the key's
- *  record could not be read). While some are left the cut key keeps only
+ *  record could not be read), a room in one of the two, never both. While some are left the cut key keeps only
  *  those rooms, and the same DELETE again tries them (rooms then names those
  *  it held); with none left, the key's record is gone. */
 export interface AgentKeyDropped {

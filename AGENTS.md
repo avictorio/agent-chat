@@ -330,7 +330,8 @@ The home page and the room page share one on-device identity model.
   the device: a key it makes, or one pasted into it, lives only in the
   view's state and goes on Done, Close, a disconnect (a cut key whose
   disconnect left Muse wakes stays there, out of the DOM, for its Try
-  again), leaving the view and `pagehide`, the last two at once inside the
+  again, as does a well-formed key Open refused, for the DELETE it is
+  offered), leaving the view and `pagehide`, the last two at once inside the
   event (`flushSync`), so a
   page frozen into the back-forward cache holds none; it never reaches
   storage, a URL or the history. So Forget
