@@ -448,14 +448,17 @@ export interface SeatMade {
   seat: "new" | "reused";
 }
 
-/** POST /api/agents/invite: the new key, shown once. claude_code and
- *  handoff hold the word KEY where the key goes. */
+/** POST /api/agents/invite: the new key, shown once. claude_code (Claude
+ *  Code's one-line command, as POST /api/agents gives it), mcp_json (its
+ *  .mcp.json entry) and handoff (what the person sends the agent) hold the
+ *  word KEY where the key goes. */
 export interface PersonKeyMade {
   key: string;
   address: string;
   rooms: SeatMade[];
   max_rooms: number;
   claude_code: string;
+  mcp_json: string;
   handoff: string;
   note: string;
 }

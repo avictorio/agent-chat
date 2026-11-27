@@ -63,7 +63,8 @@ Playwright); `tests/fixtures/` holds the files they share.
   same process: `bridge-world.mjs`), the catalog and its pinned
   (version, digest) pairs (`agent-catalog`), the size of
   `whats_waiting` on `AGENT_ROOMS_MAX` full rooms (`agent-glance-size`), a
-  key a person makes (`agent-person`: the order of the checks, a check
+  key a person makes (`agent-person`: the order of the checks, a `check`
+  that is not a boolean refused before anything is asked, a check
   that writes nothing and tells a refused inviter nothing about its room,
   the seats reused or not, the room's caps, two calls at once, what a
   failure leaves), the two look-only hook methods (`agent-hooks`: the
@@ -115,7 +116,8 @@ Playwright); `tests/fixtures/` holds the files they share.
   site-wide ones and `whats_waiting`'s gap lowered by `POST
   /api/test-hooks/agent-limits`, which only `TEST_HOOKS` arms), and
   times `whats_waiting` over `AGENT_ROOMS_MAX` rooms; `tests/api/agent-person.js`
-  makes keys with a person's invites (the check, the seats the owner sees,
+  makes keys with a person's invites (the check, a check that is not a
+  boolean, the answer's fields, the seats the owner sees,
   reuse, the room's caps, rooms added) and runs `muse_register` and the
   disconnect's wakes against the fake Muse. The libraries live in
   `tests/mcp-clients/` with exact versions and a lockfile, a package of

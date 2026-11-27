@@ -66,7 +66,7 @@ import { AGENT_UNREADABLE, agentCredential, agentDataKey, agentSealRing, agentUn
 import { hashKey, networkKey } from "../lib/address.js";
 import { cleanName, memberNameProblem, nameFold, sameName } from "../lib/text.js";
 import { warn } from "../lib/log.js";
-import { AGENT_KEY_INVALID, AGENT_KEY_MISSING, NOT_AGENT_KEY, agentInstructions, agentKeyNote, dropNote, personKeyClaudeCode, personKeyHandoff, personKeyNote, unusedNote, type AgentVariant } from "../agents/onboarding.js";
+import { AGENT_KEY_INVALID, AGENT_KEY_MISSING, NOT_AGENT_KEY, agentInstructions, agentKeyNote, claudeCodeLine, dropNote, mcpJsonEntry, personKeyHandoff, personKeyNote, unusedNote, type AgentVariant } from "../agents/onboarding.js";
 import { MCP_AGENT_CATALOG_VERSION, agentServerInfo, mcpAgentCatalogBuilt, mcpCallOf, mcpErr, mcpHasAgentTool, mcpOk } from "../agents/mcp.js";
 import { mcpServe, roomToolAnswer, type ToolAnswer, type Worded } from "./agents.js";
 import { museClaim } from "./muse.js";
@@ -351,7 +351,7 @@ export async function agentCreateRoute(rc: RouteContext): Promise<Response> {
         return json({
           key: k.key, address, rooms: found.map((f) => ({ room: f.room, name: f.name, opened: f.opened })), max_rooms: AGENT_ROOMS_MAX,
           // the line holds the word KEY, so the key itself is in the answer once
-          claude_code: "claude mcp add --transport http agent-chat " + address + " --header \"Authorization: Bearer KEY\"",
+          claude_code: claudeCodeLine(address),
           note: agentKeyNote(url.origin),
         }, 201);
       }
@@ -617,8 +617,11 @@ function personShape(v: unknown, i: number, seen: Set<string>, topName: unknown)
   return { i, room, inviter, name, reuse };
 }
 
-/** The body of both routes: the list (1 to AGENT_ROOMS_MAX) and every
- *  entry's shape, and whether it only asks (check: the boolean true). */
+/** The body of both routes: the list (1 to AGENT_ROOMS_MAX), every entry's
+ *  shape, and whether it only asks: check true; absent or false is the call
+ *  itself, and any other value (a string, a number, null) is refused as the
+ *  field readers refuse a flag of the wrong type, so a check is never taken
+ *  for the call. */
 function personBody(b: Body | null): { entries: PersonEntry[], check: boolean } | Refused {
   const list = b ? b.rooms : undefined;
   if (!Array.isArray(list) || list.length < 1 || list.length > AGENT_ROOMS_MAX) return { status: 400, error: "\"rooms\" must list 1 to " + AGENT_ROOMS_MAX + " rooms: [{\"room\", \"inviter_token\"}], with your own invites" };
@@ -629,7 +632,9 @@ function personBody(b: Body | null): { entries: PersonEntry[], check: boolean } 
     if ("status" in e) return e;
     entries.push(e);
   }
-  return { entries, check: !!b && b.check === true };
+  const check = b && "check" in b ? b.check : false;
+  if (typeof check !== "boolean") return { status: 400, error: "\"check\" must be true or false" };
+  return { entries, check };
 }
 
 /** What a room says of an entry's inviter: a look (lookupInvite), which
@@ -795,15 +800,16 @@ async function emptyIdentity(env: Env): Promise<{ key: string, u: Unsealed } | n
 }
 
 // POST /api/agents/invite {"name", "rooms": [{"room", "inviter_token",
-// "name"?, "reuse"?}], "check"?: true}: a new key whose seats are agent
-// invites the site makes, or reuses, with the person's own invites (the
-// person's tokens in the body, as POST /api/muse/hooks takes them; no
+// "name"?, "reuse"?}], "check"?: true | false}: a new key whose seats are
+// agent invites the site makes, or reuses, with the person's own invites
+// (the person's tokens in the body, as POST /api/muse/hooks takes them; no
 // Authorization and no owner key is read). In order: the method; the body
-// (at most SMALL_BODY_MAX); the list; every entry's shape (no object asked
-// yet); every inviter looked up, in order; each seat planned (reads only);
-// with check, the answer is here: what the call would do, with the
-// counters only peeked at (agentPeek: the network's and the site's, and
-// only the rooms' whose inviter passed), and nothing is written anywhere;
+// (at most SMALL_BODY_MAX); the list; every entry's shape and check, a
+// boolean (no object asked yet); every inviter looked up, in order; each
+// seat planned (reads only); with check, the answer is here: what the
+// call would do, with the counters only peeked at (agentPeek: the
+// network's and the site's, and only the rooms' whose inviter passed), and
+// nothing is written anywhere;
 // without it the first refusal is the answer, nothing counted. Then the
 // caps (agentReserve, as POST /api/agents). Then, under waitUntil with the
 // answer awaiting it (as room creation does), so a caller that goes away
@@ -873,8 +879,9 @@ async function personKeyNow(env: Env, url: URL, q: DurableObjectStub, got: strin
     const address = url.origin + "/api/mcp";
     return json({
       key: k.key, address, rooms, max_rooms: AGENT_ROOMS_MAX,
-      // both hold the word KEY where the key goes, so the key is in the answer once
-      claude_code: personKeyClaudeCode(address),
+      // the three hold the word KEY where the key goes, so the key is in the answer once
+      claude_code: claudeCodeLine(address),
+      mcp_json: mcpJsonEntry(address),
       handoff: personKeyHandoff(url.origin, rooms.map((r) => r.room)),
       note: personKeyNote(rooms.some((r) => r.seat === "reused")),
     }, 201);
@@ -893,9 +900,9 @@ async function personKeyNow(env: Env, url: URL, q: DurableObjectStub, got: strin
 // POST /api/agent/rooms/invite with the key as Authorization: Bearer and
 // the body of POST /api/agents/invite: more seats made, or reused, with
 // the person's own invites, on a key the person holds. In order: the
-// method; the key; the body; the list; every entry's shape; the key's list
-// (500 agent_unreadable); a room already on the key and held (409
-// room_held); the most rooms a key holds (429 limit_reached, counted as
+// method; the key; the body; the list; every entry's shape and check;
+// the key's list (500 agent_unreadable); a room already on the key and
+// held (409 room_held); the most rooms a key holds (429 limit_reached, counted as
 // add_room counts: a room the key holds that the room has refused is
 // replaced in place and counts once); every inviter looked up, in order;
 // each seat planned. check answers there and writes nothing (a held room is

@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AGENT_NAME_MAX, agentNameProblem, cleanAgentName } from "../../web/app/src/features/home/agentName.ts";
 import { MAX_NAME, cleanName, memberNameProblem, nameFold } from "../../worker/lib/text.ts";
-import { dropNote, personKeyClaudeCode, personKeyHandoff, personKeyNote, unusedNote } from "../../worker/agents/onboarding.ts";
+import { claudeCodeLine, dropNote, mcpJsonEntry, personKeyHandoff, personKeyNote, unusedNote } from "../../worker/agents/onboarding.ts";
 import { HOSTILE_NAMES } from "./start-views.mjs";
 
 const REFEREE = "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member.";
@@ -31,14 +31,17 @@ test("the view keeps a name as the server stores it, and refuses it with the ser
 });
 
 test("the texts a person's key comes with ask for no User-Agent and put no token in a URL", () => {
-  const texts = [personKeyNote(false), personKeyNote(true), personKeyClaudeCode("https://chat.victorio.cloud/api/mcp"), personKeyHandoff("https://chat.victorio.cloud", ["lima", "oslo"]), unusedNote(["lima"]), unusedNote(["lima", "oslo"]), dropNote([]), dropNote(["lima"]), dropNote(null)];
+  const texts = [personKeyNote(false), personKeyNote(true), claudeCodeLine("https://chat.victorio.cloud/api/mcp"), mcpJsonEntry("https://chat.victorio.cloud/api/mcp"), personKeyHandoff("https://chat.victorio.cloud", ["lima", "oslo"]), unusedNote(["lima"]), unusedNote(["lima", "oslo"]), dropNote([]), dropNote(["lima"]), dropNote(null)];
   for (const t of texts) {
     assert.ok(!/user[- ]?agent/i.test(t), t.slice(0, 60));
     assert.ok(!/[?&]invite=|#invite=/.test(t), t.slice(0, 60));
   }
-  // the key goes where KEY is, once, in each text the view fills in
-  assert.equal(personKeyClaudeCode("https://x/api/mcp").split("Bearer KEY").length, 2);
+  // the key goes where KEY is, once, in each text
+  assert.equal(claudeCodeLine("https://x/api/mcp").split("Bearer KEY").length, 2);
+  assert.equal(mcpJsonEntry("https://x/api/mcp").split("Bearer KEY").length, 2);
   assert.equal(personKeyHandoff("https://x", ["a"]).split("Bearer KEY").length, 2);
+  // the hand-off, pasted into a chat with KEY left in, says what KEY stands for and where the key goes
+  assert.ok(personKeyHandoff("https://x", ["a"]).includes("KEY below stands for that key, which your person holds: it goes into your MCP client's settings or its secure credential field, never into a chat."));
   // Muse's hand-off: a custom connector and its API Key box, never the chat
   assert.ok(personKeyHandoff("https://x", ["a"]).includes("custom connector") && personKeyHandoff("https://x", ["a"]).includes("\"API Key\" box it shows, never into the chat"));
   // the disconnect's note says the wakes are off only when none is left

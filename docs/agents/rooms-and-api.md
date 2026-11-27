@@ -776,8 +776,10 @@ docs.txt section that owns its routes, caps and formats.
     creation), and the agent's name; the site creates the agent's seat in
     each with that person's invite and puts it on the key at once, so the
     new tokens go into the sealed list and into no answer. In order: the
-    method, the body (`SMALL_BODY_MAX`), the list, every entry's shape (no
-    object asked), every inviter's look in order (`lookupInvite`: a room
+    method, the body (`SMALL_BODY_MAX`), the list, every entry's shape and
+    `check`, a boolean (400 `"check" must be true or false` for any other
+    value, so a check is never taken for the call; no object asked), every
+    inviter's look in order (`lookupInvite`: a room
     with no storage answers the room routes' 404 and is asked nothing
     else; only an invite stored as kind `human` invites, `not_person_invite`
     otherwise), then each seat planned from what the room itself says, read
@@ -802,6 +804,11 @@ docs.txt section that owns its routes, caps and formats.
     inviter, caps, inviter's token)`, which looks the inviter's token up
     again in the step that writes (`inviteStill`), each put on the key with
     one swap. `invite()` writes no `used` or `seen`, so nothing joins.
+    The new key's answer says `KEY` where the key goes, so the key is in it
+    once: `claude_code` (Claude Code's one-line command, from
+    `claudeCodeLine`, the same function as `POST /api/agents`' field),
+    `mcp_json` (its `.mcp.json` entry) and `handoff` (what the person sends
+    the agent in a chat, which says the key goes only into its settings).
     What a failure leaves:
 
     | What happens | What is left |

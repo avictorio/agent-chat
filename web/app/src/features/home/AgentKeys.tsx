@@ -382,30 +382,32 @@ function useSeatRun<T>(o: {
   return { busy, say, alert, nameErr, otherErr, waiting, run };
 }
 
-/** The new key, shown once: the key and what to give the agent, with the key filled in by the page. */
+/** The new key, shown once: the key and what to give the agent. The page
+ *  fills the key into Claude Code's two texts, which go into a file or a
+ *  terminal; the hand-off, which goes into a chat, keeps the word KEY. */
 function KeyMade({ made, name, onDone, cardRef }: { made: PersonKeyMade; name: string; onDone: () => void; cardRef: RefObject<HTMLDivElement | null> }) {
   const fill = (s: string) => s.split("Bearer KEY").join("Bearer " + made.key);
-  const settings = fill(made.claude_code);
-  const line = 'claude mcp add --transport http agent-chat ' + made.address + ' --header "Authorization: Bearer ' + made.key + '"';
-  const handoff = fill(made.handoff);
+  const settings = fill(made.mcp_json);
+  const line = fill(made.claude_code);
+  const handoff = made.handoff;
   return (
     <Card className="key-made" id="keyMade" tabIndex={-1} ref={cardRef} aria-labelledby="keyMadeTitle">
       <h2 id="keyMadeTitle">{name}'s agent key</h2>
       <div className="row">
         <input type="text" id="keyMadeKey" readOnly value={made.key} aria-label="Agent key" autoComplete="off" spellCheck={false} autoCapitalize="off" />
-        <Button type="button" onClick={() => copy(made.key)}>
+        <Button type="button" id="keyMadeCopyKey" onClick={() => copy(made.key)}>
           Copy
         </Button>
       </div>
       <h3 className="key-sub">For Claude Code</h3>
       <p className="hint">Put this in the .mcp.json file of the folder you run Claude Code in, which keeps the key off command lines. Keep that file out of version control.</p>
       <pre className="key-text" id="keyMadeSettings">{settings}</pre>
-      <Button type="button" size="sm" onClick={() => copy(settings)}>
+      <Button type="button" size="sm" id="keyMadeCopySettings" onClick={() => copy(settings)}>
         Copy
       </Button>
       <p className="hint">Or add it with one line. The line stays in your shell's history.</p>
       <pre className="key-text" id="keyMadeLine">{line}</pre>
-      <Button type="button" size="sm" onClick={() => copy(line)}>
+      <Button type="button" size="sm" id="keyMadeCopyLine" onClick={() => copy(line)}>
         Copy
       </Button>
       <h3 className="key-sub">For Muse</h3>
@@ -413,8 +415,12 @@ function KeyMade({ made, name, onDone, cardRef }: { made: PersonKeyMade; name: s
         In Muse, ask it to add a custom connector for {made.address}, then paste the key into the "API Key" box it shows, never into the chat.
       </p>
       <h3 className="key-sub">For your agent</h3>
+      <p className="hint" id="keyMadeHandoffHint">
+        Send this to your agent in a chat. It says KEY where the key goes: the key itself goes only into the agent's MCP settings or its secure credential field, never
+        into a chat.
+      </p>
       <pre className="key-text" id="keyMadeHandoff">{handoff}</pre>
-      <Button type="button" size="sm" onClick={() => copy(handoff)}>
+      <Button type="button" size="sm" id="keyMadeCopyHandoff" onClick={() => copy(handoff)}>
         Copy
       </Button>
       <h3 className="key-sub">Rooms</h3>
@@ -685,7 +691,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
         </p>
       ) : null}
       {/* the section's one live region: progress and results, the disconnect's included */}
-      <p className="hint" id="keyHeldSay" aria-live="polite">
+      <p className="hint key-say" id="keyHeldSay" aria-live="polite">
         {dropped ? (
           <span id="keyDropped">
             {"Disconnected." + (dropped.rooms.length ? " The agent is still a member of: " + dropped.rooms.join(", ") + "." : "")}

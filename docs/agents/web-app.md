@@ -100,11 +100,17 @@ Front-end conventions.
   new name (`agentName.ts`, kept the same as `cleanName` and
   `memberNameProblem` by `tests/unit/agent-name.test.mjs`). The new key is
   shown once, in its card: the key, Claude Code's `.mcp.json` entry first
-  (the key off command lines) and the one-line command with the word that
-  it stays in the shell's history, the Muse line (a custom connector, the
-  key in its "API Key" box, never the chat), the hand-off text, the rooms
-  and the note; the page fills the key in where the answer says `Bearer
-  KEY`. A failure says what is left (`left_unused`'s note, else "Nothing
+  (`mcp_json`, the key off command lines) and the one-line command
+  (`claude_code`) with the word that it stays in the shell's history, the
+  Muse line (a custom connector, the key in its "API Key" box, never the
+  chat), the hand-off text, the rooms and the note. The page fills the key
+  in where Claude Code's two texts say `Bearer KEY` (they go into a file or
+  a terminal), never in the hand-off: a person pastes that into a chat, so
+  it keeps the word `KEY`, and its line says the key itself goes only into
+  the agent's MCP settings or its secure credential field. The held key's
+  live region, at its card's foot, is an empty paragraph until it has
+  something to say, and takes no room then (`.key-held .key-say:empty`);
+  the making card's sits above its button, and its margin spaces it. A failure says what is left (`left_unused`'s note, else "Nothing
   was kept."), and a lost answer that a key made then is lost and that
   making it again uses the same seats. A pasted key is checked for its form
   first, then opened (`GET /api/agent`): its rooms with their state and

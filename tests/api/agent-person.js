@@ -2,13 +2,13 @@
 // (worker/routes/agent.ts agentInviteCreateRoute, agentInviteAddRoute): a
 // person's invite in each of two throwaway rooms (the owner key makes
 // them); the check that answers "new" and writes nothing (the owner's invite
-// list unchanged); the real call, whose seats the owner sees as two agent
-// invites the person made, unopened, whose tokens no answer held; a key
-// whose answer was dropped, then a new name that reuses nothing and the
-// same name that reuses both unused seats; a call whose second inviter is
-// revoked after its check, which keeps the first room's invite unused,
-// names it and makes no key, and a retry that reuses it; the person's
-// daily and the room's active caps per room; rooms added with the key;
+// list unchanged), and a check that is not a boolean, refused with nothing
+// written; the real call, whose seats the owner sees as two agent invites
+// the person made, unopened, whose tokens no answer held; a key whose
+// answer was dropped, then a new name that reuses nothing and the same name
+// that reuses both unused seats; a call whose second inviter is revoked, or
+// whose name is taken, after its check, refused before anything is made;
+// the person's daily and the room's active caps per room; rooms added with the key;
 // muse_register through the key against the fake Muse (one claim, the hooks
 // set, the members list's muse_delivery, the seats' joined and last_seen
 // left alone, a seat never opened skipped); and the disconnect that turns
@@ -53,10 +53,12 @@ async function agentPerson(ctx) {
     let r = await personKey({ name: 'ScoutP', rooms: rooms(), check: true });
     check('agent person: check answers seat new in both rooms, ok', r.status === 200 && r.json.ok === true && JSON.stringify(r.json.rooms) === JSON.stringify([{ room: A, name: 'ScoutP', seat: 'new', opened: false }, { room: B, name: 'ScoutP', seat: 'new', opened: false }]), r.text.slice(0, 200));
     check('agent person: check wrote nothing (the owner\'s invite lists unchanged)', JSON.stringify([await listOf(A), await listOf(B)]) === listBefore);
+    r = await personKey({ name: 'ScoutP', rooms: rooms(), check: 'true' });
+    check('agent person: a check that is not a boolean is 400 and writes nothing', r.status === 400 && JSON.stringify(r.json) === JSON.stringify({ error: '"check" must be true or false' }) && JSON.stringify([await listOf(A), await listOf(B)]) === listBefore, r.status + ' ' + r.text.slice(0, 160));
 
     // the real call: a key; its answer dropped (nobody uses this key)
     r = await personKey({ name: 'ScoutP', rooms: rooms() });
-    check('agent person: POST /api/agents/invite makes a key, 201 with its fields', r.status === 201 && JSON.stringify(Object.keys(r.json || {})) === JSON.stringify(['key', 'address', 'rooms', 'max_rooms', 'claude_code', 'handoff', 'note']) && /^\.ac1\./.test(r.json.key || ''), r.status + ' ' + r.text.slice(0, 160));
+    check('agent person: POST /api/agents/invite makes a key, 201 with its fields', r.status === 201 && JSON.stringify(Object.keys(r.json || {})) === JSON.stringify(['key', 'address', 'rooms', 'max_rooms', 'claude_code', 'mcp_json', 'handoff', 'note']) && /^\.ac1\./.test(r.json.key || '') && r.json.claude_code === 'claude mcp add --transport http agent-chat ' + r.json.address + ' --header "Authorization: Bearer KEY"', r.status + ' ' + r.text.slice(0, 160));
     let seats = [...(await rowsOf(A, 'ScoutP')), ...(await rowsOf(B, 'ScoutP'))];
     check('agent person: the owner sees two agent invites the person made, unopened', seats.length === 2 && seats.every((i) => i.kind === 'agent' && i.used === null && i.revoked === null), JSON.stringify(seats.map((i) => [i.kind, i.used, i.revoked])));
     check('agent person: no answer held their tokens', holdsNone(r.text, seats.map((i) => i.token)) && !/#invite=/.test(r.text) && !r.text.includes('agent_onboarding'));

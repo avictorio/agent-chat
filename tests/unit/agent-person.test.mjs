@@ -15,7 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, read, agentInvite } from "./agent-world.mjs";
 import { agentInviteAddRoute, agentInviteCreateRoute, agentMcpRoute, agentRoute } from "../../worker/routes/agent.ts";
-import { personKeyHandoff, personKeyNote, unusedNote } from "../../worker/agents/onboarding.ts";
+import { claudeCodeLine, personKeyHandoff, personKeyNote, unusedNote } from "../../worker/agents/onboarding.ts";
 import { AGENT_KEYS_PER_DAY, AGENT_KEYS_PER_IP, AGENT_KEYS_PER_ROOM_DAY, AGENT_KEYS_WINDOW_S, AGENT_QUOTA_ROOM, AGENT_ROOMS_MAX, MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY } from "../../worker/limits.ts";
 import { hashKey, networkKey } from "../../worker/lib/address.ts";
 import { newAgentKey } from "../../worker/lib/agentkey.ts";
@@ -52,12 +52,15 @@ test("a key made with a person's invites: the answer's fields, the key once, two
   assert.equal(r.status, 201, r.text);
   assert.equal(r.headers.get("Cache-Control"), "no-store");
   assert.equal(r.headers.get("Access-Control-Allow-Origin"), "*");
-  assert.deepEqual(Object.keys(r.json), ["key", "address", "rooms", "max_rooms", "claude_code", "handoff", "note"]);
+  assert.deepEqual(Object.keys(r.json), ["key", "address", "rooms", "max_rooms", "claude_code", "mcp_json", "handoff", "note"]);
   assert.match(r.json.key, /^\.ac1\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/);
   assert.equal(r.json.address, "http://localhost/api/mcp");
   assert.deepEqual(r.json.rooms, [{ room: "lima", name: "Scout", opened: false, seat: "new" }, { room: "oslo", name: "Scout", opened: false, seat: "new" }]);
   assert.equal(r.json.max_rooms, AGENT_ROOMS_MAX);
-  assert.deepEqual(JSON.parse(r.json.claude_code), { mcpServers: { "agent-chat": { type: "http", url: "http://localhost/api/mcp", headers: { Authorization: "Bearer KEY" } } } });
+  // claude_code is POST /api/agents' one-line command, from the same function; mcp_json the settings entry
+  assert.equal(r.json.claude_code, "claude mcp add --transport http agent-chat http://localhost/api/mcp --header \"Authorization: Bearer KEY\"");
+  assert.equal(r.json.claude_code, claudeCodeLine(r.json.address));
+  assert.deepEqual(JSON.parse(r.json.mcp_json), { mcpServers: { "agent-chat": { type: "http", url: "http://localhost/api/mcp", headers: { Authorization: "Bearer KEY" } } } });
   assert.equal(r.json.handoff, personKeyHandoff("http://localhost", ["lima", "oslo"]));
   assert.equal(r.json.handoff.split("Bearer KEY").length, 2, "the handoff holds the word KEY once");
   assert.equal(r.json.note, personKeyNote(false));
@@ -115,6 +118,46 @@ test("the shapes are checked for every entry before any object is asked", async 
   assert.ok(!w.objects.has(AGENT_QUOTA_ROOM), "nothing counted");
 });
 
+test("check is true or false: any other value is refused with the shapes, before any room is asked, anything counted or anything written, on both routes", async () => {
+  const { w, pat } = people(["lima", "oslo"]);
+  const WRONG = ["true", "false", 1, 0, null, {}, [], [true]];
+  const want = { error: "\"check\" must be true or false" };
+  const invRows = () => ["lima", "oslo"].map((n) => w.harness(n).all("SELECT token, name, used, seen, revoked FROM inv ORDER BY token"));
+  const before = invRows();
+  for (const check of WRONG) {
+    const mark = w.asked.length;
+    const r = await invite(w, { name: "Scout", rooms: entries(pat, ["lima", "oslo"]), check });
+    assert.equal(r.status, 400, JSON.stringify(check));
+    assert.deepEqual(r.json, want, JSON.stringify(check));
+    assert.equal(w.asked.length, mark, "no object asked for check " + JSON.stringify(check));
+  }
+  assert.equal(w.identities().length, 0, "no identity");
+  assert.ok(!w.objects.has(AGENT_QUOTA_ROOM), "nothing counted");
+  assert.deepEqual(invRows(), before, "no invite made, opened or seen");
+  // false is the call itself, true the check
+  const c = await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]), check: true });
+  assert.equal(c.status, 200, c.text);
+  assert.equal(c.json.ok, true);
+  const r = await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]), check: false });
+  assert.equal(r.status, 201, r.text);
+  // adding: the key is checked first, as on every key route, then the body; no room is asked
+  const quota = () => w.harness(AGENT_QUOTA_ROOM).all("SELECT * FROM aq ORDER BY k");
+  const counted = quota();
+  const list = (await read(agentRoute(w.rc("GET", "/api/agent", { headers: { Authorization: "Bearer " + r.json.key } })))).json;
+  const osloBefore = w.harness("oslo").all("SELECT token, name, used, seen, revoked FROM inv ORDER BY token");
+  for (const check of WRONG) {
+    const mark = w.asked.length;
+    const a = await addInvite(w, r.json.key, { name: "Scout", rooms: entries(pat, ["oslo"]), check });
+    assert.equal(a.status, 400, JSON.stringify(check));
+    assert.deepEqual(a.json, want, JSON.stringify(check));
+    const got = asked(w, mark);
+    assert.ok(got.every((m) => m.endsWith(".agentOpen")), "only the key opened for check " + JSON.stringify(check) + ": " + got.join(" "));
+  }
+  assert.deepEqual(w.harness("oslo").all("SELECT token, name, used, seen, revoked FROM inv ORDER BY token"), osloBefore, "no invite made in oslo");
+  assert.deepEqual((await read(agentRoute(w.rc("GET", "/api/agent", { headers: { Authorization: "Bearer " + r.json.key } })))).json, list, "the key's list as it was");
+  assert.deepEqual(quota(), counted, "the counters as they were");
+});
+
 test("every inviter is looked up, in order, before any seat is planned or counted; the first refused is the answer and nothing else is asked", async () => {
   const { w, pat } = people(["lima", "oslo"]);
   const hank = agentInvite(w.harness("lima"), "Hank");
@@ -163,9 +206,10 @@ test("check answers what the call would do and writes nothing: no invite, no cou
   for (const n of ["lima", "oslo"]) assert.deepEqual(w.harness(n).all("SELECT * FROM inv"), before[n], n + ": inv as it was");
   assert.equal(w.identities().length, 0);
   assert.equal(w.harness(AGENT_QUOTA_ROOM).db.prepare("SELECT COUNT(*) AS n FROM sqlite_master").get().n, 0, "the peek made no table");
-  // only the boolean true checks
+  // only the boolean true checks, and no other value is taken for the call
   const truthy = await invite(w, { name: "Scout", rooms: entries(pat, ["lima"]), check: "true" });
-  assert.equal(truthy.status, 201, "check: \"true\" is no check");
+  assert.equal(truthy.status, 400, "check: \"true\" is refused");
+  assert.equal(w.identities().length, 0, "and makes no key");
 });
 
 test("check with a refused inviter: that entry says its refusal and nothing more, no seat is planned there and its room's counter is never read", async () => {

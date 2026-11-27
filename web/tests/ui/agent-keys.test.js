@@ -30,10 +30,11 @@ const LOOKS = {
   tok_gone000000000000000000: 404,
   tok_flaky00000000000000000: 500,
 };
-const HANDOFF = 'You have an Agent Chat agent key for the rooms family-trip, book-club. Connect an MCP client that can send a header to ' + ORIGIN + '/api/mcp with the header Authorization: Bearer KEY, then call list_rooms; get_start_page with a room gives that room\'s steps. The key is a password: keep it with your credentials and never post it. On Muse, the key goes in a custom connector instead: your person asks Muse to add one for ' + ORIGIN + '/api/mcp and pastes the key into the "API Key" box it shows, never into the chat.';
+const HANDOFF = 'Your person made you an Agent Chat agent key for the rooms family-trip, book-club. KEY below stands for that key, which your person holds: it goes into your MCP client\'s settings or its secure credential field, never into a chat. Connect an MCP client that can send a header to ' + ORIGIN + '/api/mcp with the header Authorization: Bearer KEY, then call list_rooms; get_start_page with a room gives that room\'s steps. The key is a password: keep it with your credentials and never post it. On Muse, the key goes in a custom connector instead: your person asks Muse to add one for ' + ORIGIN + '/api/mcp and pastes the key into the "API Key" box it shows, never into the chat.';
+const LINE = 'claude mcp add --transport http agent-chat ' + ORIGIN + '/api/mcp --header "Authorization: Bearer KEY"';
 const SETTINGS = JSON.stringify({ mcpServers: { 'agent-chat': { type: 'http', url: ORIGIN + '/api/mcp', headers: { Authorization: 'Bearer KEY' } } } }, null, 2);
 const NOTE = "Shown only now: the site keeps no copy it can show again. Whoever holds this key acts as the agent in every room on it: give it only to that agent's settings, never in a message. The seats it holds were made with your invites, so the agent holds no room link of its own for them: disconnecting the key cuts it off from them at once.";
-const MADE = { key: KEY, address: ORIGIN + '/api/mcp', rooms: [{ room: 'family-trip', name: 'Scout', opened: false, seat: 'new' }, { room: 'book-club', name: 'Scout', opened: false, seat: 'reused' }], max_rooms: 30, claude_code: SETTINGS, handoff: HANDOFF, note: NOTE + ' A seat it already had keeps any link the agent was given for it.' };
+const MADE = { key: KEY, address: ORIGIN + '/api/mcp', rooms: [{ room: 'family-trip', name: 'Scout', opened: false, seat: 'new' }, { room: 'book-club', name: 'Scout', opened: false, seat: 'reused' }], max_rooms: 30, claude_code: LINE, mcp_json: SETTINGS, handoff: HANDOFF, note: NOTE + ' A seat it already had keeps any link the agent was given for it.' };
 const INFO = {
   rooms: [
     { room: 'family-trip', name: 'Scout', added: NOW - 3 * D, state: 'held', muse_wake: true },
@@ -289,14 +290,25 @@ const OPEN = { info: async () => ({ body: INFO }) };
     must((await text(page, '#keyMadeLine')) === 'claude mcp add --transport http agent-chat ' + ORIGIN + '/api/mcp --header "Authorization: Bearer ' + KEY + '"', 'the one line');
     must(/Or add it with one line\. The line stays in your shell's history\./.test(await text(page, '#keyMade')), 'the history caution beside the line');
     must((await text(page, '#keyMadeMuse')) === 'In Muse, ask it to add a custom connector for ' + ORIGIN + '/api/mcp, then paste the key into the "API Key" box it shows, never into the chat.', 'the Muse line');
-    must((await text(page, '#keyMadeHandoff')).includes('Authorization: Bearer ' + KEY + ', then call list_rooms'), 'the hand-off with the key');
+    // the hand-off goes into a chat: it keeps the word KEY, and its line says where the key itself goes
+    must((await text(page, '#keyMadeHandoff')) === HANDOFF && !(await text(page, '#keyMadeHandoff')).includes(KEY), 'the hand-off as the answer gives it, without the key');
+    must((await text(page, '#keyMadeHandoffHint')) === "Send this to your agent in a chat. It says KEY where the key goes: the key itself goes only into the agent's MCP settings or its secure credential field, never into a chat.", 'the hand-off\'s line');
     must(JSON.stringify(await page.$$eval('#keyMadeRooms li', (l) => l.map((x) => x.textContent.replace(/\s+/g, ' ').trim()))) === JSON.stringify(['family-trip as Scout new invite', 'book-club as Scout existing seat']), 'the rooms');
     must((await text(page, '#keyMadeNote')) === MADE.note, 'the note');
     const calls = S.calls.filter((c) => c.p === '/api/agents/invite');
     must(calls.length === 2 && calls[0].body.check === true && !('check' in calls[1].body), 'the check, then the call at once');
     must(calls.every((c) => !c.auth), 'no key sent to make one');
-    // Copy
-    await page.click('#keyMade .row button');
+    // Copy: what each button puts on the clipboard (the clipboard recorded here)
+    await page.evaluate(() => {
+      window.__copied = [];
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied.push(t); return Promise.resolve(); } } });
+    });
+    for (const id of ['keyMadeCopyKey', 'keyMadeCopySettings', 'keyMadeCopyLine', 'keyMadeCopyHandoff']) await page.click('#' + id);
+    const copied = await page.evaluate(() => window.__copied);
+    must(copied.length === 4 && copied[0] === KEY, 'the key copied: ' + copied.length);
+    must(copied[1] === SETTINGS.split('Bearer KEY').join('Bearer ' + KEY), 'the settings copied with the key');
+    must(copied[2] === LINE.split('Bearer KEY').join('Bearer ' + KEY), 'the one line copied with the key');
+    must(copied[3] === HANDOFF && !copied[3].includes(KEY), 'the hand-off copied without the key');
     await page.waitForFunction(() => /Copied|Couldn't copy/.test(document.getElementById('toast')?.textContent || ''), null, { timeout: 3000 });
     must(!page.url().includes('.ac1.'), 'the key is in no URL');
   }, '#keyMade');
@@ -380,8 +392,13 @@ const OPEN = { info: async () => ({ body: INFO }) };
     await paste(page, KEY);
     await page.waitForSelector('#keyAddRooms', { timeout: 5000 });
     await tick(page, 'keyAddRooms', 'trip-two');
+    // the held key's live region takes no room while it has nothing to say (the making
+    // card's keeps its margin above its button); once it speaks it has its margin
+    const margins = () => page.evaluate(() => ['keySay', 'keyHeldSay'].map((id) => { const e = document.getElementById(id); return e ? getComputedStyle(e).marginTop + '/' + e.getBoundingClientRect().height : 'none'; }));
+    must(JSON.stringify(await margins()) === JSON.stringify(['8px/0', '0px/0']), 'the empty live regions: ' + JSON.stringify(await margins()));
     await page.click('#keyAdd');
     await page.waitForFunction(() => /Added: trip-two\./.test(document.getElementById('keyHeldSay')?.textContent || ''), null, { timeout: 5000 });
+    must((await margins())[1].startsWith('8px/'), 'the live region keeps its margin once it speaks: ' + JSON.stringify(await margins()));
     await page.waitForFunction(() => !!document.querySelector('#keyHeldRooms li[data-room="trip-two"]'), null, { timeout: 5000 });
     const adds = S.calls.filter((c) => c.p === '/api/agent/rooms/invite');
     must(adds.length === 2 && adds[0].body.check === true && adds.every((c) => c.auth === 'Bearer ' + KEY) && adds[1].body.rooms[0].inviter_token === 'tok_two', JSON.stringify(adds.map((c) => c.body)));

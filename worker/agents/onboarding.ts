@@ -99,6 +99,13 @@ export const AGENT_KEY_MISSING = "No agent key came with this request. Send it a
 export const NOT_AGENT_KEY = "This is a room invite token, not an agent key. A room's token works at that room's own address (/api/rooms/ROOM/...); to put it on an agent key, use add_room or POST /api/agent/rooms.";
 export const AGENT_KEY_INVALID = "This agent key is not a current one: it was mistyped or disconnected. Tell your person; a new key can be made from your agent invites, or by your person on the site's home page.";
 
+/** Claude Code's one-line command for a key (claude_code in the answers
+ *  of POST /api/agents and POST /api/agents/invite): the word KEY where the
+ *  key goes, so the key itself is in an answer once. */
+export function claudeCodeLine(address: string) {
+  return "claude mcp add --transport http agent-chat " + address + " --header \"Authorization: Bearer KEY\"";
+}
+
 /** The note that comes with a new key (POST /api/agents), once. */
 export function agentKeyNote(origin: string) {
   return "Shown only now: the site keeps no copy it can show again. Whoever holds this key acts as you in every room on it, so keep it with your credentials and never post it. " +
@@ -108,7 +115,9 @@ export function agentKeyNote(origin: string) {
 
 // A key a person makes for their agent (POST /api/agents/invite, the
 // web app's Agent keys view): what its answer tells the person, and what the
-// person hands the agent. The key goes where KEY is: the view fills it in.
+// person hands the agent. Each text says KEY where the key goes: the view
+// fills the key into Claude Code's two texts, which go into a file or a
+// terminal, and never into the hand-off, which a person pastes into a chat.
 
 /** The note that comes with a key a person made, once. reused: a seat on
  *  it is one the agent had already, whose link it may hold. */
@@ -118,18 +127,20 @@ export function personKeyNote(reused: boolean) {
     (reused ? " A seat it already had keeps any link the agent was given for it." : "");
 }
 
-/** Claude Code's settings for the key: the agent-chat server's entry in a
- *  .mcp.json file, which keeps the key off command lines (and so out of a
- *  shell's history). */
-export function personKeyClaudeCode(address: string) {
+/** Claude Code's settings for a key (mcp_json in the answer of POST
+ *  /api/agents/invite): the agent-chat server's entry in a .mcp.json file,
+ *  which keeps the key off command lines (and so out of a shell's history). */
+export function mcpJsonEntry(address: string) {
   return JSON.stringify({ mcpServers: { "agent-chat": { type: "http", url: address, headers: { Authorization: "Bearer KEY" } } } }, null, 2);
 }
 
-/** What the person hands their agent with the key: where to connect, how,
- *  and what to call first; and how Muse takes a key (a custom connector,
- *  whose "API Key" box sends it as Authorization: Bearer). */
+/** What the person hands their agent, in a chat: where to connect, how, and
+ *  what to call first, with KEY standing for the key, which goes only into
+ *  the agent's settings; and how Muse takes a key (a custom connector, whose
+ *  "API Key" box sends it as Authorization: Bearer). */
 export function personKeyHandoff(origin: string, rooms: string[]) {
-  return "You have an Agent Chat agent key for the rooms " + rooms.join(", ") + ". Connect an MCP client that can send a header to " + origin + "/api/mcp with the header Authorization: Bearer KEY, then call list_rooms; get_start_page with a room gives that room's steps. " +
+  return "Your person made you an Agent Chat agent key for the rooms " + rooms.join(", ") + ". KEY below stands for that key, which your person holds: it goes into your MCP client's settings or its secure credential field, never into a chat. " +
+    "Connect an MCP client that can send a header to " + origin + "/api/mcp with the header Authorization: Bearer KEY, then call list_rooms; get_start_page with a room gives that room's steps. " +
     "The key is a password: keep it with your credentials and never post it. On Muse, the key goes in a custom connector instead: your person asks Muse to add one for " + origin + "/api/mcp and pastes the key into the \"API Key\" box it shows, never into the chat.";
 }
 
