@@ -43,8 +43,10 @@ import {
   mediaTooBig,
   MESSAGES_PAGE,
   MOVE_DIR_MAX,
+  MUSE_LINK_CODE_TTL_S,
   pageTooBig,
   pollGap,
+  spanS,
   UP_KINDS,
   UP_MAX_DIRECT_TEXT,
   UP_MAX_TEXT,
@@ -679,13 +681,13 @@ export function mcpCatalog() {
 // The agent key's address (POST /api/mcp, routes/agent.ts): every room tool
 // of the catalog above with one more argument, the room, first and
 // required (and without the owner key's "as": no key is the owner), plus
-// four tools of its own. It is generated from the room catalog, so the two
+// five tools of its own. It is generated from the room catalog, so the two
 // cannot drift, and it has its own version and server name: the official
 // v2 client keeps a tools/list answer by the server's name and version, not
 // its address, so one name for both would hand a client the room address's
-// list here. Bump MCP_AGENT_CATALOG_VERSION on any edit of the four tools
+// list here. Bump MCP_AGENT_CATALOG_VERSION on any edit of the five tools
 // or of the sentences below, and whenever MCP_CATALOG_VERSION moves.
-export const MCP_AGENT_CATALOG_VERSION = "1.0.0";
+export const MCP_AGENT_CATALOG_VERSION = "1.1.0";
 /** Who answers at the agent key's address: initialize's serverInfo and
  *  every per-request result's _meta. @param origin the site's origin */
 export function agentServerInfo(origin: string) {
@@ -697,6 +699,7 @@ export const AGENT_TOOL_TITLES: Record<string, string> = {
   whats_waiting: "What waits on you in every room",
   add_room: "Add a room's invite to your key",
   remove_room: "Take a room off your key",
+  muse_register: "Wake your Muse from your rooms",
 };
 /** The room argument every room tool takes at that address. */
 const ROOM_ARG = { type: "string", description: "The room's name, as list_rooms gives it." };
@@ -719,7 +722,7 @@ function withRoom(t: McpTool): McpTool {
   const props = Object.fromEntries(Object.entries(t.inputSchema.properties).filter(([k]) => k !== "as"));
   return { name: t.name, title: t.title, description, inputSchema: { type: "object", properties: { room: ROOM_ARG, ...props }, required: ["room", ...t.inputSchema.required], additionalProperties: false }, annotations: t.annotations };
 }
-/** The agent key's catalog: its own four tools, then every room tool with room. */
+/** The agent key's catalog: its own five tools, then every room tool with room. */
 export function mcpAgentCatalog(): McpTool[] {
   const own = [
     mcpTool(
@@ -743,6 +746,16 @@ export function mcpAgentCatalog(): McpTool[] {
       "Take one room off your key: the key forgets that room's invite. Your seat stays (you are still a member); to leave the room for good, call leave_room first.",
       { room: ROOM_ARG }, ["room"], false,
     ),
+    mcpTool(
+      "muse_register",
+      "Have your person's Muse woken by rooms on your key, with the one-time code from their Muse gadget (Agree and connect, or Add rooms): the code works once, within " + spanS(MUSE_LINK_CODE_TTL_S) + " of the tap, for the rooms you name (or every room on your key that you have joined). A room you have not joined yet is skipped: join it first, then register it with a new code. It replaces any hook you had in those rooms and joins nothing. routing is where wakes land: agent-chat (the default), main, per-room or a side chat's id. Disconnecting your key turns these wakes off.",
+      {
+        code: { type: "string", description: "The one-time link code your Muse gave you." },
+        routing: { type: "string", description: "Where wakes land on your Muse: agent-chat (the default), main, per-room or a side chat's id (a UUID)." },
+        rooms: { type: "array", items: { type: "string" }, description: "The rooms to register, by name, as list_rooms gives them; left out, every room on your key that you have joined." },
+      },
+      ["code"], false,
+    ),
   ];
   const look = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
   const hints: Record<string, NonNullable<McpTool["annotations"]>> = {
@@ -750,6 +763,8 @@ export function mcpAgentCatalog(): McpTool[] {
     whats_waiting: look,
     add_room: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     remove_room: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    // it replaces any hook the agent had in those rooms, a webhook included
+    muse_register: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   };
   return own.map((t): McpTool => ({ name: t.name, title: AGENT_TOOL_TITLES[t.name], description: t.description, inputSchema: t.inputSchema, annotations: hints[t.name] }))
     .concat(mcpCatalog().map(withRoom));

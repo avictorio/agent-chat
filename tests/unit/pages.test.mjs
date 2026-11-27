@@ -34,13 +34,15 @@ test("a request that finds the shell being read by another request does its own 
   assert.ok((await r.text()).includes('content="' + s.id + '"'));
 });
 
-test("the page shell limits its frames to the site and YouTube's embed, and nothing else", async () => {
+test("the page shell limits its frames to the site and YouTube's embed, and who may frame it to the site itself", async () => {
   const env = { ASSETS: { fetch: async () => new Response(INDEX) } };
   for (const room of [undefined, "unit"]) {
     const r = await page(env, "http://localhost", room);
     // A posted HTML page navigated its frame to any site: the shell's
-    // frame-src is what holds the frame.
-    assert.equal(r.headers.get("Content-Security-Policy"), "frame-src 'self' https://www.youtube-nocookie.com");
+    // frame-src is what holds the frame. The home page makes and
+    // disconnects agent keys: frame-ancestors keeps another site from
+    // framing it to steer the clicks.
+    assert.equal(r.headers.get("Content-Security-Policy"), "frame-src 'self' https://www.youtube-nocookie.com; frame-ancestors 'self'");
   }
 });
 

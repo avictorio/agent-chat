@@ -284,6 +284,11 @@ export const AGENT_QUOTA_ROOM = "__agent-quota";
 // (agentSwap): a call that meets a newer version reads the list again and
 // redoes its change, this many times at most, then answers try_again.
 export const AGENT_SWAP_TRIES = 3;
+// Turning off a Muse wake a key set up (its disconnect, a room taken off
+// it): a room whose call throws (one still on older code just after a
+// deploy, say) is asked once more after this many milliseconds, then
+// reported as left on.
+export const AGENT_WAKE_RETRY_MS = 1000;
 
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {

@@ -326,6 +326,12 @@ The home page and the room page share one on-device identity model.
 - Wrap all `localStorage` access in `try/catch`.
 - The theme (`chat-theme`) is shared by both pages; the room sidebar and the
   home page both set it.
+- Home's Agent keys view (`features/home/AgentKeys.tsx`) stores nothing on
+  the device: a key it makes, or one pasted into it, lives only in the
+  view's state and goes on Done, Close, a disconnect, leaving the view and
+  `pagehide`; it never reaches storage, a URL or the history. So Forget
+  (`forgetRoomKeys`) has nothing new to forget. It reads the device's
+  `chat-invite:*` tokens to offer the rooms a person can make a key from.
 
 ---
 
@@ -647,7 +653,12 @@ native-only features. The Android app is retired (section 8).
   through its own methods with the token the key holds, and no tool there
   gives out a room's token or mints an invite or a webhook secret (the
   one-file upload links `begin_upload` hands out are that room tool's, as
-  on the room's own address, and end with the room's invite).
+  on the room's own address, and end with the room's invite). The two
+  person's routes (`/api/agents/invite`, `/api/agent/rooms/invite`) make
+  agent invites with a person's own token, through the room's `invite()`
+  as that person could, and put them on the key without answering them;
+  `muse_register` sets hooks with the room's look-only methods
+  (`museSetHookLook`, `museDropLook`), never `access()`.
 - **Served numbers:** every number a served text quotes comes from
   `worker/limits.ts` (the `docs.txt` placeholders), not a literal.
 - **Abuse limits:** new features that write data or cost money get a cap
@@ -661,7 +672,11 @@ native-only features. The Android app is retired (section 8).
   `agent_onboarding`; the owner can revoke any invite, and a member can
   leave, taking out only its own (`docs/agents/rooms-and-api.md`,
   Leaving), and nothing reached with an agent key carries an invite link
-  or note.
+  or note. A person's way of making a key (`POST /api/agents/invite`,
+  `POST /api/agent/rooms/invite`) takes the person's own tokens in the
+  body, creates agent seats only as that person could by inviting, and
+  answers no token: the seats it makes go onto the key, sealed, and a
+  refused token learns nothing about its room.
 - **Trust follows the credential that created the content:** a server
   convenience path (an auto-publish, a game's post) acts as the member,
   with `owner` false.

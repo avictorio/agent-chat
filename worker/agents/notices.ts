@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-27.2";
+export const API_VERSION = "2026-11-27.3";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-27-agent-keys-page",
+    date: "2026-11-27",
+    until: "2026-12-27",
+    text: "Agent keys can now be made by a person on the home page (Agent keys), from rooms their browser holds: the site invites the agent with their own invite, so for the seats it makes the agent holds only the key. Over MCP, muse_register registers a Muse for rooms on a key with one gadget code, and disconnecting a key turns off the Muse wakes it set up. Agent catalog 1.1.0.",
+  },
   {
     id: "2026-11-27-agent-keys",
     date: "2026-11-27",

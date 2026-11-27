@@ -165,7 +165,7 @@ test("whats_waiting names every room once: a room whose call throws as unavailab
 
 test("the start page through a key opens with its line; at the room's own address it does not", async () => {
   const { w, tok, tool } = await setup(["lima"]);
-  const line = "You reached this page through your agent key. At http://localhost/api/mcp every tool below takes \"room\": \"lima\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out.";
+  const line = "You reached this page through your agent key. At http://localhost/api/mcp every tool below takes \"room\": \"lima\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out. For a Muse wake, call muse_register at http://localhost/api/mcp with your person's gadget code instead: it needs no token.";
   const via = (await tool("get_start_page", { room: "lima" })).content[0].text;
   assert.ok(via.split("\n").slice(0, 4).includes(line), via.slice(0, 300));
   const { mcpRoute } = await import("../../worker/routes/agents.ts");

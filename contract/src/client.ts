@@ -1,4 +1,7 @@
 import type {
+  AgentKeyDropped,
+  AgentKeyInfo,
+  AgentKeyRoomRemoved,
   AttachmentsResponse,
   Game,
   GameResponse,
@@ -6,6 +9,10 @@ import type {
   Message,
   MessagesByIdResponse,
   MessagesResponse,
+  PersonKeyMade,
+  PersonSeatEntry,
+  SeatCheck,
+  SeatsAdded,
   VoiceState,
   VoiceUploadResult,
 } from "./types";
@@ -86,6 +93,66 @@ export async function fetchChanges(): Promise<ChangesFeed | null> {
     return d && Array.isArray(d.notices) ? d : null;
   } catch {
     return null;
+  }
+}
+
+/** The agent key routes as a person calls them (the home page's Agent keys
+ *  view): making a key for an agent with the person's own invites, and,
+ *  with a key the person pasted, its rooms, more rooms, a room off it, the
+ *  key disconnected. The key goes only in the Authorization: Bearer header,
+ *  never in a URL, and this client keeps it only as long as the page
+ *  holds the client. A refusal is an ApiError whose body is the answer's
+ *  JSON, with retry_after added from a Retry-After header. */
+export class AgentKeyClient {
+  private key: string | null;
+
+  constructor(key: string | null) {
+    this.key = key;
+  }
+
+  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers = new Headers();
+    if (this.key) headers.set("Authorization", "Bearer " + this.key);
+    if (body !== undefined) headers.set("Content-Type", "application/json");
+    const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string; retry_after?: number };
+    if (!res.ok) {
+      const ra = parseInt(res.headers.get("Retry-After") || "", 10);
+      const b = ra > 0 && data && typeof data === "object" && data.retry_after === undefined ? { ...data, retry_after: ra } : data;
+      throw new ApiError(res.status, data.error || "Request failed: " + res.status, b);
+    }
+    return data;
+  }
+
+  /** POST /api/agents/invite: a new key for an agent named name, its seats
+   *  made (or reused) with the person's own invites; with check, what it
+   *  would do, written nowhere. Needs no key. */
+  invite(name: string, rooms: PersonSeatEntry[], check: true): Promise<SeatCheck>;
+  invite(name: string, rooms: PersonSeatEntry[], check?: false): Promise<PersonKeyMade>;
+  invite(name: string, rooms: PersonSeatEntry[], check?: boolean): Promise<SeatCheck | PersonKeyMade> {
+    return this.call("POST", "/api/agents/invite", check ? { name, rooms, check: true } : { name, rooms });
+  }
+
+  /** GET /api/agent: the key's rooms. */
+  info(): Promise<AgentKeyInfo> {
+    return this.call<AgentKeyInfo>("GET", "/api/agent");
+  }
+
+  /** POST /api/agent/rooms/invite: more seats on the key, made with the person's invites. */
+  addRooms(name: string, rooms: PersonSeatEntry[], check: true): Promise<SeatCheck>;
+  addRooms(name: string, rooms: PersonSeatEntry[], check?: false): Promise<SeatsAdded>;
+  addRooms(name: string, rooms: PersonSeatEntry[], check?: boolean): Promise<SeatCheck | SeatsAdded> {
+    return this.call("POST", "/api/agent/rooms/invite", check ? { name, rooms, check: true } : { name, rooms });
+  }
+
+  /** POST /api/agent/rooms/remove: one room off the key (the room in the body). */
+  removeRoom(room: string): Promise<AgentKeyRoomRemoved> {
+    return this.call<AgentKeyRoomRemoved>("POST", "/api/agent/rooms/remove", { room });
+  }
+
+  /** DELETE /api/agent: the key disconnected everywhere. */
+  disconnect(): Promise<AgentKeyDropped> {
+    return this.call<AgentKeyDropped>("DELETE", "/api/agent");
   }
 }
 

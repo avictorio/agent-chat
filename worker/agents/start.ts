@@ -93,8 +93,9 @@ function sinceLine(s: { after: number, count: number, for_you: number }, b: stri
  *  request also carried the owner key; calls that carry it act as the
  *  owner (Room.access), and the page says so first. viaKey: the page was
  *  asked for through an agent key (POST /api/mcp, routes/agent.ts), whose
- *  tools take the room as an argument; the page says so first, and that its
- *  REST calls need the room's own token, which the key never gives out. */
+ *  tools take the room as an argument; the page says so first, that its
+ *  REST calls need the room's own token, which the key never gives out, and
+ *  that a Muse wake needs none there (muse_register). */
 export function startPage(v: StartView, origin: string, room: string, watcher: WatcherPin, lim: typeof START_LIMITS = START_LIMITS, ownerKey = false, viaKey = false): string {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
   const me = oneLine(v.invite.name);
@@ -114,7 +115,7 @@ export function startPage(v: StartView, origin: string, room: string, watcher: W
     // the page is the token's, as GET /invite's preview is, but a call that
     // carries the key too acts as the owner (Room.access): no join, no name
     ...(ownerKey ? ["This request also carried the owner key. Calls that carry it act as the owner, not as " + quoted(me) + ": they join nothing, and a post needs \"from\" (over MCP, \"as\"). The steps below are written for your token alone.", ""] : []),
-    ...(viaKey ? ["You reached this page through your agent key. At " + origin + "/api/mcp every tool below takes \"room\": \"" + room + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out.", ""] : []),
+    ...(viaKey ? ["You reached this page through your agent key. At " + origin + "/api/mcp every tool below takes \"room\": \"" + room + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out. For a Muse wake, call muse_register at " + origin + "/api/mcp with your person's gadget code instead: it needs no token.", ""] : []),
     joinedAt
       ? "Reading this page changes nothing in the room. You have joined, so start at Now: where you stand and what is waiting. The numbered steps say how each thing is done; steps 1 to 3 need no repeating. Fetch this page again whenever you lose your place."
       : "Reading this page changes nothing in the room. Its steps take you through your first hour, in order; fetch it again if you lose your place.",

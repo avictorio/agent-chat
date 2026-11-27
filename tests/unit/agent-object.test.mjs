@@ -1,11 +1,13 @@
 // The agent key's identity object and the creation counters
 // (worker/room/agent.ts) on the real Room class over node:sqlite
 // (room-harness.mjs): made once, opened with its verifier only, a list
-// swapped on its version, dropped whole; nothing written by a probe of an
-// object that holds no identity; every method refusing on a room, and a
-// room's create() and createGenesis() refusing on an identity; the
-// counters' caps, their windows by the object's own clock (an hour's and a
-// day's turn included) and release. Run with `npm run test:unit`.
+// swapped on its version, dropped whole (handing back the list as it stood
+// when the key was cut); nothing written by a probe of an object that
+// holds no identity; every method refusing on a room, and a room's
+// create() and createGenesis() refusing on an identity; the counters'
+// caps, their windows by the object's own clock (an hour's and a day's
+// turn included), release, and the peek that only reads them. Run with
+// `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
@@ -55,6 +57,7 @@ test("an open, a swap or a drop on an object never made leaves no table and writ
   assert.deepEqual(h.room.agentOpen("key", V), { ok: false });
   assert.deepEqual(h.room.agentSwap("key", V, 1, "x"), { ok: false });
   assert.deepEqual(await h.room.agentDrop("key", V), { ok: false });
+  assert.equal(h.room.agentPeek([{ k: "net:abc", max: 1, per: 3600 }]), 0, "a peek on a fresh object: nothing full");
   assert.equal(h.room.agentGlanceTake(1000), 0, "the gap is memory only");
   assert.deepEqual(tables(h), [], "sqlite_master empty after");
   assert.equal(changes(h), 0);
@@ -71,15 +74,33 @@ test("a swap moves the version on; a stale one is refused, and a swap with a wro
   assert.equal(h.room.agentOpen("key", V).ver, 2);
 });
 
-test("agentDrop deletes the whole identity: no table left, the key opens nothing", async () => {
+test("agentDrop deletes the whole identity and hands back the list as it was: no table left, the key opens nothing", async () => {
   const h = makeRoom({ bare: true });
   h.room.agentMake(V, "wrapped-dk", "ring-1");
+  h.room.agentSwap("key", V, 1, "ring-2");
   assert.deepEqual(await h.room.agentDrop("key", W), { ok: false }, "a wrong verifier drops nothing");
   assert.deepEqual(tables(h), ["ak", "aks"]);
-  assert.deepEqual(await h.room.agentDrop("key", V), { ok: true });
+  assert.deepEqual(await h.room.agentDrop("key", V), { ok: true, ver: 2, ring: "ring-2" }, "the list's version and sealed list as they stood");
   assert.deepEqual(tables(h), []);
   assert.deepEqual(h.room.agentOpen("key", V), { ok: false });
   assert.deepEqual(h.room.agentSwap("key", V, 1, "x"), { ok: false });
+  assert.deepEqual(await h.room.agentDrop("key", V), { ok: false }, "a second drop finds nothing");
+});
+
+test("agentDrop cuts the key before its storage goes: an open or a swap that lands in between is refused", async () => {
+  const h = makeRoom({ bare: true });
+  h.room.agentMake(V, "wrapped-dk", "ring-1");
+  // hold deleteAll: the slot is already gone when it starts
+  const real = h.room.ctx.storage.deleteAll;
+  let release;
+  h.room.ctx.storage.deleteAll = () => new Promise((r) => { release = () => r(real()); });
+  const drop = h.room.agentDrop("key", V);
+  assert.deepEqual(h.room.agentOpen("key", V), { ok: false }, "an open after the cut");
+  assert.deepEqual(h.room.agentSwap("key", V, 1, "raced"), { ok: false }, "a swap after the cut");
+  release();
+  assert.deepEqual(await drop, { ok: true, ver: 1, ring: "ring-1" });
+  h.room.ctx.storage.deleteAll = real;
+  assert.deepEqual(tables(h), []);
 });
 
 test("agentGlanceTake: once per gap, in memory only", () => {
@@ -181,4 +202,34 @@ test("the test hook lowers the caps only under TEST_HOOKS", () => {
   assert.equal(typeof t.room.agentReserve(cap), "number", "lowered to 1");
   assert.deepEqual(t.room.setTestAgentLimits(null), { agent_limits: {} });
   assert.ok(Array.isArray(t.room.agentReserve(cap)), "back to the constant");
+});
+
+test("agentPeek answers what agentReserve would, and writes nothing: no table made, no place taken, no past window dropped", () => {
+  const h = makeRoom({ bare: true });
+  assert.equal(at(T, () => h.room.agentPeek(caps("r1"))), 0, "no table: nothing full");
+  assert.deepEqual(tables(h), [], "a peek makes no table");
+  assert.equal(changes(h), 0);
+  at(T, () => h.room.agentReserve(caps("r1")));
+  at(T, () => h.room.agentReserve(caps("r1")));
+  const counted = h.all("SELECT k, w, n FROM aq ORDER BY k");
+  const before = changes(h);
+  assert.equal(at(T, () => h.room.agentPeek(caps("r1"))), 18.5 * 3600, "the room's day is full: the seconds to midnight, as agentReserve says");
+  assert.equal(at(T, () => h.room.agentReserve(caps("r1"))), 18.5 * 3600);
+  assert.equal(at(T, () => h.room.agentPeek(caps("r2"))), 0, "another room has room");
+  // a later window: the peek counts it fresh and drops nothing of the ended one
+  assert.equal(at(T + 86400e3, () => h.room.agentPeek(caps("r1"))), 0);
+  assert.equal(changes(h), before, "nothing written");
+  assert.deepEqual(h.all("SELECT k, w, n FROM aq ORDER BY k"), counted);
+  // on an identity or a room, refused
+  const id = makeRoom({ bare: true });
+  id.room.agentMake(V, "w", "r");
+  assert.equal(id.room.agentPeek(caps("r1")), false);
+  assert.equal(makeRoom().room.agentPeek(caps("r1")), false);
+  // the test hook's lowered caps count, as in agentReserve
+  const t = makeRoom({ bare: true, env: { TEST_HOOKS: "1" } });
+  t.room.setTestAgentLimits({ per_ip: 1 });
+  const cap = [{ k: "net:abc", max: 10, per: 3600 }];
+  assert.equal(t.room.agentPeek(cap), 0);
+  t.room.agentReserve(cap);
+  assert.ok(t.room.agentPeek(cap) > 0, "lowered to 1, now full");
 });

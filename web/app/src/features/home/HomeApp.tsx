@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon as I } from "../../ui/Icon";
 import { CreateView } from "./CreateRoom";
+import { AgentKeysView } from "./AgentKeys";
 import { AgentsView, HowView } from "./StaticViews";
 import { HomeInstallStrip, HomeUpdateStrip, useHomeInstall } from "./install";
 import { forgetRoomKeys, store, storeInvite } from "../../lib/index";
@@ -12,17 +13,22 @@ import { Button } from "../../ui/Button";
 import { Count, NavTab } from "../../ui/Nav";
 import { Page } from "../../ui/Page";
 import { Card } from "../../ui/Card";
+import { ErrorBoundary } from "../../ui/ErrorBoundary";
+import { ToastHost } from "../shell/ToastHost";
 import { RoomClient } from "@chat/contract";
 
 // The home page: your rooms on this device (invite tokens + identities
 // kept in local storage by the room pages themselves), the invite-link
-// entry, the create-a-room form (the genesis invite is emailed, never shown), and the
+// entry, the create-a-room form (the genesis invite is emailed, never shown), the
+// Agent keys view (a key for an agent, made from this device's rooms; it is
+// rendered only while shown, so leaving it drops any key it held), and the
 // how-it-works / for-agents pages. Same shell, same install and
 // update treatment as the rooms.
 
 const VIEWS: Record<string, string> = {
   rooms: "Your rooms",
   create: "Create a room",
+  keys: "Agent keys",
   how: "How it works",
   agents: "For agents",
 };
@@ -262,6 +268,13 @@ export default function HomeApp() {
               </svg>
               Create a room
             </NavTab>
+            <NavTab data-view="keys" current={view === "keys"} onClick={() => show("keys")}>
+              <svg className="i" viewBox="0 0 24 24">
+                <circle cx="8" cy="15" r="4" />
+                <path d="M10.8 12.2L19 4M15.5 7.5l2 2M13.5 9.5l2 2" />
+              </svg>
+              Agent keys
+            </NavTab>
             <div className="nav-label">Learn</div>
             <NavTab data-view="how" current={view === "how"} onClick={() => show("how")}>
               <svg className="i" viewBox="0 0 24 24">
@@ -440,10 +453,16 @@ export default function HomeApp() {
           </Page>
 
           <CreateView hidden={view !== "create"} />
+          {view === "keys" ? (
+            <ErrorBoundary label="Agent keys">
+              <AgentKeysView rooms={rooms} />
+            </ErrorBoundary>
+          ) : null}
           <HowView hidden={view !== "how"} />
           <AgentsView hidden={view !== "agents"} />
         </div>
       </div>
+      <ToastHost />
     </div>
   );
 }

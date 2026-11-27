@@ -119,11 +119,20 @@ export const AgentMethods = {
   },
 
   /** Disconnects the key everywhere: the whole identity goes. Nothing in
-   *  any room changes. */
-  async agentDrop(slot: string, verifier: string): Promise<{ ok: boolean }> {
+   *  any room changes here. The list's version and sealed list are read and
+   *  the slot deleted in one synchronous step, so from that instant every
+   *  open and swap of the key is refused, and the list handed back is the
+   *  one as it stood when the key was cut (a wake recorded by a call that
+   *  raced the disconnect is in it): the Worker turns off the Muse wakes it
+   *  names (routes/agent.ts). Then the rest of the storage goes. */
+  async agentDrop(slot: string, verifier: string): Promise<{ ok: true, ver: number, ring: string } | { ok: false }> {
     if (!slotOk(this.sql, slot, verifier)) return { ok: false };
+    const a = this.sql.exec<Pick<AkRow, "ver" | "ring">>("SELECT ver, ring FROM ak WHERE k = 1").toArray()[0];
+    this.sql.exec("DELETE FROM aks");
     await this.ctx.storage.deleteAll();
-    return { ok: true };
+    // a slot with no list row (rows changed by hand) is cut all the same; its
+    // list is answered as one that does not open
+    return a ? { ok: true, ver: a.ver, ring: a.ring } : { ok: true, ver: 0, ring: "" };
   },
 
   /** whats_waiting's gap, in this object's memory only (an evicted object
@@ -165,6 +174,28 @@ export const AgentMethods = {
     }
     for (const p of placed) this.sql.exec("INSERT INTO aq (k, w, n) VALUES (?, ?, 1) ON CONFLICT(k) DO UPDATE SET n = n + 1", p.k, p.w);
     return placed.map((p) => p.k);
+  },
+
+  /** agentReserve's check alone, for a call that only asks what a creation
+   *  would meet (POST /api/agents/invite with check): no place taken, no row
+   *  of a past window deleted, and no table made (a check must leave nothing
+   *  behind; with no table nothing is full). Each counter is read in the
+   *  window this object's clock puts it in now, as agentReserve reads it.
+   *  @returns 0 when every counter has room, else the seconds until the
+   *  first full counter's window ends; false on an object that holds a room
+   *  or an identity */
+  agentPeek(caps: AgentCap[]): number | false {
+    if (hasTable(this.sql, "m") || hasTable(this.sql, "ak")) return false;
+    if (!hasTable(this.sql, "aq")) return 0;
+    const now = Date.now();
+    const lower = this.env && this.env.TEST_HOOKS ? this.agentTestLimits() : {};
+    for (const c of caps) {
+      const win = windowOf(c.per, now);
+      const k = String(c.k) + ":" + win.w;
+      const r = this.sql.exec<Pick<AqRow, "n">>("SELECT n FROM aq WHERE k = ?", k).toArray()[0];
+      if ((r ? r.n : 0) >= capOf(k, Number(c.max), lower)) return Math.max(1, Math.ceil((win.ends - now) / 1000));
+    }
+    return 0;
   },
 
   /** Gives back the places agentReserve took (its keys), for a creation that made nothing. */

@@ -9,8 +9,10 @@
 // (tests/api/muse-hooks.js: the real bridge, against a fake Muse,
 // tests/api/fake-muse.mjs), the official MCP client libraries against
 // the MCP endpoint (tests/api/mcp-clients.js) and its revision 2026-07-28 by
-// hand (tests/api/mcp-modern.js), and the agent key with its one MCP address
-// (tests/api/agent-key.js). Exits non-zero on any failure.
+// hand (tests/api/mcp-modern.js), the agent key with its one MCP address
+// (tests/api/agent-key.js), and a key a person makes for their agent, with
+// Muse wakes through it (tests/api/agent-person.js). Exits non-zero on any
+// failure.
 //
 //   npm run build     (once, and after web/ changes: the page shell and
 //                      its assets come from web/app/dist)
@@ -42,6 +44,7 @@ const { webhooks } = require('./webhooks.js');
 const { mcpClients } = require('./mcp-clients.js');
 const { mcpModern } = require('./mcp-modern.js');
 const { agentKey } = require('./agent-key.js');
+const { agentPerson } = require('./agent-person.js');
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -271,6 +274,8 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     await mcpModern({ req, check, SUF });
     // The agent key and POST /api/mcp (tests/api/agent-key.js).
     await agentKey({ req, check, SUF, IPO });
+    // A key a person makes, and Muse wakes through it (tests/api/agent-person.js).
+    await agentPerson(museCtx);
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);
@@ -3425,10 +3430,12 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     check('room page stamped with the build id', metaOf(roomTxt) === bid, metaOf(roomTxt));
     check('no unstamped placeholder served', !homeTxt.includes('next-dev') && !roomTxt.includes('next-dev'));
     // The shell limits its frames: a posted page navigated the card's
-    // frame to any site. Only frame-src, so the app's own loads are untouched.
+    // frame to any site. Only frame-src, so the app's own loads are
+    // untouched, and frame-ancestors, so no other site frames the shell (the
+    // home page makes and disconnects agent keys).
     for (const p of ['/', '/r/apitest-main-' + SUF]) {
       const sc = (await fetch(BASE + p)).headers.get('content-security-policy');
-      check('page ' + p.slice(0, 3) + ' sends frame-src only', sc === "frame-src 'self' https://www.youtube-nocookie.com", sc);
+      check('page ' + p.slice(0, 3) + ' sends frame-src and frame-ancestors only', sc === "frame-src 'self' https://www.youtube-nocookie.com; frame-ancestors 'self'", sc);
     }
     // Static assets: the hashed bundle files come straight from the
     // build, with the one-year immutable cache the _headers file sets.

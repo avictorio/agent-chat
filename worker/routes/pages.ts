@@ -72,9 +72,13 @@ export async function page(env: Env, origin: string, room?: string) {
 // then showed its own live page inside the room, under the app's header.
 // The shell's frame-src applies to every navigation of its frames, so they
 // can hold only the site's own pages and YouTube's privacy-mode embed (the
-// video cards). It sets nothing else: the app's scripts, styles, fonts,
-// workers and images load as before.
-export const SHELL_CSP = "frame-src 'self' https://www.youtube-nocookie.com";
+// video cards). frame-ancestors 'self' lets only the site itself frame the
+// shell: the home page makes and disconnects agent keys, and a page on
+// another site could otherwise frame it and steer the clicks. Nothing frames
+// the shell today (the app's frames are posted pages and YouTube's embed).
+// It sets nothing else: the app's scripts, styles, fonts, workers and images
+// load as before.
+export const SHELL_CSP = "frame-src 'self' https://www.youtube-nocookie.com; frame-ancestors 'self'";
 
 // The home page names no room: its describedby link is the site guide,
 // public like the page, for an agent sent to the site with a token.

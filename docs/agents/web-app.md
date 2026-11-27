@@ -12,8 +12,8 @@ Front-end conventions.
   the bottom of the screen and let the header slide away on scroll.
 
 - **Home page and identity:** the home page shares the room page's shell
-  (sidebar, topbar, views: Your rooms, Create a room, How it works, For
-  agents). The identity and storage model both pages share is
+  (sidebar, topbar, views: Your rooms, Create a room, Agent keys, How it
+  works, For agents). The identity and storage model both pages share is
   `AGENTS.md` section 5: rooms are reached by invite only, and there is
   no open-by-name.
 
@@ -82,6 +82,43 @@ Front-end conventions.
   to the room. Only a 400 or 409, which the server refuses with nothing
   changed, says "Nothing was changed." A revoked row reads "Left <date>"
   when it carries `left`, else "Access removed <date>".
+
+- **Agent keys:** Home's view `#keys` (`features/home/AgentKeys.tsx`,
+  rendered only while it is shown) lets a person make an agent key from
+  rooms this browser holds and manage a key they paste
+  (`docs/agents/rooms-and-api.md`, Agent keys, The person's way). Each
+  device room is looked at once with `GET /invite` (a look that opens
+  nothing); only a person's invite is offered, and every other row says why
+  in its label (an agent's invite, one that no longer works, a room that
+  no longer exists, one that could not be checked, with Try again). Make
+  key sends the check first (`POST /api/agents/invite` with `check`) and,
+  when nothing stands in the way, the call at once; the check's problems
+  show on their rooms without the `Room "R": ` prefix, a seat of the
+  person's in use is offered with a checkbox (`reuse: "any"`), an unused
+  one is reused and said so, a full counter disables the button until its
+  `retry_after`. The agent's name is checked first as the server checks a
+  new name (`agentName.ts`, kept the same as `cleanName` and
+  `memberNameProblem` by `tests/unit/agent-name.test.mjs`). The new key is
+  shown once, in its card: the key, Claude Code's `.mcp.json` entry first
+  (the key off command lines) and the one-line command with the word that
+  it stays in the shell's history, the Muse line (a custom connector, the
+  key in its "API Key" box, never the chat), the hand-off text, the rooms
+  and the note; the page fills the key in where the answer says `Bearer
+  KEY`. A failure says what is left (`left_unused`'s note, else "Nothing
+  was kept."), and a lost answer that a key made then is lost and that
+  making it again uses the same seats. A pasted key is checked for its form
+  first, then opened (`GET /api/agent`): its rooms with their state and
+  wake, Add rooms (the device's rooms not on it; a full key says so), Take
+  off this key and Disconnect everywhere, each asked first in a native
+  `<dialog>` (Escape closes, a click on the backdrop closes when no call
+  runs, `confirm` where `showModal` is missing). Nothing is stored on the
+  device (`AGENTS.md` section 5): the key is in the view's state only, gone
+  on Done, Close, a disconnect, leaving the view and `pagehide` (the view
+  remounts its sections), and the only calls are the looks and the agent
+  routes (`AgentKeyClient`, `@chat/contract`, the key only in
+  `Authorization: Bearer`). Every name and sentence from the server is
+  rendered as text. Copy goes through the toast bus (`ToastHost`, which the
+  home page renders).
 
 - **Install strip:** the native install prompt on Android, Share steps on
   iOS, with one shared 30-day dismissal for the home banner and the room
@@ -207,7 +244,10 @@ Front-end conventions.
     the feed card and the viewer to any site. The page shell is served
     with `SHELL_CSP` (`worker/routes/pages.ts`), a policy with only
     `frame-src` (the site itself and YouTube's privacy-mode embed), so
-    every frame stays on those. A frame from a new host needs adding
+    every frame stays on those, and `frame-ancestors 'self'`, so no other
+    site can frame the shell (the home page makes and disconnects agent
+    keys, and a framing page could steer the clicks; nothing frames the
+    shell but the site itself). A frame from a new host needs adding
     there. It sets nothing else on purpose: a wider policy could stop the
     app's own scripts, styles, workers or images. WebRTC stays open: no
     browser lets a CSP block it.

@@ -375,3 +375,113 @@ export interface GameResponse {
   room: string;
   game: Game;
 }
+
+// ---- Agent keys (worker/routes/agent.ts): what the home page's Agent keys
+// view reads. No answer here carries a room's invite token.
+
+/** A room on an agent key, as GET /api/agent (and MCP list_rooms) show it:
+ *  the agent's name there, when it was added, and held, or refused with the
+ *  room's code since at; muse_wake when the key set up a Muse wake there. */
+export interface AgentKeyRoom {
+  room: string;
+  name: string;
+  added: number;
+  state: "held" | "refused";
+  code?: string;
+  at?: number;
+  muse_wake?: true;
+}
+
+/** GET /api/agent: the key's rooms, the most it holds, when it was made. */
+export interface AgentKeyInfo {
+  rooms: AgentKeyRoom[];
+  max_rooms: number;
+  created: number;
+}
+
+/** How a person's call may reuse an agent seat: an unused one (the
+ *  default), one in use too, or none. */
+export type SeatReuse = "unused" | "any" | "none";
+
+/** One room of a person's call (POST /api/agents/invite and
+ *  /api/agent/rooms/invite): the person's own invite token there, and the
+ *  agent's name there when it differs from the call's. */
+export interface PersonSeatEntry {
+  room: string;
+  inviter_token: string;
+  name?: string;
+  reuse?: SeatReuse;
+}
+
+/** A refusal as a list carries it, beside its room. */
+export interface SeatProblem {
+  status: number;
+  code?: string;
+  error: string;
+}
+
+/** One room of a check's answer: the seat the call would make or reuse,
+ *  or its problem. */
+export interface SeatCheckRoom {
+  room: string;
+  name: string;
+  seat?: "new" | "reused";
+  opened?: boolean;
+  problem?: SeatProblem;
+}
+
+/** A person's call with check: what it would do, written nowhere. ok when
+ *  nothing stands in the way; retry_after when the new keys' counters are
+ *  full; problem when the key would hold too many rooms. */
+export interface SeatCheck {
+  ok: boolean;
+  rooms: SeatCheckRoom[];
+  retry_after?: number;
+  problem?: SeatProblem;
+}
+
+/** A seat made (a new invite) or reused, now on the key. */
+export interface SeatMade {
+  room: string;
+  name: string;
+  opened: boolean;
+  seat: "new" | "reused";
+}
+
+/** POST /api/agents/invite: the new key, shown once. claude_code and
+ *  handoff hold the word KEY where the key goes. */
+export interface PersonKeyMade {
+  key: string;
+  address: string;
+  rooms: SeatMade[];
+  max_rooms: number;
+  claude_code: string;
+  handoff: string;
+  note: string;
+}
+
+/** POST /api/agent/rooms/invite: the seats added, and how many rooms the key holds now. */
+export interface SeatsAdded {
+  rooms: SeatMade[];
+  rooms_held: number;
+}
+
+/** POST /api/agent/rooms/remove: the room is off the key; muse_wake_removed
+ *  when the Muse wake the key set up there was turned off with it. */
+export interface AgentKeyRoomRemoved {
+  room: string;
+  removed: true;
+  muse_wake_removed?: true;
+  note: string;
+}
+
+/** DELETE /api/agent: the key is cut; the rooms it held, the Muse wakes it
+ *  set up that were turned off and those that could not be (null: the
+ *  key's record could not be read). */
+export interface AgentKeyDropped {
+  deleted: true;
+  rooms: string[];
+  muse_wakes_removed: string[];
+  muse_wakes_left: string[] | null;
+  note: string;
+}

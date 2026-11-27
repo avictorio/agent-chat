@@ -58,9 +58,17 @@ Playwright); `tests/fixtures/` holds the files they share.
   scanned for a room's token, link or note, and the owner key sent beside
   one (`agent-answers`), the REST routes' order
   (`agent-route`), the MCP address and the same calls asked of a room
-  through either address (`agent-mcp`), the catalog and its pinned
-  (version, digest) pairs (`agent-catalog`), and the size of
-  `whats_waiting` on `AGENT_ROOMS_MAX` full rooms (`agent-glance-size`).
+  through either address (`agent-mcp`, which also runs `muse_register`, the
+  disconnect's and the take-off's wakes against the Muse bridge in the
+  same process: `bridge-world.mjs`), the catalog and its pinned
+  (version, digest) pairs (`agent-catalog`), the size of
+  `whats_waiting` on `AGENT_ROOMS_MAX` full rooms (`agent-glance-size`), a
+  key a person makes (`agent-person`: the order of the checks, a check
+  that writes nothing and tells a refused inviter nothing about its room,
+  the seats reused or not, the room's caps, two calls at once, what a
+  failure leaves), the two look-only hook methods (`agent-hooks`: the
+  member's `inv` row the same before and after) and the Agent keys view's
+  name check against the server's (`agent-name`).
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
   in the same `npm run test:unit`, with the same hook, and need no
   network and no Python. `bridge.test.mjs` runs the bridge's router and
@@ -106,7 +114,10 @@ Playwright); `tests/fixtures/` holds the files they share.
   included (the per-room one at its constant; the per-network and
   site-wide ones and `whats_waiting`'s gap lowered by `POST
   /api/test-hooks/agent-limits`, which only `TEST_HOOKS` arms), and
-  times `whats_waiting` over `AGENT_ROOMS_MAX` rooms. The libraries live in
+  times `whats_waiting` over `AGENT_ROOMS_MAX` rooms; `tests/api/agent-person.js`
+  makes keys with a person's invites (the check, the seats the owner sees,
+  reuse, the room's caps, rooms added) and runs `muse_register` and the
+  disconnect's wakes against the fake Muse. The libraries live in
   `tests/mcp-clients/` with exact versions and a lockfile, a package of
   its own so the deploy build installs none of them: run
   `npm ci --prefix tests/mcp-clients` once, or the suite fails saying so.
@@ -157,10 +168,12 @@ Playwright); `tests/fixtures/` holds the files they share.
   this `node_modules` and a copy of `web/app/dist`) and one from this,
   sends both the same fixed list of requests (every per-room MCP request
   in each credential state and one `tools/call` per tool, the start page,
-  the looks, members, messages, `/api/changes`, `/api`, `/llms.txt`) and
-  compares status, type and body with what differs per run masked (and
-  this checkout's listed doc edits and new notices taken out). Run it
-  before a push that must leave existing answers alone.
+  the looks, members, messages, the agent key's routes and address, the
+  page shell, `/api/changes`, `/api`, `/llms.txt`) and compares status,
+  type, body and the headers a page or an agent reads, with what differs
+  per run masked (and this checkout's listed changes taken out: the doc
+  edits, the changed sentences, the new notices). Run it before a push
+  that must leave existing answers alone.
 - **A one-off script against its own local server** (a bug repro, a
   probe): `node tests/api/server.js run path/to/script.js` starts a
   server on a free port, runs the script with `BASE` and `OWNER` (the

@@ -10,13 +10,43 @@ import {
   MIB, MUSE_BATCH_MAX, MUSE_CODE_MAX, MUSE_HANDOVER_BODY_MAX, MUSE_HANDOVER_PER_IP, MUSE_HANDOVER_WINDOW_S, MUSE_QUOTA_ROOM,
   MUSE_SEAL_KEY_CACHE_S, ROOM_RE, SMALL_BODY_MAX,
 } from "../limits.js";
-import { MUSE_ROUTING_DEFAULT, MUSE_ROUTING_ERROR, museBridge, museReportRoom, museRouting } from "../room/muse.js";
+import { MUSE_ROUTING_DEFAULT, MUSE_ROUTING_ERROR, museBridge, museReportRoom, museRouting, type MuseBridge } from "../room/muse.js";
 import { hashKey, networkKey } from "../lib/address.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
 
 /** One room's answer in a registration. */
 type RoomResult = { room: string, ok: true, name: string, hook: unknown } | { room: string, ok: false, status: number, code?: string, error: string };
+
+/** A link code claimed from the bridge: the Muse link's id, or why not
+ *  (the bridge busy, a code that is not valid, or no usable answer). */
+export type MuseClaim = { ok: true, link: string }
+  | { ok: false, status: 429, code: "rate_limited", error: string, retry_after: number }
+  | { ok: false, status: 403 | 502, code: "code_invalid" | "muse_unreachable", error: string };
+
+/** Claims a one-time link code from the bridge (POST /claim {code} ->
+ *  {museLinkId}), once: what POST /api/muse/hooks and an agent key's
+ *  muse_register (routes/agent.ts) both do before they set any hook. The
+ *  code and the link id are never logged. */
+export async function museClaim(bridge: MuseBridge, code: string): Promise<MuseClaim> {
+  let link = "";
+  try {
+    const r = await bridge("/claim", { code: code });
+    if (r.status === 429) return { ok: false, status: 429, code: "rate_limited", error: "The Muse bridge is busy; try again shortly", retry_after: parseInt(r.headers.get("Retry-After") || "", 10) || 30 };
+    if (r.status >= 400 && r.status < 500) return { ok: false, status: 403, code: "code_invalid", error: "That link code is not valid: it may have expired or been used already. Ask your person to tap Agree and connect (or Add rooms) on the gadget again for a new one." };
+    if (!r.ok) { warn("muse.claim", "HTTP " + r.status); return { ok: false, status: 502, code: "muse_unreachable", error: "The Muse bridge did not answer; nothing was registered. Try again shortly." }; }
+    const j = await r.json().catch(() => null) as { museLinkId?: unknown } | null;
+    link = j && typeof j.museLinkId === "string" ? j.museLinkId : "";
+  } catch (e) {
+    warn("muse.claim", e && (e as Error).name ? (e as Error).name : "fetch failed");
+    return { ok: false, status: 502, code: "muse_unreachable", error: "The Muse bridge did not answer; nothing was registered. Try again shortly." };
+  }
+  if (!link || link.length > MUSE_CODE_MAX) {
+    warn("muse.claim", "no link id");
+    return { ok: false, status: 502, code: "muse_unreachable", error: "The Muse bridge's answer had no link; nothing was registered." };
+  }
+  return { ok: true, link };
+}
 
 /** A boolean field, or undefined when absent. */
 function bodyFlag(v: unknown, name: string): boolean | undefined {
@@ -72,22 +102,12 @@ export async function museRegisterRoute(rc: RouteContext) {
   if (!accepted.length) return json({ error: "No room accepted its token, so the code was not used", code: "no_rooms", results }, 403);
 
   // The code, claimed once for every room.
-  let link = "";
-  try {
-    const r = await bridge("/claim", { code: code });
-    if (r.status === 429) return rateLimited("The Muse bridge is busy; try again shortly", parseInt(r.headers.get("Retry-After") || "", 10) || 30);
-    if (r.status >= 400 && r.status < 500) return json({ error: "That link code is not valid: it may have expired or been used already. Ask your person to tap Agree and connect (or Add rooms) on the gadget again for a new one.", code: "code_invalid" }, 403);
-    if (!r.ok) { warn("muse.claim", "HTTP " + r.status); return json({ error: "The Muse bridge did not answer; nothing was registered. Try again shortly.", code: "muse_unreachable" }, 502); }
-    const j = await r.json().catch(() => null) as { museLinkId?: unknown } | null;
-    link = j && typeof j.museLinkId === "string" ? j.museLinkId : "";
-  } catch (e) {
-    warn("muse.claim", e && (e as Error).name ? (e as Error).name : "fetch failed");
-    return json({ error: "The Muse bridge did not answer; nothing was registered. Try again shortly.", code: "muse_unreachable" }, 502);
+  const c = await museClaim(bridge, code);
+  if (!c.ok) {
+    if (c.code === "rate_limited") return rateLimited(c.error, c.retry_after);
+    return json({ error: c.error, code: c.code }, c.status);
   }
-  if (!link || link.length > MUSE_CODE_MAX) {
-    warn("muse.claim", "no link id");
-    return json({ error: "The Muse bridge's answer had no link; nothing was registered.", code: "muse_unreachable" }, 502);
-  }
+  const link = c.link;
 
   // Each accepted room sets the hook (its token checked again there: it
   // could have been revoked since the first pass).

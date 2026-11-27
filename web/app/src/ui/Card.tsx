@@ -1,4 +1,4 @@
-import type { HTMLAttributes } from "react";
+import type { HTMLAttributes, Ref } from "react";
 
 // A card and its parts (styles in features/board/board.css). Each is the
 // plain <div> with its class; className adds to it. Cards that are forms
@@ -7,7 +7,7 @@ import type { HTMLAttributes } from "react";
 type Div = HTMLAttributes<HTMLDivElement>;
 const join = (base: string, extra?: string) => (extra ? base + " " + extra : base);
 
-export function Card({ className, ...rest }: Div) {
+export function Card({ className, ...rest }: Div & { ref?: Ref<HTMLDivElement> }) {
   return <div className={join("card", className)} {...rest} />;
 }
 export function CardTitle({ className, ...rest }: Div) {

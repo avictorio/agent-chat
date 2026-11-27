@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeWorld, read, agentInvite } from "./agent-world.mjs";
-import { agentCreateRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
+import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "../../worker/routes/agent.ts";
 import { mcpAgentCatalog } from "../../worker/agents/mcp.ts";
 import { newAgentKey } from "../../worker/lib/agentkey.ts";
 
@@ -20,11 +20,12 @@ const call = (name, args, id = 1) => ({ jsonrpc: "2.0", id, method: "tools/call"
 /** rooms lima and oslo, each with the agent Hank on the key, a person Pat who has joined, a message and a decision; rome to add later */
 async function world() {
   const w = makeWorld();
-  const tok = {};
+  const tok = {}, pats = {};
   for (const n of ["lima", "oslo", "rome"]) {
     const h = w.room(n);
     tok[n] = agentInvite(h, "Hank");
     const pat = agentInvite(h, "Pat", "human");
+    pats[n] = pat;
     h.room.access(pat, false);
     agentInvite(h, "Ada");
     await h.room.post("Pat", "Hello @Hank, see https://example.org/page", n, false, null, null, null, false);
@@ -32,7 +33,7 @@ async function world() {
   }
   const made = await read(agentCreateRoute(w.rc("POST", "/api/agents", { json: { rooms: [{ room: "lima", token: tok.lima }, { room: "oslo", token: tok.oslo }] }, headers: { "CF-Connecting-IP": "10.5.0.1" } })));
   assert.equal(made.status, 201, made.text);
-  return { w, tok, key: made.json.key, made };
+  return { w, tok, pats, key: made.json.key, made };
 }
 /** every invite token in every room of the world */
 const allTokens = (w) => [...w.objects.values()].flatMap((h) => { try { return h.all("SELECT token FROM inv").map((r) => r.token); } catch { return []; /* an object with no invite table */ } });
@@ -46,7 +47,7 @@ function clean(w, what, text, key) {
 }
 
 test("no answer reached with a key carries a room's token, an invite link or an invite note: every route, every tool, every refusal", async () => {
-  const { w, tok, key, made } = await world();
+  const { w, tok, pats, key, made } = await world();
   const auth = { Authorization: "Bearer " + key };
   const mcp = async (body) => (await read(agentMcpRoute(w.rc("POST", "/api/mcp", { json: body, headers: auth })))).text;
   clean(w, "POST /api/agents", made.text, key);
@@ -69,6 +70,7 @@ test("no answer reached with a key carries a room's token, an invite link or an 
     ["begin_upload", room({ kind: "image" })], ["begin_upload", room({ kind: "file", size: 20000000, name: "big.bin", type: "application/octet-stream" })],
     ["attach_media", room({ id: 2, kind: "image", base64: PNG })],
     ["add_room", { room: "rome", token: tok.rome }], ["remove_room", { room: "rome" }],
+    ["muse_register", { code: "AAAAA-BBBBB", rooms: ["lima"] }],
     ["leave_room", room({ confirm: "not-this-room" })],
   ];
   const named = new Set(calls.map(([n]) => n));
@@ -98,6 +100,14 @@ test("no answer reached with a key carries a room's token, an invite link or an 
     agentRoute(w.rc("GET", "/api/agent", { headers: { Authorization: "Bearer " + newAgentKey().key } })),
     agentCreateRoute(w.rc("POST", "/api/agents", { json: { rooms: [{ room: "lima", token: tok.lima }] } })),
     agentCreateRoute(w.rc("POST", "/api/agents", { json: { rooms: [{ room: "rome", token: tok.rome }, { room: "oslo", token: tok.oslo }] } })),
+    // a person's way: the check, a key made with the person's invites, more seats added, and the refusals
+    agentInviteCreateRoute(w.rc("POST", "/api/agents/invite", { json: { name: "Scout", rooms: [{ room: "lima", inviter_token: pats.lima }, { room: "rome", inviter_token: pats.rome }], check: true } })),
+    agentInviteCreateRoute(w.rc("POST", "/api/agents/invite", { json: { name: "Scout", rooms: [{ room: "lima", inviter_token: pats.lima }, { room: "rome", inviter_token: pats.rome }] } })),
+    agentInviteCreateRoute(w.rc("POST", "/api/agents/invite", { json: { name: "Scout", rooms: [{ room: "lima", inviter_token: pats.lima }], check: true } })),
+    agentInviteCreateRoute(w.rc("POST", "/api/agents/invite", { json: { name: "Hank", rooms: [{ room: "lima", inviter_token: pats.lima }] } })),
+    agentInviteCreateRoute(w.rc("POST", "/api/agents/invite", { json: { name: "Scout", rooms: [{ room: "lima", inviter_token: tok.lima }] } })),
+    agentInviteAddRoute(w.rc("POST", "/api/agent/rooms/invite", { headers: auth, json: { name: "Hank", rooms: [{ room: "rome", inviter_token: pats.rome }], check: true } })),
+    agentInviteAddRoute(w.rc("POST", "/api/agent/rooms/invite", { headers: auth, json: { name: "Hank", rooms: [{ room: "rome", inviter_token: pats.rome, reuse: "any" }] } })),
   ];
   for (const [i, p] of rest.entries()) { const r = await read(p); clean(w, "REST answer " + i, r.text, r.json && r.json.key); }
   const gone = await read(agentRoute(w.rc("DELETE", "/api/agent", { headers: auth })));

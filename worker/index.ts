@@ -52,7 +52,7 @@ import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "
 import { speakRoute, voiceRoute } from "./routes/voices.js";
 import { museHandoverRoute, museHookRoute, museRegisterRoute, type MuseHandover } from "./routes/muse.js";
 import { webhookHookRoute } from "./routes/webhook.js";
-import { agentCreateRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "./routes/agent.js";
+import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "./routes/agent.js";
 
 import {
   attachmentsRoute,
@@ -204,8 +204,10 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     // the agent key's routes and its one MCP address (routes/agent.ts): not
     // under a room, and never reached by a room's name
     if (path === "/api/agents" || path === "/api/agents/") return agentCreateRoute(rc);
+    if (path === "/api/agents/invite" || path === "/api/agents/invite/") return agentInviteCreateRoute(rc);
     if (path === "/api/agent" || path === "/api/agent/") return agentRoute(rc);
     if (path === "/api/agent/rooms" || path === "/api/agent/rooms/") return agentRoomsRoute(rc);
+    if (path === "/api/agent/rooms/invite" || path === "/api/agent/rooms/invite/") return agentInviteAddRoute(rc);
     if (path === "/api/agent/rooms/remove" || path === "/api/agent/rooms/remove/") return agentRemoveRoute(rc);
     if (path === "/api/mcp" || path === "/api/mcp/") return agentMcpRoute(rc);
     {

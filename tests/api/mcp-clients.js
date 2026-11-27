@@ -244,7 +244,8 @@ async function mcpClients(ctx) {
         const out = { era: client.getProtocolEra ? client.getProtocolEra() : 'legacy', server: client.getServerVersion(), instructions: client.getInstructions() };
         const tools = (await client.listTools()).tools;
         out.tools = tools.length;
-        out.roomFirst = tools.filter((t) => !['list_rooms', 'whats_waiting', 'add_room', 'remove_room'].includes(t.name)).every((t) => Object.keys(t.inputSchema.properties)[0] === 'room' && t.inputSchema.required[0] === 'room');
+        out.roomFirst = tools.filter((t) => !['list_rooms', 'whats_waiting', 'add_room', 'remove_room', 'muse_register'].includes(t.name)).every((t) => Object.keys(t.inputSchema.properties)[0] === 'room' && t.inputSchema.required[0] === 'room');
+        out.museRegister = tools.some((t) => t.name === 'muse_register' && JSON.stringify(t.inputSchema.required) === '["code"]');
         out.rooms = (await client.callTool({ name: 'list_rooms', arguments: {} })).structuredContent.rooms.map((x) => x.room);
         out.post = await client.callTool({ name: 'post_message', arguments: { room: room2, text: 'hello through the key' } });
         return out;
@@ -256,7 +257,8 @@ async function mcpClients(ctx) {
       for (const [what, got, era] of [['v1', v1run, 'legacy'], ['v2 default', v2def, 'legacy'], ['v2 auto', v2auto, 'modern'], ['v2 pinned to ' + MODERN, v2pin, 'modern']]) {
         const o = got.out || {};
         check('mcp clients, agent key (' + what + '): connects to /api/mcp and is told it is the agent server', got.ok && o.era === era && !!o.server && o.server.name === 'agent-chat-agent' && /^All your Agent Chat rooms as tools, through your agent key\./.test(o.instructions || ''), said(got));
-        check('mcp clients, agent key (' + what + '): lists the tools, room first on every room tool, and its rooms', o.tools === listed.length + 4 && o.roomFirst === true && JSON.stringify(o.rooms) === JSON.stringify([room, room2]), JSON.stringify({ tools: o.tools, roomFirst: o.roomFirst, rooms: o.rooms }));
+        check('mcp clients, agent key (' + what + '): lists the tools, room first on every room tool, and its rooms', o.tools === listed.length + 5 && o.roomFirst === true && JSON.stringify(o.rooms) === JSON.stringify([room, room2]), JSON.stringify({ tools: o.tools, roomFirst: o.roomFirst, rooms: o.rooms }));
+        check('mcp clients, agent key (' + what + '): lists muse_register, which takes code', o.museRegister === true, JSON.stringify({ museRegister: o.museRegister }));
         check('mcp clients, agent key (' + what + '): post_message {room} goes through', !!o.post && !o.post.isError, JSON.stringify(o.post).slice(0, 160));
       }
       // a revoked room through the key: a tool error with the code, from both libraries
@@ -283,7 +285,7 @@ async function mcpClients(ctx) {
       const ga = await withClient(a, new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer ' + T1 } } }), async () => (await a.listTools()).tools.map((t) => t.name));
       const b = new v2.Client({ name: 'apitest-v2-cache-agent', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } }, responseCacheStore: store });
       const gb = await withClient(b, new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }), async () => (await b.listTools()).tools.map((t) => t.name));
-      check('mcp clients, agent key: one shared response cache gives each address its own list', ga.ok && gb.ok && !ga.out.includes('list_rooms') && gb.out.includes('list_rooms') && gb.out.length === ga.out.length + 4, JSON.stringify({ room: ga.ok && ga.out.length, agent: gb.ok && gb.out.length }));
+      check('mcp clients, agent key: one shared response cache gives each address its own list', ga.ok && gb.ok && !ga.out.includes('list_rooms') && gb.out.includes('list_rooms') && gb.out.length === ga.out.length + 5, JSON.stringify({ room: ga.ok && ga.out.length, agent: gb.ok && gb.out.length }));
       await req('DELETE', '/api/agent', { headers });
     }
     await req('DELETE', R2 + '/invites', { owner: true });
