@@ -328,8 +328,10 @@ The home page and the room page share one on-device identity model.
   home page both set it.
 - Home's Agent keys view (`features/home/AgentKeys.tsx`) stores nothing on
   the device: a key it makes, or one pasted into it, lives only in the
-  view's state and goes on Done, Close, a disconnect, leaving the view and
-  `pagehide`, the last two at once inside the event (`flushSync`), so a
+  view's state and goes on Done, Close, a disconnect (a cut key whose
+  disconnect left Muse wakes stays there, out of the DOM, for its Try
+  again), leaving the view and `pagehide`, the last two at once inside the
+  event (`flushSync`), so a
   page frozen into the back-forward cache holds none; it never reaches
   storage, a URL or the history. So Forget
   (`forgetRoomKeys`) has nothing new to forget. It reads the device's

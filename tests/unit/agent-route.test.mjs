@@ -217,7 +217,8 @@ test("the key check of every /api/agent route: no key 401, a room token 403, any
       else assert.deepEqual(r.json, { error, code }, what);
       const names = [...new Set(w.asked.slice(mark).map((a) => a.name))];
       assert.ok(asks ? names.length === 1 && names[0].startsWith("__agent-") : names.length === 0, what + ": asked " + names.join());
-      assert.ok(w.asked.slice(mark).every((a) => a.method === "agentOpen"), what + ": only an open");
+      // DELETE asks the slot to cut (a cut key's own DELETE is let through to finish it); a wrong verifier writes nothing
+      assert.ok(w.asked.slice(mark).every((a) => a.method === (what.startsWith("DELETE") ? "agentCut" : "agentOpen")), what + ": only an open, or for DELETE a cut: " + w.asked.slice(mark).map((a) => a.method));
     }
   }
   // nothing was written: the key still opens, its one room held

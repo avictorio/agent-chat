@@ -49,7 +49,6 @@ import {
   AGENT_QUOTA_ROOM,
   AGENT_ROOMS_MAX,
   AGENT_SWAP_TRIES,
-  AGENT_WAKE_FRESH_MS,
   AGENT_WAKE_LINKS_MAX,
   AGENT_WAKE_RETRY_MS,
   AGENT_WAKE_SET_MS,
@@ -140,18 +139,44 @@ async function unseal(k: Opened): Promise<Unsealed | null> {
   return u ? { ...k, dk: u.dk, rooms: u.rooms } : null;
 }
 
-/** A change to the key's list: the new list and what to answer, or only
- *  an answer (nothing written). */
-type Changed<T> = { rooms: AgentEntry[], then: T } | { answer: T };
+/** A change to the key's list: the new list and what to answer, with the
+ *  room's answers that took recorded Muse wake links off it (settled), or
+ *  only an answer (nothing written). */
+type Changed<T> = { rooms: AgentEntry[], then: T, settled?: Settled[] } | { answer: T };
+
+/** A recorded link taken off the list, and the room's answer that allows
+ *  it ("the record", below): the room's refusal of that link's own set
+ *  (refused_set), or an answer that shows no hook of the link there with
+ *  the room's clock in it (no_hook), which must be past the link's
+ *  deadline. */
+type Settled = { room: string, token: string, link: string, deadline: number, by: { kind: "refused_set" } | { kind: "no_hook", now: number } };
+
+/** The one check every write of a key's list goes through (rewrite, and a
+ *  cut key's remainder and deletion): every link recorded before must be
+ *  on the list after (on the same room and token, its deadline the same or
+ *  later), or be named in settled with a room's answer that allows it. It
+ *  throws otherwise, and nothing is written. */
+export function keepsWakes(before: AgentEntry[], after: AgentEntry[], settled: Settled[]): void {
+  for (const e of before) {
+    for (const h of e.hooks || []) {
+      const still = after.find((a) => a.room === e.room && a.token === e.token);
+      if (still && (still.hooks || []).some((k) => k.link === h.link && k.deadline >= h.deadline)) continue;
+      const by = settled.find((z) => z.room === e.room && z.token === e.token && z.link === h.link && z.deadline === h.deadline);
+      if (!by) throw new Error("a recorded Muse wake would leave the key's list with no room's answer for it");
+      if (by.by.kind === "no_hook" && !(by.by.now > h.deadline)) throw new Error("a recorded Muse wake would leave the key's list before its deadline passed in the room");
+    }
+  }
+}
 /** What a rewrite came to: done (with the list as it now stands, after
  *  its swap), an answer that wrote nothing, or a swap that did not happen. */
 type Rewritten<T> = { done: T, after: Unsealed } | { answer: T } | { busy: true } | { gone: true } | { unreadable: true };
 
 /** Changes the key's list, compare-and-set: change gets the list as stored;
- *  the new list is sealed at the next version and swapped in, and on a
- *  stale swap (another call wrote meanwhile) the list is read again and the
- *  change made again, tries times at most. A swap the object refuses
- *  otherwise means the key was disconnected meanwhile (gone). */
+ *  the new list is checked (keepsWakes), sealed at the next version and
+ *  swapped in, and on a stale swap (another call wrote meanwhile) the list
+ *  is read again and the change made again, tries times at most. A swap the
+ *  object refuses otherwise means the key was disconnected (cut) meanwhile
+ *  (gone). */
 async function rewrite<T>(first: Unsealed, change: (u: Unsealed) => Promise<Changed<T>>, tries = AGENT_SWAP_TRIES): Promise<Rewritten<T>> {
   let u: Unsealed | null = first;
   for (let i = 0; i < tries; i++) {
@@ -163,6 +188,7 @@ async function rewrite<T>(first: Unsealed, change: (u: Unsealed) => Promise<Chan
     }
     const c = await change(u);
     if ("answer" in c) return { answer: c.answer };
+    keepsWakes(u.rooms, c.rooms, c.settled || []);
     const ring = await agentSealRing(u.dk, u.id, u.ver + 1, c.rooms);
     const s = await u.stub.agentSwap("key", u.verifier, u.ver, ring);
     if (s.ok) return { done: c.then, after: { ...u, ver: u.ver + 1, ring, rooms: c.rooms } };
@@ -381,17 +407,26 @@ async function agentKeyNow(env: Env, url: URL, caps: AgentCap[], found: Array<{ 
 /* ---------- the Muse wakes a key set up ---------- */
 
 // The record (AgentEntry.hooks): muse_register writes a link on the room's
-// entry before it asks the room to set it, and a link comes off the entry
-// only once a room has answered that no hook of that link is there: the
-// room removed it, the room's hook is not that link's, this call's own set
-// replaced it, or the room has no row for the token or is gone. A throw, a
-// Worker that stops midway or a call that loses a race to another removes
-// nothing. A link stays pending until the call that recorded it has had
-// the room's answer, and only that call takes a pending link off: no
-// other call can tell it from one whose set is still on its way to the
-// room. So a wake the key set up is always on the key's record until the
-// room has said it is off, and a disconnect or a take-off turns off every
-// link the record names.
+// entry, with its deadline (AGENT_WAKE_SET_MS after the record), before it
+// asks the room to set it, and the room refuses, by its own clock, a set
+// that reaches it after the deadline (museSetHookLook). Every answer of the
+// room's three hook methods carries the room's clock. A link leaves the
+// record on a room's answer only, by one rule (settles):
+//   (a) the room refused that link's own set (it set nothing), or
+//   (b) the answer shows no hook of that link there (another link's hook,
+//       a webhook, no hook, no row for the token, the room gone) and its
+//       room clock is past the link's deadline, so no set of it can still
+//       arrive. A set of another link that the room took is such an answer
+//       for every link whose deadline its clock has passed.
+// An answer with no room clock (a room object still on older code)
+// settles nothing. Nothing else takes a link off: not a replaced or
+// removed entry (settled first, or the call answers try_again), not a
+// rollback (it puts the entry back), not a throw, not a stopped Worker, not
+// a lost race, not the Worker's own clock, which only says when to ask
+// again. Every write of the list is checked for it (keepsWakes). So a wake
+// the key set up is on in a room only while its link is on the record, and
+// a disconnect, a take-off or a replaced entry turns off every link it
+// names before the link goes.
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -407,21 +442,6 @@ function outlive<T>(rc: RouteContext, work: () => Promise<T>): Promise<T> {
   return p;
 }
 
-/** How long a recorded link may still be set: its call asks for no hook
- *  later than set after recording it, and a link pending longer than fresh
- *  counts as answered (AGENT_WAKE_SET_MS, AGENT_WAKE_FRESH_MS). Lowered
- *  under TEST_HOOKS by the AGENT_WAKE_FRESH_MS variable (the unit tests). */
-function wakeTimes(env: Env): { set: number, fresh: number } {
-  const t = env.TEST_HOOKS && env.AGENT_WAKE_FRESH_MS !== undefined ? Number(env.AGENT_WAKE_FRESH_MS) : NaN;
-  const fresh = Number.isFinite(t) && t >= 0 ? t : AGENT_WAKE_FRESH_MS;
-  return { fresh, set: Math.floor(fresh * AGENT_WAKE_SET_MS / AGENT_WAKE_FRESH_MS) };
-}
-
-/** A recorded link its call may still set: pending, and recorded less than fresh ago. */
-function inFlight(h: AgentWake, now: number, fresh: number): boolean {
-  return !h.done && now - h.at < fresh;
-}
-
 /** The entry with these links recorded (none: no hooks field). */
 function withHooks(e: AgentEntry, hooks: AgentWake[]): AgentEntry {
   const out: AgentEntry = { ...e };
@@ -430,89 +450,146 @@ function withHooks(e: AgentEntry, hooks: AgentWake[]): AgentEntry {
   return out;
 }
 
-/** What a room said to turning off one link: removed; kept (no hook of
- *  that link there: none, a webhook, or a Muse hook on another link); gone
- *  (no row for the token, or the room itself gone: nothing the key set up
- *  can be there); left (the call threw twice, AGENT_WAKE_RETRY_MS apart,
- *  or the room refused in any other way, as one still on older code would
- *  for a revoked seat: the link is not settled). */
-type Dropped = "removed" | "kept" | "gone" | "left";
-async function dropLink(env: Env, e: AgentEntry, link: string): Promise<Dropped> {
+/** The refusals of a hook method that show no hook of any link of the
+ *  token's there: no row for the token, the room gone. */
+const NO_SEAT = new Set(["invite_invalid", "room_missing", "room_deleted"]);
+
+/** What a room said to turning off one recorded link (museDropLook):
+ *  settled (by rule (b): no hook of it there now, the room's clock past its
+ *  deadline), with whether a hook went; pending (no hook of it there, but
+ *  its deadline is still to come by the room's clock: wait ms, then ask
+ *  again); or left (two throws, AGENT_WAKE_RETRY_MS apart, a refusal of
+ *  another kind, as one still on older code gives for a revoked seat, or
+ *  an answer with no room clock). */
+type Asked = { settled: Settled, removed: boolean } | { pending: number, removed: boolean } | { left: true };
+async function askDrop(env: Env, e: AgentEntry, h: AgentWake): Promise<Asked> {
   for (let i = 0; i < 2; i++) {
     if (i) await sleep(AGENT_WAKE_RETRY_MS);
-    try {
-      const r = await roomStub(env, e.room).museDropLook(e.token, link);
-      if (r.ok) return r.removed ? "removed" : "kept";
-      return r.code === "invite_invalid" || r.code === "room_missing" || r.code === "room_deleted" ? "gone" : "left";
-    } catch { /* asked once more, then reported as left; the caller logs the count */ }
+    let r: { ok: boolean, removed?: boolean, code?: string, now?: unknown };
+    try { r = await roomStub(env, e.room).museDropLook(e.token, h.link); } catch { continue; /* asked once more, then left; the caller logs the count */ }
+    if (typeof r.now !== "number" || !Number.isFinite(r.now)) return { left: true };
+    if (!r.ok && !NO_SEAT.has(String(r.code))) return { left: true };
+    const removed = !!(r.ok && r.removed);
+    if (r.now > h.deadline) return { settled: { room: e.room, token: e.token, link: h.link, deadline: h.deadline, by: { kind: "no_hook", now: r.now } }, removed };
+    return { pending: h.deadline - r.now + 1, removed };
   }
-  return "left";
+  return { left: true };
 }
 
-/** Turns off every Muse wake the key recorded in one room: each link the
- *  entry names, with museDropLook, a look at the room's own invite that
- *  opens nothing and removes the hook filed under the seat's name only
- *  while it is a Muse hook on that link (a webhook, or a hook the agent set
- *  itself on another link, stays). left when any link is not settled,
- *  removed when any hook went, gone when the room has no such seat or no
- *  storage, kept when no hook of any link was there. */
-async function dropWake(env: Env, e: AgentEntry): Promise<Dropped> {
-  let removed = false, gone = false;
-  for (const link of [...new Set((e.hooks || []).map((h) => h.link))]) {
-    const r = await dropLink(env, e, link);
-    if (r === "left") return "left";
-    if (r === "removed") removed = true;
-    if (r === "gone") gone = true;
+/** Every link an entry records, asked once: the settled ones (with the
+ *  answers that allow them off), whether a hook went, the longest wait a
+ *  pending one asks for, and the links that did not settle. */
+type Swept = { settled: Settled[], removed: boolean, wait: number, unsettled: AgentWake[], left: boolean };
+async function sweep(env: Env, e: AgentEntry, hooks: AgentWake[]): Promise<Swept> {
+  const out: Swept = { settled: [], removed: false, wait: 0, unsettled: [], left: false };
+  for (const h of hooks) {
+    const a = await askDrop(env, e, h);
+    if ("settled" in a) { out.settled.push(a.settled); if (a.removed) out.removed = true; continue; }
+    out.unsettled.push(h);
+    if ("left" in a) out.left = true;
+    else { out.wait = Math.max(out.wait, a.pending); if (a.removed) out.removed = true; }
   }
-  return removed ? "removed" : gone ? "gone" : "kept";
+  return out;
 }
 
-/** A cut key's wakes in one room: every link turned off, then each link
- *  still pending asked once more when its fresh time is over, since a set
- *  its call asked for may reach the room after the first ask (that call,
- *  if it runs on, turns its own off when it finds the key cut). */
-async function dropCutWake(env: Env, e: AgentEntry, times: { fresh: number }): Promise<Dropped> {
-  const first = await dropWake(env, e);
-  if (first === "left") return first;
-  const now = Date.now();
-  const pending = (e.hooks || []).filter((h) => inFlight(h, now, times.fresh));
-  if (!pending.length) return first;
-  await sleep(Math.max(...pending.map((h) => h.at)) + times.fresh - now);
-  const again = await dropWake(env, withHooks(e, pending));
-  return again === "left" ? "left" : first === "removed" || again === "removed" ? "removed" : first;
+/** The room's clock, from a look that changes nothing (museHookLook, which
+ *  answers for every seat the room has a row for): tried twice,
+ *  AGENT_WAKE_RETRY_MS apart; null when it threw both times, refused in
+ *  another way, or sent no clock. */
+async function roomClock(env: Env, e: AgentEntry): Promise<number | null> {
+  for (let i = 0; i < 2; i++) {
+    if (i) await sleep(AGENT_WAKE_RETRY_MS);
+    let r: { ok: boolean, code?: string, now?: unknown };
+    try { r = await roomStub(env, e.room).museHookLook(e.token); } catch { continue; /* asked once more, then left */ }
+    if (typeof r.now !== "number" || !Number.isFinite(r.now) || (!r.ok && !NO_SEAT.has(String(r.code)))) return null;
+    return r.now;
+  }
+  return null;
 }
 
-/** The wakes a disconnected key set up, turned off: every entry that
- *  records one, AGENT_GLANCE_PARALLEL rooms at a time. Which rooms' wakes
- *  this turned off, and which rooms did not settle. */
-async function dropWakes(env: Env, rooms: AgentEntry[], times: { fresh: number }): Promise<{ removed: string[], left: string[] }> {
+/** Turns off every Muse wake the key recorded in one room, before its entry
+ *  is taken off or replaced. First a look at the room's clock: while any
+ *  link's deadline is still to come by it (a registration may still set it)
+ *  nothing is turned off and the caller answers try_again, as it does when
+ *  the room cannot be asked. Then each link with museDropLook, a look at
+ *  the room's own invite that opens nothing and removes the hook filed under
+ *  the seat's name only while it is a Muse hook on that link (a webhook, or
+ *  a hook the agent set itself on another link, stays). Ready (with the
+ *  answers that allow every link off) only when each settled; otherwise
+ *  try_again, the list unchanged. */
+async function dropWake(env: Env, e: AgentEntry): Promise<{ ok: true, settled: Settled[], removed: boolean } | { ok: false, refused: Refused }> {
+  const hooks = e.hooks || [];
+  const notSettled = (): { ok: false, refused: Refused } => ({ ok: false, refused: { status: 503, code: "try_again", error: wakeNotSettled(e.room), room: e.room, retry_after: 1 } });
+  const stillSetting = (ms: number): { ok: false, refused: Refused } => {
+    const sec = Math.max(1, Math.ceil(ms / 1000));
+    return { ok: false, refused: { status: 503, code: "try_again", error: wakeStillSetting(e.room, sec), room: e.room, retry_after: sec } };
+  };
+  const now = await roomClock(env, e);
+  if (now === null) return notSettled();
+  const due = Math.max(...hooks.map((h) => h.deadline));
+  if (!(now > due)) return stillSetting(due - now + 1);
+  const s = await sweep(env, e, hooks);
+  if (!s.unsettled.length) return { ok: true, settled: s.settled, removed: s.removed };
+  return s.left ? notSettled() : stillSetting(s.wait);
+}
+
+/** A cut key's wakes in one room: every link turned off, and the links
+ *  whose deadline is still to come by the room's clock asked again once it
+ *  has passed (waiting at most AGENT_WAKE_SET_MS), since a set may still
+ *  reach the room until then; what still did not settle is left. */
+async function dropCutWake(env: Env, e: AgentEntry): Promise<Swept> {
+  const first = await sweep(env, e, e.hooks || []);
+  const pending = first.unsettled;
+  if (!pending.length || first.left && first.wait === 0) return first;
+  await sleep(Math.min(first.wait, AGENT_WAKE_SET_MS));
+  const again = await sweep(env, e, pending);
+  return { settled: first.settled.concat(again.settled), removed: first.removed || again.removed, wait: again.wait, unsettled: again.unsettled, left: again.unsettled.length > 0 };
+}
+
+/** The wakes a cut key set up, turned off: every entry that records one,
+ *  AGENT_GLANCE_PARALLEL rooms at a time. Which rooms' wakes went, which
+ *  rooms did not settle (and their entries, holding only the links that did
+ *  not), and the answers that allow the rest off. */
+async function dropWakes(env: Env, rooms: AgentEntry[]): Promise<{ removed: string[], left: string[], remain: AgentEntry[], settled: Settled[] }> {
   const hooked = rooms.filter((e) => e.hooks && e.hooks.length);
-  const got: Dropped[] = hooked.map(() => "kept");
+  const got: Swept[] = [];
   let next = 0;
   const lane = async () => {
     while (next < hooked.length) {
       const i = next++;
-      got[i] = await dropCutWake(env, hooked[i], times);
+      got[i] = await dropCutWake(env, hooked[i]);
     }
   };
   await Promise.all(Array.from({ length: Math.min(AGENT_GLANCE_PARALLEL, hooked.length) }, lane));
-  return { removed: hooked.filter((_, i) => got[i] === "removed").map((e) => e.room), left: hooked.filter((_, i) => got[i] === "left").map((e) => e.room) };
+  const left = hooked.filter((_, i) => got[i].unsettled.length);
+  return {
+    removed: hooked.filter((_, i) => got[i].removed).map((e) => e.room),
+    left: left.map((e) => e.room),
+    remain: hooked.map((e, i) => withHooks(e, got[i].unsettled)).filter((e) => e.hooks),
+    settled: got.flatMap((g) => g.settled),
+  };
 }
 
 /* ---------- GET, HEAD and DELETE /api/agent ---------- */
 
 // GET /api/agent with the key: its rooms (never a token), the most it can
 // hold and when it was made; HEAD the same headers. DELETE disconnects it
-// everywhere: the identity goes, the key works nowhere from then on, and
-// every seat stays in its room (as does any token the agent kept). Then
-// the Muse wakes the key set up (muse_register) are turned off, from the
-// list as it stood when the key was cut, each with a look that opens
-// nothing (museDropLook); a hook the agent set with a room's own token on
-// another link stays. Joins nothing. The whole of it, the cut included,
-// runs under waitUntil, registered before the cut, and the answer waits
-// for it, so a caller that goes away does not cut it short (the platform
-// gives such work about 30 seconds; past that, rooms not reached keep
-// their wakes, and the gadget's Disconnect stops every wake).
+// everywhere, in two steps. First the cut (agentCut): the key's slot is
+// marked cut, and from then on the key opens nothing, every route and the
+// MCP address refusing it as they refuse a key that does not exist, but
+// this same DELETE. Then the Muse wakes the key set up (muse_register) are
+// turned off, from the list as it stood when the key was cut, each with a
+// look that opens nothing (museDropLook); a hook the agent set with a
+// room's own token on another link stays. When every one settled the
+// identity is deleted (agentDrop). When some did not, the list is written
+// again holding only the rooms whose wakes did not settle (agentRemain),
+// and the answer names them: DELETE again with the same key tries them
+// again, and finishes. Every seat stays in its room (as does any token the
+// agent kept). Joins nothing. The whole of it, the cut included, runs under
+// waitUntil, registered before the cut, and the answer waits for it, so a
+// caller that goes away does not cut it short (the platform gives such work
+// about 30 seconds; a Worker that stops in between leaves the key cut and
+// its list as it was, for the next DELETE).
 export async function agentRoute(rc: RouteContext): Promise<Response> {
   const res = await agentAnswer(rc);
   return rc.request.method === "HEAD" ? new Response(null, { status: res.status, headers: res.headers }) : res;
@@ -521,27 +598,46 @@ async function agentAnswer(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
   const method = request.method;
   if (method !== "GET" && method !== "HEAD" && method !== "DELETE") return json({ error: "Method not allowed" }, 405);
+  if (method === "DELETE") {
+    // a cut key is refused by openKey, as an unknown one: its own DELETE goes to the slot directly
+    const c = agentCredential(request);
+    if (c.kind !== "key") return refusedJson(KEY_REFUSED[c.kind === "bad" ? "invalid" : c.kind]);
+    const stub = identity(env, c.id);
+    const verifier = await agentVerifier(c.id, c.secret);
+    return await outlive(rc, () => disconnect(env, stub, c.id, c.secret, verifier));
+  }
   const k = await openKey(env, request);
   if (k.variant !== "ok") return refusedJson(KEY_REFUSED[k.variant]);
-  if (method === "DELETE") {
-    const key = k.key;
-    return await outlive(rc, async () => {
-      // the key is cut first; the list comes back from the cut itself
-      const d = await key.stub.agentDrop("key", key.verifier);
-      if (!d.ok) return refusedJson(KEY_REFUSED.invalid);
-      // a list that does not open is no reason to keep the key working: it
-      // is cut, and the answer says its wakes could not be turned off (the
-      // slot, gone now, held the same wrapped data key the open read)
-      const list = await agentUnseal(key.id, key.secret, key.wrapped, d.ver, d.ring);
-      if (!list) return json({ deleted: true, rooms: [], muse_wakes_removed: [], muse_wakes_left: null, note: dropNote(null) });
-      const w = await dropWakes(env, list.rooms, wakeTimes(env));
-      if (w.left.length) warn("agent.drop", null, { left: w.left.length });
-      return json({ deleted: true, rooms: list.rooms.map((e) => e.room), muse_wakes_removed: w.removed, muse_wakes_left: w.left, note: dropNote(w.left) });
-    });
-  }
   const u = await unseal(k.key);
   if (!u) return refusedJson(UNREADABLE);
   return json({ rooms: u.rooms.map(entryView), max_rooms: AGENT_ROOMS_MAX, created: u.created });
+}
+
+/** DELETE /api/agent's two steps, the cut and the wakes (above). */
+async function disconnect(env: Env, stub: DurableObjectStub, id: string, secret: Uint8Array<ArrayBuffer>, verifier: string): Promise<Response> {
+  const cut = await stub.agentCut("key", verifier);
+  if (!cut.ok) return refusedJson(KEY_REFUSED.invalid);
+  // a list that does not open is no reason to keep the key: it goes, and
+  // the answer says its wakes could not be turned off
+  const list = await agentUnseal(id, secret, cut.wrapped, cut.ver, cut.ring);
+  if (!list) {
+    await stub.agentDrop("key", verifier);
+    return json({ deleted: true, rooms: [], muse_wakes_removed: [], muse_wakes_left: null, note: dropNote(null) });
+  }
+  const w = await dropWakes(env, list.rooms);
+  const rooms = list.rooms.map((e) => e.room);
+  if (!w.left.length) {
+    keepsWakes(list.rooms, [], w.settled);
+    await stub.agentDrop("key", verifier);
+    return json({ deleted: true, rooms, muse_wakes_removed: w.removed, muse_wakes_left: [], note: dropNote([]) });
+  }
+  // only the rooms whose wakes did not settle stay, for the next DELETE
+  keepsWakes(list.rooms, w.remain, w.settled);
+  const ring = await agentSealRing(list.dk, id, cut.ver + 1, w.remain);
+  const kept = await stub.agentRemain("key", verifier, cut.ver, ring);
+  if (!kept.ok) warn("agent.drop", null, { remain: "not written" });
+  warn("agent.drop", null, { left: w.left.length });
+  return json({ deleted: true, rooms, muse_wakes_removed: w.removed, muse_wakes_left: w.left, note: dropNote(w.left) });
 }
 
 /* ---------- POST /api/agent/rooms and /api/agent/rooms/remove ---------- */
@@ -549,7 +645,10 @@ async function agentAnswer(rc: RouteContext): Promise<Response> {
 /** Puts entries on the key (REST's list, or MCP add_room's one): a room
  *  already held is refused, one the room refused since is replaced in
  *  place, the key holds AGENT_ROOMS_MAX at most, and every new room's token
- *  is looked up, in order, before anything is written. */
+ *  is looked up, in order, before anything is written. A refused entry that
+ *  records Muse wakes has them turned off first (dropWake, through its gone
+ *  seat): it is replaced only once every one settled, otherwise the call
+ *  answers try_again and changes nothing. */
 type Added = Refused | { rooms: Array<{ room: string, name: string, opened: boolean }>, rooms_held: number };
 async function addRooms(env: Env, u: Unsealed, entries: Array<{ room: string, token: string }>, rest: boolean): Promise<Rewritten<Added>> {
   return rewrite<Added>(u, async (x): Promise<Changed<Added>> => {
@@ -565,6 +664,14 @@ async function addRooms(env: Env, u: Unsealed, entries: Array<{ room: string, to
       if (!l.ok) return { answer: l };
       found.push(l.entry);
     }
+    const settled: Settled[] = [];
+    for (const f of found) {
+      const old = x.rooms.find((e) => e.room === f.room);
+      if (!old || !(old.hooks && old.hooks.length)) continue;
+      const d = await dropWake(env, old);
+      if (!d.ok) return { answer: d.refused };
+      settled.push(...d.settled);
+    }
     const now = Date.now();
     const rooms = x.rooms.slice();
     for (const f of found) {
@@ -573,35 +680,33 @@ async function addRooms(env: Env, u: Unsealed, entries: Array<{ room: string, to
       if (at >= 0) rooms[at] = entry;
       else rooms.push(entry);
     }
-    return { rooms, then: { rooms: found.map((f) => ({ room: f.room, name: f.name, opened: f.opened })), rooms_held: rooms.length } };
+    return { rooms, then: { rooms: found.map((f) => ({ room: f.room, name: f.name, opened: f.opened })), rooms_held: rooms.length }, settled };
   });
 }
 
 /** Takes one room off the key. A room where the key recorded a Muse wake
- *  (the entry's hooks) has every link turned off first, and goes off the
- *  list only once the room has answered for each (removed; not there; no
- *  such seat; the room gone): once the room is off the key nothing but the
- *  gadget could turn that wake off (with a key a person made, the agent
- *  holds no token of that room), and a wake for a room the agent can no
- *  longer read through its key serves nobody. A link still pending (a
- *  registration through the key running in that room) or one the room did
- *  not settle keeps the room on the key, its wake as it was: try_again. A
- *  room that refused the key's invite says so instead of the seat. */
+ *  (the entry's hooks) has every link turned off first (dropWake), and goes
+ *  off the list only once the room has settled each by the rule of "the
+ *  record": once the room is off the key nothing but the gadget could turn
+ *  that wake off (with a key a person made, the agent holds no token of
+ *  that room), and a wake for a room the agent can no longer read through
+ *  its key serves nobody. A link whose deadline is still to come by the
+ *  room's clock (a registration through the key may still set it), or one
+ *  the room did not settle, keeps the room on the key, its wake as it was:
+ *  try_again. A room that refused the key's invite says so instead of the
+ *  seat, and says its wake is off when it had one. */
 type Removed = Refused | { room: string, removed: true, muse_wake_removed?: true, note: string };
 async function removeRoom(env: Env, u: Unsealed, room: string): Promise<Rewritten<Removed>> {
-  const times = wakeTimes(env);
   return rewrite<Removed>(u, async (x): Promise<Changed<Removed>> => {
     const e = x.rooms.find((y) => y.room === room);
     if (!e) return { answer: { status: 404, code: "room_not_held", error: room + " is not on this key.", room } };
     const rooms = x.rooms.filter((y) => y.room !== room);
-    const note = e.state === "refused"
-      ? removedRefusedNote(room)
-      : "Your seat stays: you are still a member of " + room + ". To leave it for good, call leave_room through the key, or use the room's own address.";
-    const hooks = e.hooks || [];
-    if (!hooks.length) return { rooms, then: { room, removed: true as const, note } };
-    if (hooks.some((h) => inFlight(h, Date.now(), times.fresh))) return { answer: { status: 503, code: "try_again", error: wakeStillSetting(room, Math.ceil(times.fresh / 1000)), room, retry_after: Math.max(1, Math.ceil(times.fresh / 1000)) } };
-    if ((await dropWake(env, e)) === "left") return { answer: { status: 503, code: "try_again", error: wakeNotSettled(room), room, retry_after: 1 } };
-    return { rooms, then: { room, removed: true as const, muse_wake_removed: true as const, note: note + " The Muse wake this key set up in " + room + " is off." } };
+    const held = "Your seat stays: you are still a member of " + room + ". To leave it for good, call leave_room through the key, or use the room's own address.";
+    if (!(e.hooks && e.hooks.length)) return { rooms, then: { room, removed: true as const, note: e.state === "refused" ? removedRefusedNote(room, false) : held } };
+    const d = await dropWake(env, e);
+    if (!d.ok) return { answer: d.refused };
+    const note = e.state === "refused" ? removedRefusedNote(room, true) : held + " The Muse wake this key set up in " + room + " is off.";
+    return { rooms, then: { room, removed: true as const, muse_wake_removed: true as const, note }, settled: d.settled };
   });
 }
 
@@ -1069,8 +1174,19 @@ export async function agentInviteAddRoute(rc: RouteContext): Promise<Response> {
 }
 
 async function personAddNow(env: Env, first: Unsealed, planned: Planned[]): Promise<Response> {
+  // a refused entry that records Muse wakes is replaced only once each settled: first, before any invite
+  const settledBy = new Map<string, Settled[]>();
+  for (const p of planned) {
+    const h = first.rooms.find((y) => y.room === p.e.room);
+    if (!h || h.state === "held" || !(h.hooks && h.hooks.length)) continue;
+    const d = await dropWake(env, h);
+    if (!d.ok) return refusedJson(d.refused);
+    settledBy.set(h.room, d.settled);
+  }
   const made: Made = { sure: [], maybe: [] };
   const added: AgentEntry[] = [];
+  // the entries this call replaced, as they were (links included), for the rollback
+  const replaced = new Map<string, AgentEntry>();
   let u = first;
   let kept = false;
   const fail = (r: Refused) => refusedJson(r, undefined, unusedFields(made));
@@ -1080,16 +1196,25 @@ async function personAddNow(env: Env, first: Unsealed, planned: Planned[]): Prom
       const s = await seatNow(env, p, made, "could not be reached, so it was not added. Try again.");
       if ("status" in s) return fail(s);
       const entry: AgentEntry = { room: p.e.room, token: s.token, name: s.name, added: Date.now(), state: "held" };
+      let was: AgentEntry | undefined;
       const w = await rewrite<Refused | null>(u, async (x): Promise<Changed<Refused | null>> => {
         const h = x.rooms.find((y) => y.room === entry.room);
+        was = h;
         if (h && h.state === "held") return { answer: { status: 409, code: "room_held", error: about(p.e.i, entry.room + " is already on this key", false), room: entry.room } };
         if (!h && x.rooms.length + 1 > AGENT_ROOMS_MAX) return { answer: { status: 429, code: "limit_reached", error: "This key holds at most " + AGENT_ROOMS_MAX + " rooms; take one off first (remove_room)." } };
-        return { rooms: h ? x.rooms.map((y) => (y.room === entry.room ? entry : y)) : x.rooms.concat([entry]), then: null };
+        let settled = h ? settledBy.get(h.room) || [] : [];
+        if (h && h.hooks && h.hooks.some((k) => !settled.some((z) => z.token === h.token && z.link === k.link && z.deadline === k.deadline))) {
+          const d = await dropWake(env, h);
+          if (!d.ok) return { answer: d.refused };
+          settled = d.settled;
+        }
+        return { rooms: h ? x.rooms.map((y) => (y.room === entry.room ? entry : y)) : x.rooms.concat([entry]), then: null, settled };
       });
       if ("answer" in w) return fail(w.answer || { status: 500, error: "The rooms could not be added. Try again." });
       if (!("done" in w)) return fail("gone" in w ? KEY_REFUSED.invalid : "unreadable" in w ? UNREADABLE : { ...BUSY, retry_after: 1 });
       u = w.after;
       added.push(entry);
+      if (was) replaced.set(entry.room, was);
       rooms.push({ room: p.e.room, name: s.name, opened: s.opened, seat: s.seat });
     }
     kept = true;
@@ -1099,10 +1224,20 @@ async function personAddNow(env: Env, first: Unsealed, planned: Planned[]): Prom
     return fail({ status: 500, error: "The rooms could not be added. Try again." });
   } finally {
     // this call's entries come off the key again (each by its room and token,
-    // so an entry another call put there meanwhile stays)
+    // so an entry another call put there meanwhile stays), the entry each
+    // replaced put back as it was, links included; one a registration has
+    // recorded a wake on since stays, as nothing may drop that link unsettled
     if (!kept && added.length) {
       try {
-        await rewrite<true>(u, async (x): Promise<Changed<true>> => ({ rooms: x.rooms.filter((y) => !added.some((a) => a.room === y.room && a.token === y.token)), then: true }));
+        await rewrite<true>(u, async (x): Promise<Changed<true>> => ({
+          rooms: x.rooms.flatMap((y) => {
+            const mine = added.some((a) => a.room === y.room && a.token === y.token) && !(y.hooks && y.hooks.length);
+            if (!mine) return [y];
+            const back = replaced.get(y.room);
+            return back ? [back] : [];
+          }),
+          then: true,
+        }));
       } catch (e) { warn("agent.person", e && (e as Error).name ? (e as Error).name : "failed"); }
     }
   }
@@ -1190,11 +1325,12 @@ async function agentTool(rc: RouteContext, first: Opened, name: string, args: Bo
 type WakeResult = { room: string, ok: true, name: string, hook: unknown } | { room: string, ok: false, status: number, code: string, error: string };
 
 /** Why a room was not registered this time, told once it is known whether
- *  the code was claimed (spent): unreached (its call threw, or came too
- *  late after the record), busy (the key's list changed under the call),
- *  full (it records AGENT_WAKE_LINKS_MAX links that cannot be settled yet),
- *  not_joined (its seat was never opened). */
-type Skip = "unreached" | "busy" | "full" | "not_joined";
+ *  the code was claimed (spent): unreached (its call threw), late (it
+ *  reached the room after its deadline, and the room refused it), busy (the
+ *  key's list changed under the call), full (it records
+ *  AGENT_WAKE_LINKS_MAX links that cannot be settled yet), not_joined (its
+ *  seat was never opened). */
+type Skip = "unreached" | "late" | "busy" | "full" | "not_joined";
 function skipped(room: string, why: Skip, spent: boolean): WakeResult {
   if (why === "not_joined") return { room, ok: false, status: 409, code: "not_joined", error: museNotJoined(spent) };
   return { room, ok: false, status: 503, code: "try_again", error: wakeAgain(room, why, spent) };
@@ -1211,15 +1347,17 @@ function skipped(room: string, why: Skip, spent: boolean): WakeResult {
 // each on the key, or every held room); a look in each (lookupInvite, as
 // entryLookup asks), so the code is not spent on rooms that refuse, and a
 // room whose entry records AGENT_WAKE_LINKS_MAX links has them settled
-// first (museHookLook: those whose calls are over and whose hook is not on
-// come off), else it is skipped; the claim, once; the link recorded on each
-// accepted room's entry, pending, before any hook is set (see "the
-// record" above); the hooks set, AGENT_GLANCE_PARALLEL rooms at a time, each
-// no later than AGENT_WAKE_SET_MS after its record; then one more change
-// of the list: a room that took the hook has its link done and the links
-// whose calls are over and whose hook it replaced taken off, a room that
-// refused the set has this call's link taken off, a room whose call threw
-// keeps every link; and a key disconnected meanwhile has every hook this
+// first against the room's hook and clock (museHookLook, by the rule of
+// "the record" above), else it is skipped and spends nothing; the claim,
+// once; the link recorded on each accepted room's entry with its deadline
+// (AGENT_WAKE_SET_MS from now; a link recorded already keeps the later
+// deadline), before any hook is set; the hooks set, AGENT_GLANCE_PARALLEL
+// rooms at a time, each carrying its deadline, which the room keeps by its
+// own clock; then one more change of the list, each room's answer by the
+// rule: a set the room took settles the other links whose deadline its
+// clock has passed, and this call's link is put back if it went with them;
+// a set the room refused (late, or the seat gone) settles this call's own
+// link; a throw settles nothing. A key cut meanwhile has every hook this
 // call set turned off again. The bridge is asked what the REST route asks
 // it: /claim once, /rooms once per hook set. The link id is in no answer.
 async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnswer> {
@@ -1245,13 +1383,12 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
       if (!asked.includes(e)) asked.push(e);
     }
   }
-  const times = wakeTimes(env);
   const same = (a: AgentEntry, b: AgentEntry) => a.room === b.room && a.token === b.token;
   // first pass: a look in each room, in order (an entry the room refused before is not asked again)
   const results: Array<WakeResult | Skip> = [];
   const accepted: Array<{ i: number, e: AgentEntry }> = [];
   const marks: Array<{ room: string, token: string, code: string }> = [];
-  const settle: Array<{ i: number, e: AgentEntry, off: AgentWake[] }> = [];
+  const settle: Array<{ i: number, e: AgentEntry, off: Settled[] }> = [];
   for (const e of asked) {
     if (e.state === "refused") {
       results.push({ room: e.room, ok: false, status: e.code === "room_deleted" ? 404 : 403, code: e.code || "invite_invalid", error: "This room has refused the invite on your key" + (e.code ? " (" + e.code + ")" : "") + ": take it off with remove_room." });
@@ -1268,17 +1405,13 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
     if (!l.row.used) { results.push("not_joined"); continue; }
     const hooks = e.hooks || [];
     if (hooks.length >= AGENT_WAKE_LINKS_MAX) {
-      // full: the links whose calls are over come off when the room's hook is not theirs
-      let on: string | null;
-      try {
-        const s = await stub.museHookLook(e.token);
-        if (!s.ok) { results.push("full"); continue; }
-        on = s.link;
-      } catch { results.push("full"); continue; }
-      const now = Date.now();
-      const over = hooks.filter((h) => !inFlight(h, now, times.fresh));
-      const keep = over.filter((h) => h.link === on).sort((a, b) => b.at - a.at)[0];
-      const off = over.filter((h) => h !== keep);
+      // full: a link comes off when the room shows no hook of it and its clock is past the link's deadline
+      let look: { ok: boolean, link?: string | null, code?: string, now?: unknown };
+      try { look = await stub.museHookLook(e.token); } catch { results.push("full"); continue; }
+      const now = look.now;
+      if (typeof now !== "number" || !Number.isFinite(now) || (!look.ok && !NO_SEAT.has(String(look.code)))) { results.push("full"); continue; }
+      const on = look.ok ? look.link : null;
+      const off: Settled[] = hooks.filter((h) => h.link !== on && now > h.deadline).map((h) => ({ room: e.room, token: e.token, link: h.link, deadline: h.deadline, by: { kind: "no_hook" as const, now } }));
       if (hooks.length - off.length >= AGENT_WAKE_LINKS_MAX) { results.push("full"); continue; }
       settle.push({ i: results.length, e, off });
     }
@@ -1289,12 +1422,14 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
   // each change of the list below starts from the list as the one before left it
   let base = u;
   if (settle.length) {
+    const offs = settle.flatMap((t) => t.off);
     const s = await rewrite<true>(base, async (x): Promise<Changed<true>> => ({
       rooms: x.rooms.map((e) => {
         const t = settle.find((y) => same(y.e, e));
-        return t ? withHooks(e, (e.hooks || []).filter((h) => !t.off.some((o) => o.link === h.link && o.at === h.at))) : e;
+        return t ? withHooks(e, (e.hooks || []).filter((h) => !t.off.some((o) => o.link === h.link && o.deadline === h.deadline))) : e;
       }),
       then: true,
+      settled: offs,
     }));
     if ("gone" in s) return keyError(KEY_REFUSED.invalid);
     if ("done" in s) base = s.after;
@@ -1311,20 +1446,21 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
   const c = await museClaim(bridge, code);
   if (!c.ok) return { result: mcpErr(c.error, c.code === "rate_limited" ? { code: c.code, retry_after: c.retry_after } : { code: c.code }) };
   const link = c.link;
-  // recorded on the key, pending, before any hook is set (each entry by its room and token)
-  const rec = await rewrite<Map<number, number>>(base, async (x): Promise<Changed<Map<number, number>>> => {
-    const ats = new Map<number, number>();
+  // recorded on the key, with its deadline, before any hook is set (each entry by its room and token)
+  const deadline = Date.now() + AGENT_WAKE_SET_MS;
+  const rec = await rewrite<Set<number>>(base, async (x): Promise<Changed<Set<number>>> => {
+    const recorded = new Set<number>();
     const rooms = x.rooms.map((e) => {
       const a = accepted.findIndex((y) => same(y.e, e));
       if (a < 0 || e.state !== "held") return e;
       const hooks = e.hooks || [];
-      if (hooks.length >= AGENT_WAKE_LINKS_MAX) return e; // filled meanwhile by another registration: not asked
-      let at = Date.now();
-      for (const h of hooks) if (h.at >= at) at = h.at + 1;
-      ats.set(a, at);
-      return withHooks(e, hooks.concat([{ link, at }]));
+      const at = hooks.findIndex((h) => h.link === link);
+      if (at < 0 && hooks.length >= AGENT_WAKE_LINKS_MAX) return e; // filled meanwhile by another registration: not asked
+      recorded.add(a);
+      // a link recorded already keeps the later of the two deadlines
+      return withHooks(e, at < 0 ? hooks.concat([{ link, deadline }]) : hooks.map((h, j) => (j === at ? { link, deadline: Math.max(h.deadline, deadline) } : h)));
     });
-    return { rooms, then: ats };
+    return { rooms, then: recorded };
   });
   if ("gone" in rec) return keyError(KEY_REFUSED.invalid);
   if ("unreadable" in rec || "answer" in rec) return UNREADABLE_RPC;
@@ -1332,69 +1468,81 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
     for (const a of accepted) results[a.i] = "busy";
     return { result: mcpOk({ claimed: true, results: told(true) }) };
   }
-  const ats = rec.done;
-  // the hooks, each set with a look at the room's own invite, no later than times.set after its record
-  type Outcome = "ok" | "refused" | "threw" | "late";
-  const outcome = new Map<number, Outcome>();
-  const todo = [...ats.keys()];
+  const recorded = rec.done;
   // a room not recorded: taken off meanwhile, refused meanwhile, or filled by another registration
   for (const [n, a] of accepted.entries()) {
-    if (ats.has(n)) continue;
+    if (recorded.has(n)) continue;
     results[a.i] = rec.after.rooms.some((e) => e.room === a.e.room) ? "busy" : { room: a.e.room, ok: false, status: 404, code: "room_not_held", error: a.e.room + " is no longer on your key." };
   }
+  // the hooks, each set with a look at the room's own invite and carrying its deadline
+  type Outcome = { kind: "ok", now: number | null } | { kind: "refused" } | { kind: "threw" };
+  const outcome = new Map<number, Outcome>();
+  const todo = [...recorded];
   let next = 0, unreached = 0;
   const lane = async () => {
     while (next < todo.length) {
       const n = todo[next++], a = accepted[n];
-      if (Date.now() - (ats.get(n) as number) > times.set) { outcome.set(n, "late"); results[a.i] = "unreached"; continue; }
       try {
-        const s = await roomStub(env, a.e.room).museSetHookLook(a.e.token, link, routing, a.e.room);
-        if (!s.ok) { outcome.set(n, "refused"); results[a.i] = { room: a.e.room, ok: false, status: s.status, code: s.code, error: s.error }; continue; }
-        outcome.set(n, "ok");
+        const s = await roomStub(env, a.e.room).museSetHookLook(a.e.token, link, routing, a.e.room, deadline);
+        if (!s.ok) {
+          outcome.set(n, { kind: "refused" });
+          results[a.i] = s.code === "too_late" ? "late" : { room: a.e.room, ok: false, status: s.status, code: s.code, error: s.error };
+          continue;
+        }
+        outcome.set(n, { kind: "ok", now: typeof s.now === "number" && Number.isFinite(s.now) ? s.now : null });
         results[a.i] = { room: a.e.room, ok: true, name: s.name, hook: s.hook };
-      } catch { unreached++; outcome.set(n, "threw"); results[a.i] = "unreached"; /* counted, and logged below with no room */ }
+      } catch { unreached++; outcome.set(n, { kind: "threw" }); results[a.i] = "unreached"; /* counted, and logged below with no room */ }
     }
   };
   await Promise.all(Array.from({ length: Math.min(AGENT_GLANCE_PARALLEL, todo.length) }, lane));
   if (unreached) warn("agent.muse", null, { unreached });
-  // the room's answers on the list: a hook taken has its link done and the
-  // links it replaced whose calls are over off; a refused set, or one never
-  // asked, has this call's link off; a throw leaves every link
+  // the room's answers on the list, by the rule of "the record"
   const post = await rewrite<Set<number>>(rec.after, async (x): Promise<Changed<Set<number>>> => {
-    const now = Date.now();
     const there = new Set<number>();
+    const settled: Settled[] = [];
     const rooms = x.rooms.map((e) => {
       const n = accepted.findIndex((y) => same(y.e, e));
-      if (n < 0 || !ats.has(n)) return e;
+      if (n < 0 || !recorded.has(n)) return e;
       there.add(n);
-      const at = ats.get(n) as number, o = outcome.get(n);
-      const mine = (h: AgentWake) => h.link === link && h.at === at;
+      const o = outcome.get(n);
       const hooks = e.hooks || [];
-      if (o === "ok") return withHooks(e, hooks.filter((h) => mine(h) || inFlight(h, now, times.fresh)).map((h) => (mine(h) ? { link: h.link, at: h.at, done: true as const } : h)));
-      if (o === "refused" || o === "late") return withHooks(e, hooks.filter((h) => !mine(h)));
+      if (o && o.kind === "ok") {
+        const T = o.now;
+        const off = T === null ? [] : hooks.filter((h) => h.link !== link && h.deadline < T);
+        for (const h of off) settled.push({ room: e.room, token: e.token, link: h.link, deadline: h.deadline, by: { kind: "no_hook", now: T as number } });
+        const left = hooks.filter((h) => !off.includes(h));
+        // the room took this call's set: its link is on the record, put back if it went
+        return withHooks(e, left.some((h) => h.link === link) ? left : left.concat([{ link, deadline }]));
+      }
+      if (o && o.kind === "refused") {
+        const own = hooks.find((h) => h.link === link && h.deadline === deadline);
+        if (!own) return e;
+        settled.push({ room: e.room, token: e.token, link, deadline, by: { kind: "refused_set" } });
+        return withHooks(e, hooks.filter((h) => h !== own));
+      }
       return e;
     });
-    return { rooms, then: there };
+    return { rooms, then: there, settled };
   });
-  const setHere = [...ats.keys()].filter((n) => outcome.get(n) === "ok" || outcome.get(n) === "threw");
+  const setHere = [...recorded].filter((n) => { const o = outcome.get(n); return !!o && (o.kind === "ok" || o.kind === "threw"); });
   if ("gone" in post) {
-    // disconnected meanwhile: what this call set goes again
-    for (const n of setHere) await dropLink(env, accepted[n].e, link);
+    // cut meanwhile: what this call set goes again (the disconnect also turns off every link it recorded)
+    for (const n of setHere) await askDrop(env, accepted[n].e, { link, deadline });
     return keyError(KEY_REFUSED.invalid);
   }
   if ("done" in post) {
-    // a room whose entry changed under the call (taken off once this link was over, or put back with
-    // another invite): what this call set there goes again
-    for (const n of setHere) {
+    // a room whose entry changed under the call (taken off, or put back with another invite once its
+    // links had settled): what this call set there goes again, and its result says so
+    for (const n of recorded) {
       if (post.done.has(n)) continue;
       const a = accepted[n];
-      await dropLink(env, a.e, link);
+      if (setHere.includes(n)) await askDrop(env, a.e, { link, deadline });
       const onKey = post.after.rooms.some((e) => e.room === a.e.room);
       results[a.i] = onKey ? "busy" : { room: a.e.room, ok: false, status: 404, code: "room_not_held", error: a.e.room + " is no longer on your key." };
     }
   }
   // the bridge counts the link's rooms for the gadget (best effort: never fails the registration)
-  for (const n of [...ats.keys()]) {
+  for (const n of [...recorded]) {
     const r = results[accepted[n].i];
     if (typeof r !== "string" && r.ok) await museReportRoom(bridge, link, accepted[n].e.room, true);
   }

@@ -4,7 +4,9 @@
 // the checkout the file sits in), and one fake Muse both bridges call,
 // sends both the same fixed list of requests in the same order (the room's
 // routes and MCP endpoint, a Muse registration with room tokens, the agent
-// key's routes and address in each credential state, the page shell),
+// key's routes and address in each credential state, their refusals, a
+// room that refused the key's invite, a leave through the key and the
+// disconnect after it, the page shell),
 // checks on both sides that each set-up call did what the list assumes (a
 // room made, an invite made, a key made, a gadget linked), so two
 // identical refusals cannot pass for a match, and
@@ -19,8 +21,10 @@
 // disconnect's new fields and the agent catalog's version, digest and new
 // tool taken out (ADDED_SECTIONS, CHANGED_SECTIONS, EXPECTED_DOC_EDITS,
 // EXPECTED_SENTENCE_EDITS and agentMcpMasked below: a change that edits
-// those on purpose lists its edits there), and a note names each part
-// left out wherever the two copies differ there; the app shell's
+// those on purpose lists its edits there), and the retry time of a
+// counter's window, which moves with the run, masked on the answers that
+// carry one (MOVING_RETRY); a note names each part left out wherever the
+// two copies differ there; the app shell's
 // Content-Security-Policy may differ only by CSP_ADDED, and a path this
 // checkout adds (NEW_PATHS) must have been the other's unknown-path 404.
 // Everything else must be identical.
@@ -52,7 +56,7 @@ const CHANGED_SECTIONS = ['AGENT KEYS (ONE MCP SERVER FOR ALL YOUR ROOMS)'];
 const EXPECTED_DOC_EDITS = [
   ['      VOICES), POST /api/agents and the /api/agent routes (AGENT KEYS), POST /api/agents/invite\n      and POST /api/agent/rooms/invite (a person inviting an agent onto a key with their own\n      invite), muse_register on the agent key\'s address, and POST .../leave and MCP leave_room\n      (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.', '      VOICES), POST /api/agents and the /api/agent routes (AGENT KEYS), and POST .../leave and MCP\n      leave_room (LEAVING THE ROOM), which refuse an invite never opened and leave it unopened.'],
   ['    not_person_invite\n                     403  an invite the room stores as an agent\'s (or with no kind) offered as the\n                          inviter of an agent key\'s seat\n    seat_in_use      409  the agent seat of that name you invited is already in use: reuse "any"\n                          takes it (AGENT KEYS)\n', ''],
-  ['                          time, or a room has not confirmed that the Muse wake your key set up\n                          there is off, or a registration through your key still runs there;\n                          wait the Retry-After seconds and send it again', '                          time; wait the Retry-After seconds and send it again'],
+  ['                          time, or a room has not confirmed that the Muse wake your key set up\n                          there is off, or a registration through your key may still reach it;\n                          wait the Retry-After seconds and send it again', '                          time; wait the Retry-After seconds and send it again'],
   ['                          using it is all it takes); the call did not open it. muse_register:\n                          a room you have not joined yet, skipped', '                          using it is all it takes); the call did not open it'],
   ['  agent key, call muse_register at {{origin}}/api/mcp instead (AGENT KEYS): it needs no room\n  token. With your room tokens:', '  agent key, keep your room tokens for this call:'],
   ['AGENT KEYS at {{origin}}/api. Your person can also make one for you on the site\'s home page.', 'AGENT KEYS at {{origin}}/api.'],
@@ -72,7 +76,15 @@ const EXPECTED_SENTENCE_EDITS = [
   ['{{origin}}/api/agents, and a person can make one for it on the site\'s home page, under Agent keys (AGENT KEYS at {{origin}}/api).', '{{origin}}/api/agents (AGENT KEYS at {{origin}}/api).'],
   ['a new key can be made from your agent invites, or by your person on the site\'s home page (AGENT KEYS at {{origin}}/api).', 'a new key can be made from your agent invites (AGENT KEYS at {{origin}}/api).'],
   [' For a Muse wake, call muse_register at {{origin}}/api/mcp with your person\'s gadget code instead: it needs no token.', ''],
+  ['The key forgets {{room2}}, which no longer takes its invite: nothing else changes there.', 'Your seat stays: you are still a member of {{room2}}. To leave it for good, call leave_room through the key, or use the room\'s own address.'],
 ];
+/** The answers whose retry time is the seconds left in a counter's window,
+ *  which moves with the run (the two servers are asked a while apart): that
+ *  number masked in both copies, the Retry-After header and the body's
+ *  retry_after, and nothing else of the answer. */
+const MOVING_RETRY = new Set(['agent POST /api/agents, over the per-network cap']);
+/** The limits (worker/limits.ts), loaded before the runs. */
+let LIM;
 /** Response headers that differ per run or per connection, left out of the compare. */
 const VOLATILE_HEADERS = new Set(['date', 'content-length', 'connection', 'keep-alive', 'transfer-encoding', 'cf-ray', 'server', 'report-to', 'nel', 'alt-svc']);
 /** The answers whose Content-Security-Policy this checkout extends (the app
@@ -240,10 +252,70 @@ async function scenario(srv, muse, suf) {
   }
   await send('agent POST /api/agent/rooms/remove', 'POST', '/api/agent/rooms/remove', { headers: kh, json: { room: room2 } });
   await send('agent POST /api/agent/rooms/remove, not held', 'POST', '/api/agent/rooms/remove', { headers: kh, json: { room: room2 } });
+  // set-up calls of the test hooks, not compared (each server answers its own)
+  const hook = async (label, json) => {
+    const r = await fetch(base + '/api/test-hooks/agent-limits', { method: 'POST', headers: { 'X-Owner-Key': owner, 'Content-Type': 'application/json' }, body: JSON.stringify(json) });
+    must(label, r.status === 200);
+    await r.text();
+  };
+  // POST /api/agents refused beyond a person's invite: the shapes, the size, the method, the per-network cap
+  await send('agent POST /api/agents, rooms not a list', 'POST', '/api/agents', { json: { rooms: 'x' }, headers: net });
+  await send('agent POST /api/agents, no rooms', 'POST', '/api/agents', { json: { rooms: [] }, headers: net });
+  await send('agent POST /api/agents, a bad room name', 'POST', '/api/agents', { json: { rooms: [{ room: 'Not A Room', token: 'x' }] }, headers: net });
+  await send('agent POST /api/agents, no token', 'POST', '/api/agents', { json: { rooms: [{ room }] }, headers: net });
+  await send('agent POST /api/agents, a room twice', 'POST', '/api/agents', { json: { rooms: [{ room, token: k1 }, { room, token: k1 }] }, headers: net });
+  await send('agent POST /api/agents, a token the room never had', 'POST', '/api/agents', { json: { rooms: [{ room, token: 'not-one-of-this-rooms-xx' }] }, headers: net });
+  await send('agent POST /api/agents, a revoked token', 'POST', '/api/agents', { json: { rooms: [{ room, token: gone }] }, headers: net });
+  await send('agent POST /api/agents, no such room', 'POST', '/api/agents', { json: { rooms: [{ room: 'difftest-none-' + suf, token: k1 }] }, headers: net });
+  await send('agent POST /api/agents, not JSON', 'POST', '/api/agents', { body: '{nope', headers: Object.assign({ 'Content-Type': 'application/json' }, net) });
+  await send('agent POST /api/agents, too large', 'POST', '/api/agents', { body: '{"rooms":"' + 'x'.repeat(LIM.SMALL_BODY_MAX) + '"}', headers: Object.assign({ 'Content-Type': 'application/json' }, net) });
+  await send('agent GET /api/agents', 'GET', '/api/agents');
+  await hook('agent: one key per network (test hook)', { per_ip: 1 });
+  const net2 = { 'CF-Connecting-IP': '10.99.0.2' };
+  const made2 = await send('agent POST /api/agents, another network', 'POST', '/api/agents', { json: { rooms: [{ room, token: k1 }] }, headers: net2 });
+  must('agent: a second key made', made2.status === 201 && !!made2.json && /^\.ac1\./.test(made2.json.key || ''));
+  tokens.KEY2 = (made2.json || {}).key || '';
+  await send('agent POST /api/agents, over the per-network cap', 'POST', '/api/agents', { json: { rooms: [{ room, token: k1 }] }, headers: net2 });
+  await hook('agent: caps as they were (test hook)', { clear: true });
+  // adding refused beyond a room already held: the shapes, the size, the method, no key, tokens the room refuses
+  const p2 = (await send('agent: invite DiffPerson2', 'POST', R2 + '/invites', { owner: true, json: { name: 'DiffPerson2', kind: 'human' } })).json.token;
+  const g2 = (await send('agent: invite DiffGone2', 'POST', R2 + '/invites', { owner: true, json: { name: 'DiffGone2', kind: 'agent' } })).json.token;
+  must('agent: two more invites', !!p2 && !!g2);
+  tokens.DiffPerson2 = p2; tokens.DiffGone2 = g2;
+  await send('agent: revoke DiffGone2', 'DELETE', R2 + '/invites/' + g2, { owner: true });
+  for (const [what, body] of [['a person\'s invite', { rooms: [{ room: room2, token: p2 }] }], ['a revoked token', { rooms: [{ room: room2, token: g2 }] }], ['a token the room never had', { rooms: [{ room: room2, token: 'not-one-of-this-rooms-xx' }] }], ['no such room', { rooms: [{ room: 'difftest-none-' + suf, token: k3 }] }], ['no rooms', { rooms: [] }], ['a bad room name', { rooms: [{ room: 'Not A Room', token: 'x' }] }], ['no token', { rooms: [{ room: room2 }] }], ['a room twice', { rooms: [{ room: room2, token: k3 }, { room: room2, token: k3 }] }]]) {
+    await send('agent POST /api/agent/rooms, ' + what, 'POST', '/api/agent/rooms', { headers: kh, json: body });
+  }
+  await send('agent POST /api/agent/rooms, not JSON', 'POST', '/api/agent/rooms', { body: '{nope', headers: Object.assign({ 'Content-Type': 'application/json' }, kh) });
+  await send('agent POST /api/agent/rooms, too large', 'POST', '/api/agent/rooms', { body: '{"rooms":"' + 'x'.repeat(LIM.SMALL_BODY_MAX) + '"}', headers: Object.assign({ 'Content-Type': 'application/json' }, kh) });
+  await send('agent GET /api/agent/rooms', 'GET', '/api/agent/rooms', { headers: kh });
+  await send('agent POST /api/agent/rooms, no key', 'POST', '/api/agent/rooms', { json: { rooms: [{ room: room2, token: k3 }] } });
+  for (const [what, args] of [['no token', { room: room2 }], ['a person\'s invite', { room: room2, token: p2 }], ['a revoked token', { room: room2, token: g2 }], ['a bad room name', { room: 'Not A Room', token: k3 }]]) {
+    await send('agent mcp tools/call add_room, ' + what, 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'add_room', arguments: args }) });
+  }
+  // a room that refuses the key's invite: marked, listed, glanced at, taken off
+  must('agent: room 2 on the key again', (await send('agent POST /api/agent/rooms, room 2 again', 'POST', '/api/agent/rooms', { headers: kh, json: { rooms: [{ room: room2, token: k3 }] } })).status === 201);
+  await send('agent: revoke DiffKeyed2', 'DELETE', R2 + '/invites/' + k3, { owner: true });
+  await send('agent mcp tools/call whoami, a refused room', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'whoami', arguments: { room: room2 } }) });
+  await hook('agent: whats_waiting\'s gap lowered (test hook)', { glance_gap_ms: 1 });
+  await send('agent mcp tools/call list_rooms, a refused room', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'list_rooms', arguments: {} }) });
+  await send('agent mcp tools/call whats_waiting, a refused room', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'whats_waiting', arguments: {} }) });
+  await send('agent GET /api/agent, a refused room', 'GET', '/api/agent', { headers: kh });
+  await send('agent mcp tools/call get_start_page, a refused room', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'get_start_page', arguments: { room: room2 } }) });
+  await send('agent POST /api/agent/rooms/remove, a refused room', 'POST', '/api/agent/rooms/remove', { headers: kh, json: { room: room2 } });
+  await hook('agent: limits as they were (test hook)', { clear: true });
+  // leave_room through the key: the seat leaves, and the key marks the room left (it stays on the key for the disconnect)
+  await send('agent mcp tools/call leave_room, wrong confirm', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'leave_room', arguments: { room, confirm: 'not-this-room' } }) });
+  await send('agent mcp tools/call leave_room', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'leave_room', arguments: { room, confirm: room } }) });
+  await send('agent mcp tools/call list_rooms, after the leave', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'list_rooms', arguments: {} }) });
+  await send('agent mcp tools/call whoami, after the leave', 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name: 'whoami', arguments: { room } }) });
   await send('new POST /api/agents/invite', 'POST', '/api/agents/invite', { json: { name: 'DiffNew', rooms: [{ room, inviter_token: per }], check: true }, headers: net });
   await send('new POST /api/agent/rooms/invite', 'POST', '/api/agent/rooms/invite', { headers: kh, json: { name: 'DiffNew', rooms: [{ room: room2, inviter_token: per }], check: true } });
+  // the disconnect with a room the key holds that refused its invite (the agent left it)
   must('agent: disconnected', (await send('agent DELETE /api/agent', 'DELETE', '/api/agent', { headers: kh })).status === 200);
   await send('agent GET /api/agent, disconnected', 'GET', '/api/agent', { headers: kh });
+  await send('agent DELETE /api/agent, disconnected', 'DELETE', '/api/agent', { headers: kh });
+  must('agent: the second key disconnected', (await send('agent DELETE /api/agent, the second key', 'DELETE', '/api/agent', { headers: { Authorization: 'Bearer ' + tokens.KEY2 } })).status === 200);
   await send('agent: delete invites 2', 'DELETE', R2 + '/invites', { owner: true });
   await send('agent: delete room 2', 'DELETE', R2 + '?confirm=' + room2, { owner: true });
   // the site's own pages
@@ -279,7 +351,7 @@ function masked(text, tokens) {
 (async () => {
   // the limits the expected edits quote, from limits.ts (the unit tests' module hooks load it)
   register('../unit/txt-hooks.mjs', pathToFileURL(__filename));
-  const LIM = await import('../../worker/limits.ts');
+  LIM = await import('../../worker/limits.ts');
   const mine = require('./server.js');
   const theirs = require(path.resolve(OTHER, 'tests', 'api', 'server.js'));
   // one fake Muse for both bridges (a gadget's account is its own per server)
@@ -299,7 +371,7 @@ function masked(text, tokens) {
     }
     // the served origin, to fill the expected edits
     const origin = String((JSON.parse(rb.out.find((x) => x.label === '/api/changes').text).url || '')).replace(/\/api\/changes$/, '');
-    const fill = (s) => s.replace(/\{\{origin\}\}/g, origin).replace(/\{\{MUSE_BATCH_MAX\}\}/g, String(LIM.MUSE_BATCH_MAX));
+    const fill = (s) => s.replace(/\{\{origin\}\}/g, origin).replace(/\{\{MUSE_BATCH_MAX\}\}/g, String(LIM.MUSE_BATCH_MAX)).replace(/\{\{room2\}\}/g, 'difftest2-' + suf);
     if (ra.out.length !== rb.out.length) { console.log('FAIL the two runs sent different numbers of requests: ' + ra.out.length + ', ' + rb.out.length); process.exit(1); }
     for (let i = 0; i < ra.out.length; i++) {
       const x = ra.out[i], y = rb.out[i];
@@ -360,6 +432,13 @@ function masked(text, tokens) {
       compared++;
       // the headers too: every one but those that differ per run, and on the app shell its policy's one new directive
       const hx = Object.assign({}, x.headers), hy = Object.assign({}, y.headers);
+      if (MOVING_RETRY.has(y.label) && /^\d+$/.test(hx['retry-after'] || '') && /^\d+$/.test(hy['retry-after'] || '')) {
+        const was = hx['retry-after'] + tx + hy['retry-after'] + ty;
+        hx['retry-after'] = hy['retry-after'] = '<RETRY>';
+        tx = tx.replace(/("retry_after":)\d+/, '$1<RETRY>');
+        ty = ty.replace(/("retry_after":)\d+/, '$1<RETRY>');
+        if (was !== hx['retry-after'] + tx + hy['retry-after'] + ty && x.headers['retry-after'] + x.text !== y.headers['retry-after'] + y.text) leftOut('the retry time of a counter\'s window (seconds to its end, which moves with the run)', y.label);
+      }
       if (CSP_CHANGED.has(y.label)) {
         if (hy['content-security-policy'] !== (hx['content-security-policy'] || '') + CSP_ADDED) { diffs++; console.log('FAIL ' + y.label + ': Content-Security-Policy ' + JSON.stringify(hx['content-security-policy']) + ' / ' + JSON.stringify(hy['content-security-policy'])); }
         else cspChanged++;

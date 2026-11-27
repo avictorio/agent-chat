@@ -406,6 +406,32 @@ async function worker() {
     must((await text(page, '#keyErr')) === 'Nothing was kept.', await text(page, '#keyErr'));
     must((await row(page, 'keyRooms', 'family-trip')).includes(W.activeCapError('family-trip').replace('Room "family-trip": ', '')), 'on its room');
   }, '#keyRooms');
+  // a room the check called new is made new or not at all: the call says reuse none there, so a seat of that
+  // name that appeared since the check is the room's refusal, shown on it, never a silent reuse
+  await state('seat-appeared', { rooms: MINE, api: { invite: async (body) => (body.check ? { body: newSeats(body) } : { status: 409, body: { error: W.nameTakenError('book-club', 'Scout'), code: 'name_taken', room: 'book-club' } }) } }, async (page, S) => {
+    await page.fill('#keyName', 'Scout');
+    await tick(page, 'keyRooms', 'family-trip');
+    await tick(page, 'keyRooms', 'book-club');
+    await page.click('#keyGo');
+    await page.waitForSelector('#keyErr', { timeout: 5000 });
+    const calls = S.calls.filter((c) => c.p === '/api/agents/invite');
+    must(calls.length === 2 && calls[0].body.check === true && !('check' in calls[1].body), 'the check, then the call');
+    must(calls[0].body.rooms.every((e) => !('reuse' in e)), 'the check asks as the person chose: ' + JSON.stringify(calls[0].body.rooms));
+    must(calls[1].body.rooms.length === 2 && calls[1].body.rooms.every((e) => e.reuse === 'none'), 'every room the check called new is sent reuse none: ' + JSON.stringify(calls[1].body.rooms));
+    must((await text(page, '#keyErr')) === 'Nothing was kept.', await text(page, '#keyErr'));
+    must((await row(page, 'keyRooms', 'book-club')).includes('Scout is already taken here. Pick another name.'), 'the refusal on its room: ' + (await row(page, 'keyRooms', 'book-club')));
+    must(!(await page.$('#keyMade')), 'no key');
+  }, '#keyRooms');
+  await scenario('keys-add-seat-appeared', { rooms: { ...MINE, 'trip-two': 'tok_two' }, api: { ...OPEN, looks: { tok_two: PERSON() }, add: async (body) => (body.check ? { body: newSeats(body) } : { status: 409, body: { error: W.nameTakenError('trip-two', 'Scout'), code: 'name_taken', room: 'trip-two' } }) } }, async (page, S) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyAddRooms', { timeout: 5000 });
+    await tick(page, 'keyAddRooms', 'trip-two');
+    await page.click('#keyAdd');
+    await until(() => S.calls.filter((c) => c.p === '/api/agent/rooms/invite').length === 2);
+    await page.waitForFunction(() => /already taken here/.test(document.getElementById('keyAddRooms')?.textContent || ''), null, { timeout: 5000 });
+    const adds = S.calls.filter((c) => c.p === '/api/agent/rooms/invite');
+    must(adds[1].body.rooms.length === 1 && adds[1].body.rooms[0].reuse === 'none', 'the add sends reuse none too: ' + JSON.stringify(adds[1].body.rooms));
+  });
   // the room's answer to an invite was lost, and the look after it could not tell: never "nothing was kept"
   await state('maybe-made', { rooms: MINE, api: { invite: async (body) => (body.check ? { body: newSeats(body) } : { status: 500, body: { error: 'Room "family-trip" could not be reached, so no key was made. Try again.', room: 'family-trip', maybe_unused: ['family-trip'], note: W.unusedNote([], ['family-trip']) } }) } }, async (page) => {
     await page.fill('#keyName', 'Scout');
@@ -525,6 +551,30 @@ async function worker() {
     must(t.includes("Take old-room off this key? The key forgets this room, which no longer takes the key's invite (revoked, or the agent left). Nothing else changes there."), t);
     must(!/stays a member/.test(t), 'it does not say the agent stays a member');
   });
+  // the same for a refused row whose Muse wake the key recorded: the dialog says that wake is turned off, and nothing contradicts it
+  const INFO_REFUSED_WAKE = { ...INFO, rooms: INFO.rooms.map((r) => (r.room === 'old-room' ? { ...r, muse_wake: true } : r)) };
+  await state('takeoff-refused-wake', { rooms: MINE, api: { info: async () => ({ body: INFO_REFUSED_WAKE }) } }, async (page) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    await page.click('#keyHeldRooms li[data-room="old-room"] button');
+    await page.waitForSelector('#keyOffDlg[open]', { timeout: 3000 });
+    const t = await text(page, '#keyOffDlg');
+    must(t.includes("Take old-room off this key? The key forgets this room, which no longer takes the key's invite (revoked, or the agent left), and the Muse wake set up with this key there is turned off."), t);
+    must(!/Nothing else changes/.test(t) && !/stays a member/.test(t), 'no "nothing else changes", no seat');
+    must((t.match(/Muse wake/g) || []).length === 1, 'said once');
+    must((await row(page, 'keyHeldRooms', 'old-room')).includes('Muse wake set up with this key'), 'the row says the key records one there: ' + (await row(page, 'keyHeldRooms', 'old-room')));
+  });
+  // a take-off while a registration through the key may still reach the room: the room's sentence, the dialog open
+  await scenario('keys-takeoff-still-setting', { rooms: MINE, api: { ...OPEN, remove: async () => ({ status: 503, headers: { 'Retry-After': '12' }, body: { error: W.wakeStillSetting('family-trip', 12), code: 'try_again', room: 'family-trip' } }) } }, async (page) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    await page.click('#keyHeldRooms li[data-room="family-trip"] button');
+    await page.waitForSelector('#keyOffDlg[open]', { timeout: 3000 });
+    await page.click('#keyOffYes');
+    await page.waitForSelector('#keyOffDlg [role=alert]', { timeout: 5000 });
+    must((await text(page, '#keyOffDlg [role=alert]')) === 'family-trip may still be reached by a Muse registration through this key, so it is still on this key as it was. Try again in 12 seconds.', await text(page, '#keyOffDlg [role=alert]'));
+    must(await page.$eval('#keyOffDlg', (d) => d.open) && !!(await page.$('#keyHeldRooms li[data-room="family-trip"]')), 'the dialog stays open, the room on the list');
+  });
   await scenario('keys-takeoff-done', { rooms: MINE, api: { info: async (S) => ({ body: S.removed ? { ...INFO, rooms: INFO.rooms.slice(1) } : INFO }), remove: async (body, S) => { S.removed = true; return { body: { room: body.room, removed: true, muse_wake_removed: true, note: 'x' } }; } } }, async (page, S) => {
     await paste(page, KEY);
     await page.waitForSelector('#keyOpened', { timeout: 5000 });
@@ -551,10 +601,51 @@ async function worker() {
     await page.click('#keyDropYes');
     await page.waitForSelector('#keyDropped', { timeout: 5000 });
     // old-room no longer took the key's invite: it is not named as a room the agent is a member of
-    must((await text(page, '#keyDropped')) === 'Disconnected. The agent is still a member of: family-trip, book-club. These rooms did not confirm that the Muse wakes this key set up there are off: family-trip. Disconnect on the Muse gadget stops every wake at once.', await text(page, '#keyDropped'));
-    must(!(await page.$('#keyOpened')) && await page.$eval('#keyPaste', (i) => i.value) === '', 'the key is cleared');
+    must((await text(page, '#keyDropped')) === 'Disconnected. The agent is still a member of: family-trip, book-club. These rooms did not confirm that the Muse wakes this key set up there are off: family-trip. Try again turns them off once they answer; Disconnect on the Muse gadget stops every wake at once.', await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropAgain')) === 'Try again' && await page.$eval('#keyDropAgain', (b) => !b.disabled), 'Try again, beside the result');
+    must(!(await page.$('#keyOpened')) && await page.$eval('#keyPaste', (i) => i.value) === '', 'the key is cleared from the view');
     await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'keyPaste', null, { timeout: 3000 });
   }, '#keyHeld');
+  // Try again: the same DELETE, with the same key, for the wakes the first one left
+  const DROP_ALL = { deleted: true, rooms: ['family-trip'], muse_wakes_removed: ['family-trip'], muse_wakes_left: [], note: W.dropNote([]) };
+  await state('disconnect-again', { rooms: MINE, api: { ...OPEN, drop: async (S) => { S.drops = (S.drops || 0) + 1; return { body: S.drops === 1 ? DROP_LEFT : DROP_ALL }; } } }, async (page, S) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    await page.click('#keyDrop');
+    await page.waitForSelector('#keyDropDlg[open]', { timeout: 3000 });
+    await page.click('#keyDropYes');
+    await page.waitForSelector('#keyDropAgain', { timeout: 5000 });
+    await page.click('#keyDropAgain');
+    await page.waitForFunction(() => !document.getElementById('keyDropAgain'), null, { timeout: 5000 });
+    must((await text(page, '#keyDropped')) === 'Disconnected. The agent is still a member of: family-trip, book-club. The Muse wakes this key set up are off.', await text(page, '#keyDropped'));
+    const drops = S.calls.filter((c) => c.p === '/api/agent' && c.m === 'DELETE');
+    must(drops.length === 2 && drops.every((c) => c.auth === 'Bearer ' + KEY), 'the same DELETE, with the same key: ' + drops.length);
+    must(!(await page.$('#keyOpened')), 'the key is still not shown');
+    await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'keyPaste', null, { timeout: 3000 });
+  }, '#keyHeld');
+  await scenario('keys-disconnect-again-left', { rooms: MINE, api: { ...OPEN, drop: async (S) => {
+    S.drops = (S.drops || 0) + 1;
+    if (S.drops === 1) return { body: { ...DROP_LEFT, muse_wakes_left: ['family-trip', 'book-club'], muse_wakes_removed: [] } };
+    if (S.drops === 2) return { body: { deleted: true, rooms: ['family-trip', 'book-club'], muse_wakes_removed: ['book-club'], muse_wakes_left: ['family-trip'], note: W.dropNote(['family-trip']) } };
+    return { status: 403, body: { error: W.AGENT_KEY_INVALID, code: 'agent_key_invalid' } };
+  } } }, async (page, S) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyOpened', { timeout: 5000 });
+    await page.click('#keyDrop');
+    await page.waitForSelector('#keyDropDlg[open]', { timeout: 3000 });
+    await page.click('#keyDropYes');
+    await page.waitForSelector('#keyDropAgain', { timeout: 5000 });
+    await page.click('#keyDropAgain');
+    await until(() => S.drops === 2);
+    await page.waitForFunction(() => /are off: family-trip\. Try again/.test(document.getElementById('keyDropped')?.textContent || ''), null, { timeout: 5000 });
+    must((await text(page, '#keyDropped')).endsWith('These rooms did not confirm that the Muse wakes this key set up there are off: family-trip. Try again turns them off once they answer; Disconnect on the Muse gadget stops every wake at once.'), await text(page, '#keyDropped'));
+    must(!!(await page.$('#keyDropAgain')), 'still offered while a wake is left');
+    // a record gone meanwhile (another disconnect finished it): said, and nothing left to try
+    await page.click('#keyDropAgain');
+    await page.waitForSelector('#keyHeldErr', { timeout: 5000 });
+    must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
+    must(!(await page.$('#keyDropAgain')), 'no Try again once the key is gone');
+  });
   await scenario('keys-disconnect-unreadable', { rooms: MINE, api: { ...OPEN, drop: async () => ({ body: { deleted: true, rooms: [], muse_wakes_removed: [], muse_wakes_left: null, note: W.dropNote(null) } }) } }, async (page) => {
     await paste(page, KEY);
     await page.waitForSelector('#keyOpened', { timeout: 5000 });

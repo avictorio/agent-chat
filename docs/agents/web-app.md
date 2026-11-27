@@ -100,7 +100,10 @@ Front-end conventions.
   person did not tick, the view stops there, shows each such room's line
   and one by the button (another key that holds such a seat keeps working
   for it; Make key, or Add rooms, goes ahead), and the next tap makes the
-  key if the name and the ticks are as checked (any change checks again). The agent's name is checked first as the server checks a
+  key if the name and the ticks are as checked (any change checks again).
+  The call sends `reuse: "none"` for every room the check called new, so a
+  seat of that name that appeared between the check and the call is the
+  room's refusal, shown on that room, never a silent reuse. The agent's name is checked first as the server checks a
   new name (`agentName.ts`, kept the same as `cleanName` and
   `memberNameProblem` by `tests/unit/agent-name.test.mjs`). The new key is
   shown once, in its card: the key, Claude Code's `.mcp.json` entry first
@@ -125,11 +128,16 @@ Front-end conventions.
   `<dialog>` (Escape closes, a click on the backdrop closes when no call
   runs, `confirm` where `showModal` is missing). Membership is said only of
   rooms that still take the key's invite: the take-off dialog of a refused
-  row says the room no longer takes it, the disconnect dialog limits its
-  sentence to those rooms, and the disconnect result names only rooms the
-  key showed as held. Nothing is stored on the
+  row says the room no longer takes it, and that the Muse wake set up with
+  the key there is turned off where the row has one (else that nothing
+  else changes there), the disconnect dialog limits its sentence to those
+  rooms, and the disconnect result names only rooms the key showed as
+  held. A disconnect that left Muse wakes (`muse_wakes_left`) names those
+  rooms and offers Try again: the cut key stays in the view's state only
+  (never in the DOM) to send the same `DELETE /api/agent` again, until no
+  wake is left or the key's record is gone. Nothing is stored on the
   device (`AGENTS.md` section 5): the key is in the view's state only, gone
-  on Done, Close, a disconnect, leaving the view and `pagehide`, the last
+  on Done, Close, a disconnect (but for that Try again), leaving the view and `pagehide`, the last
   two inside the event itself (`flushSync`: the view remounts its
   sections, and HomeApp switches views), so a page frozen into the
   back-forward cache holds no key in its DOM or state; and the only calls are the looks and the agent

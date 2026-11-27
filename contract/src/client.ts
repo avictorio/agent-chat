@@ -150,7 +150,8 @@ export class AgentKeyClient {
     return this.call<AgentKeyRoomRemoved>("POST", "/api/agent/rooms/remove", { room });
   }
 
-  /** DELETE /api/agent: the key disconnected everywhere. */
+  /** DELETE /api/agent: the key disconnected everywhere; again, with the
+   *  same key, for the Muse wakes a first one left. */
   disconnect(): Promise<AgentKeyDropped> {
     return this.call<AgentKeyDropped>("DELETE", "/api/agent");
   }

@@ -384,7 +384,9 @@ function useSeatRun<T>(o: {
     o.setForm({ ...o.form, check, failed: null });
     setSay(o.making);
     try {
-      const r = (await o.call(got.name, got.entries, false)) as T;
+      // a room the check called new is made new or not at all: a seat of that name that appeared since is a refusal, never a silent reuse
+      const sent = got.entries.map((e) => (check.rooms.some((x) => x.room === e.room && x.seat === "new") ? { ...e, reuse: "none" as const } : e));
+      const r = (await o.call(got.name, sent, false)) as T;
       setBusy(false);
       setSay("");
       o.done(r);
@@ -606,6 +608,9 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
   const [err, setErr] = useState("");
   const [say, setSay] = useState("");
   const [dropped, setDropped] = useState<AgentKeyDropped | null>(null);
+  // a disconnect that left Muse wakes: the cut key, kept in this view's memory only, so DELETE can be sent again
+  const [again, setAgain] = useState<string | null>(null);
+  const [retried, setRetried] = useState(false);
   const [off, setOff] = useState<AgentKeyRoom | null>(null);
   const [dlgErr, setDlgErr] = useState("");
   const [form, setForm] = useState<SeatForm>(() => emptyForm());
@@ -637,6 +642,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
     setErr("");
     setSay("");
     setDropped(null);
+    setAgain(null);
     const k = paste.trim();
     if (!k) return;
     if (k.charAt(0) !== ".") return setErr(NOT_KEY);
@@ -685,11 +691,39 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
       // the agent is a member only where a room still took the key's invite, as the key last showed it
       const took = new Set(held.info.rooms.filter((r) => r.state === "held").map((r) => r.room));
       setDropped({ ...d, rooms: d.rooms.filter((r) => took.has(r)) });
+      setAgain(d.muse_wakes_left && d.muse_wakes_left.length ? held.key : null);
+      setRetried(false);
       clear();
     } catch (e) {
       const t = keyRefusal(e);
       if (dropRef.current && dropRef.current.open) setDlgErr(t);
       else setErr(t);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // the same DELETE again, for the wakes a disconnect left: the cut key does nothing else
+  const dropAgain = async () => {
+    if (!again || !dropped) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const d = await new AgentKeyClient(again).disconnect();
+      setDropped({ ...dropped, muse_wakes_removed: dropped.muse_wakes_removed.concat(d.muse_wakes_removed), muse_wakes_left: d.muse_wakes_left });
+      setRetried(true);
+      // nothing left to try: focus goes back to the Open field, as the button goes
+      if (!d.muse_wakes_left || !d.muse_wakes_left.length) {
+        setAgain(null);
+        setRefocus((n) => n + 1);
+      }
+    } catch (e) {
+      // a key whose record is gone has nothing left to try (another disconnect finished it)
+      const b = bodyOf(e);
+      if (b && b.code === "agent_key_invalid") {
+        setAgain(null);
+        setRefocus((n) => n + 1);
+      }
+      setErr(keyRefusal(e));
     } finally {
       setBusy(false);
     }
@@ -750,13 +784,20 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
             {dropped.muse_wakes_left === null
               ? " This key's record could not be read, so the Muse wakes it set up could not be turned off: Disconnect on the Muse gadget stops every wake at once."
               : dropped.muse_wakes_left.length
-                ? " These rooms did not confirm that the Muse wakes this key set up there are off: " + dropped.muse_wakes_left.join(", ") + ". Disconnect on the Muse gadget stops every wake at once."
-                : ""}
+                ? " These rooms did not confirm that the Muse wakes this key set up there are off: " + dropped.muse_wakes_left.join(", ") + ". Try again turns them off once they answer; Disconnect on the Muse gadget stops every wake at once."
+                : retried
+                  ? " The Muse wakes this key set up are off."
+                  : ""}
           </span>
         ) : (
           add.say || say
         )}
       </p>
+      {dropped && again ? (
+        <LinkButton type="button" id="keyDropAgain" disabled={busy} onClick={() => void dropAgain()}>
+          Try again
+        </LinkButton>
+      ) : null}
       {held ? (
         <div className="key-open" id="keyOpened">
           <p className="hint" id="keyMeta">
@@ -779,9 +820,17 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
                         ) : null}
                       </>
                     ) : (
-                      <span className="hint bad">
-                        This room no longer takes the key's invite ({REFUSED_WHY[r.code || ""] || r.code}){r.at ? " since " + shortDate(r.at) : ""}
-                      </span>
+                      <>
+                        <span className="hint bad">
+                          This room no longer takes the key's invite ({REFUSED_WHY[r.code || ""] || r.code}){r.at ? " since " + shortDate(r.at) : ""}
+                        </span>
+                        {r.muse_wake ? (
+                          <>
+                            {" "}
+                            <Pill tone="muted">Muse wake set up with this key</Pill>
+                          </>
+                        ) : null}
+                      </>
                     )}
                   </div>
                 </div>
@@ -869,7 +918,8 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
         <h3 id="keyOffTitle">Take {off ? off.room : ""} off this key?</h3>
         {off && off.state !== "held" ? (
           <p>
-            The key forgets this room, which no longer takes the key's invite ({REFUSED_WHY[off.code || ""] || off.code}). Nothing else changes there.
+            The key forgets this room, which no longer takes the key's invite ({REFUSED_WHY[off.code || ""] || off.code})
+            {off.muse_wake ? ", and the Muse wake set up with this key there is turned off." : ". Nothing else changes there."}
           </p>
         ) : (
           <p>
@@ -877,7 +927,7 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
             key: to take it out of {off ? off.room : ""}, have it leave first (leave_room), or add {off ? off.room : ""} back later.
           </p>
         )}
-        {off && off.muse_wake ? <p>The Muse wake set up with this key in {off.room} is turned off.</p> : null}
+        {off && off.state === "held" && off.muse_wake ? <p>The Muse wake set up with this key in {off.room} is turned off.</p> : null}
         {dlgErr ? (
           <p className="forget-err" role="alert">
             {dlgErr}

@@ -682,14 +682,15 @@ docs.txt section that owns its routes, caps and formats.
   - **The identity** is a Room object under `__agent-<id>`, a name
     `ROOM_RE` never gives a room (as `__create-quota` is). Table `ak`
     (one row: when made, the list's version, the sealed list) and `aks`
-    (the key's slot: its verifier and the data key wrapped under it); the
-    columns `ak.client` and `aks.expires`, `used`, `bind` and `next` are
-    unused (NULL): an agent key neither expires nor is used once. The list (per room: its name, the token, the member's name there,
+    (the key's slot: its kind, `key`, or `cut` once a disconnect has cut
+    it, its verifier and the data key wrapped under it); the columns
+    `ak.client` and `aks.expires`, `used`, `bind` and `next` are unused
+    (NULL): an agent key neither expires nor is used once. The list (per room: its name, the token, the member's name there,
     when added, and `held` or `refused` with the room's code) is sealed
     with AES-256-GCM under the data key (and, for a room where the key set
-    up a Muse wake, that wake's record, `hooks`: each link id, when it was
-    recorded and whether its call is done, which no answer carries:
-    `muse_wake` says the key records one), its additional data the
+    up a Muse wake, that wake's record, `hooks`: each link id and its
+    deadline, which no answer carries: `muse_wake` says the key records
+    one), its additional data the
     identity's id and the list's version, padded with spaces to
     `AGENT_RING_PAD` bytes. Every crypto step runs in the Worker; the
     object compares verifiers and swaps the list on its version
@@ -762,9 +763,11 @@ docs.txt section that owns its routes, caps and formats.
     `room` to every `mcp_call` there. The start page through a key opens
     with one line saying so (`startPage`'s `viaKey`).
   - **Disconnecting** (`DELETE /api/agent`) ends every call with the key,
-    at once (`agentDrop` deletes the slot and hands back the list in one
-    synchronous step, then the rest of the storage), and then turns off
-    the Muse wakes the key set up (Muse through a key). It ends no room's
+    at once (`agentCut` marks the slot cut and hands back the list in one
+    synchronous step: a cut key opens and swaps nothing), and then turns
+    off the Muse wakes the key set up, deleting the record once every one
+    is off and keeping only the rooms whose wakes did not settle for the
+    same DELETE again (Muse through a key). It ends no room's
     own invite (whoever holds a seat's token can still use it), and links
     a room tool already handed out through the key run out on their own
     clocks: upload tickets and resumable upload sessions (which also end
@@ -834,42 +837,68 @@ docs.txt section that owns its routes, caps and formats.
     refuse; a room never joined is skipped (`not_joined`: a wake would join
     it, and `muse_register` joins nothing); the claim once (`museClaim`,
     `routes/muse.ts`, which the REST route uses too). **The record**
-    (`AgentEntry.hooks`, each `{link, at, done?}`): each accepted room's
-    link is written on its entry, pending, before the room is asked to set
-    it (`museSetHookLook`, `AGENT_GLANCE_PARALLEL` rooms at a time, each no
-    later than `AGENT_WAKE_SET_MS` after its record), and a link comes off
-    only once a room has answered that no hook of that link is there: this
-    call's own set took (its link done; the links it replaced whose calls
-    are over come off), the set was refused (this call's link comes off),
-    `museDropLook` removed it or found none, or the room has no row for the
-    token or is gone. A throw, a Worker that stops midway, or a call that
-    loses a race to another takes nothing off: a pending link belongs to
-    its call until `AGENT_WAKE_FRESH_MS` after its record (by then its call
-    can no longer set it), and no other call takes it off before. An entry
-    records at most `AGENT_WAKE_LINKS_MAX` links: at the bound,
-    `muse_register` first settles the links whose calls are over against
-    the room's hook (`museHookLook`) and skips the room (`try_again`,
-    the code not spent on it) when that leaves no room for one more. Two
-    registrations at once both answer truly (each set happened; the later
-    one is on, and recorded). So every hook set through a key goes with its
-    disconnect or with taking its room off, whichever comes first, in an
-    older room whose two active invites' names fold alike too (there a
-    revoke or a leave keeps the name's hook, and `museDropLook` answers for
-    the gone seat). `DELETE /api/agent` turns off every recorded link
-    (`AGENT_GLANCE_PARALLEL` rooms at a time, a throw asked once more after
-    `AGENT_WAKE_RETRY_MS`, a link still pending asked again once its call
-    can no longer set it) and answers `muse_wakes_removed` and
-    `muse_wakes_left` (a room that threw twice, or refused in any way but
-    "no such seat" or "room gone", as one still on older code would for a
-    gone seat); its note says the wakes are off only when none is left, and
-    otherwise names the rooms and what turns them off (that room's own
-    `DELETE .../muse-hook` while the seat is active, or the gadget's
-    Disconnect). A list that does not open is still disconnected
-    (`muse_wakes_left: null`). `remove_room` and `POST
-    /api/agent/rooms/remove` turn every recorded link off first and take
-    the room off only once the room has answered for each; a room that did
-    not, or one where a registration through the key still runs, stays on
-    the key with its wake as it was (`try_again`). A wake counts as the
+    (`AgentEntry.hooks`, each `{link, deadline}`): each accepted room's
+    link is written on its entry with its deadline (`AGENT_WAKE_SET_MS`
+    after the record; a link recorded already keeps the later deadline)
+    before the room is asked to set it (`museSetHookLook`,
+    `AGENT_GLANCE_PARALLEL` rooms at a time), and the set carries the
+    deadline: the room refuses, by its own clock, a set that reaches it
+    after it (`too_late`), setting nothing. Every answer of the room's
+    three hook methods carries the room's clock (`now`, `museNow`). A link
+    comes off the record on a room's answer only, by one rule: the room
+    refused that link's own set, or the answer shows no hook of that link
+    there (another link's hook, a webhook, no hook, no row for the token,
+    the room gone) and its room clock is past the link's deadline, so no
+    set of it can still arrive; a set of another link that the room took
+    is such an answer for every link whose deadline its clock has passed.
+    An answer with no clock settles nothing. Nothing else takes a link off:
+    not a replaced or removed entry (its links are settled first, or the
+    call answers `try_again` and changes nothing), not a rollback (a failed
+    add puts the entry it replaced back, links included), not a throw, a
+    Worker that stops midway, a lost race, or the Worker's own clock, which
+    only says when to ask again. Every write of the list goes through one
+    check (`keepsWakes`): a recorded link missing after it must be named
+    with the room's answer that settled it, or the write throws and nothing
+    is written. A call whose own set the room took puts its link back if it
+    went meanwhile. An entry records at most `AGENT_WAKE_LINKS_MAX` links:
+    at the bound, `muse_register` first settles them by that rule against
+    the room's hook and clock (`museHookLook`) and skips the room
+    (`try_again`, the code not spent on it) when that leaves no room for
+    one more. Two registrations at once both answer truly (each set
+    happened; the wake on is a recorded one). So a wake the key set up is
+    on in a room only while its link is on the record, in an older room
+    whose two active invites' names fold alike too (there a revoke or a
+    leave keeps the name's hook, and `museDropLook` and `museHookLook`
+    answer for the gone seat). `DELETE /api/agent` is two steps. The cut
+    (`agentCut`): the key's slot is marked cut, and from then on the key
+    opens nothing (every route and `/api/mcp` refuse it as they refuse a
+    key that does not exist) but this same DELETE. Then every recorded
+    link is turned off (`AGENT_GLANCE_PARALLEL` rooms at a time, a throw
+    asked once more after `AGENT_WAKE_RETRY_MS`, a link whose deadline is
+    still to come by the room's clock asked again once it has passed,
+    waiting at most `AGENT_WAKE_SET_MS`). All settled: the record is
+    deleted (`agentDrop`). Some not: the cut record is rewritten to hold
+    only those rooms' entries with their unsettled links (`agentRemain`),
+    and `DELETE /api/agent` again with the same key tries them again. The
+    answer, the second one's too, says `muse_wakes_removed` and
+    `muse_wakes_left` (a room that threw twice, sent no clock, kept a
+    deadline still to come, or refused in any way but "no such seat" or
+    "room gone", as one still on older code would for a gone seat); its
+    note says the wakes are off only when none is left, and otherwise names
+    the rooms and what turns them off (the same DELETE again, that room's
+    own `DELETE .../muse-hook` while the seat is active, or the gadget's
+    Disconnect). A list that does not open is still disconnected, its
+    record deleted (`muse_wakes_left: null`). A registration whose key is
+    cut meanwhile turns off what it set. `remove_room` and `POST
+    /api/agent/rooms/remove`, and an add that puts a refused room back with
+    another invite (`add_room`, `POST /api/agent/rooms`, `POST
+    /api/agent/rooms/invite`), first ask the room's clock (`museHookLook`):
+    while a recorded link's deadline is still to come they answer
+    `try_again` (503 with `Retry-After`; the tool error over MCP) and turn
+    nothing off; then they turn every recorded link off, and take the room
+    off or replace its entry only once the room has answered for each; a
+    room that did not stays on the key with its wake as it was
+    (`try_again`). A wake counts as the
     key's only while the room's hook is a Muse hook on a recorded link: a
     hook the agent set with the room's own token on another link stays (on
     the same link it cannot be told apart, and goes; docs.txt says so).
@@ -1000,9 +1029,12 @@ docs.txt section that owns its routes, caps and formats.
   registration keeps no token; outside the rooms only an agent key's
   identity does, sealed (Agent keys). Through an agent key
   (`muse_register`, Agent keys) three other methods set, remove and look
-  at the hook: `museSetHookLook(token, link, routing, room)`, which writes
-  the hook as `museSetHook` does but finds the member with `lookupInvite`
-  alone and refuses an invite never opened (409 `not_joined`);
+  at the hook, each answer carrying the room's clock (`now`, from
+  `museNow`): `museSetHookLook(token, link, routing, room, notAfter)`,
+  which writes the hook as `museSetHook` does but finds the member with
+  `lookupInvite` alone, refuses an invite never opened (409 `not_joined`)
+  and refuses a set that reaches the room after its deadline `notAfter`
+  by that clock (409 `too_late`), setting nothing;
   `museDropLook(token, link)`, which removes the hook filed under the
   seat's name only when it is a Muse hook on that link (a webhook, or a
   hook on another link, stays), and answers for every seat the room has a
@@ -1010,8 +1042,8 @@ docs.txt section that owns its routes, caps and formats.
   `invite_invalid`): a revoke drops a name's hook only when no other active
   invite's name folds the same, so in an older room holding "Scout" beside
   "scout" a wake set through the key outlives its seat; and
-  `museHookLook(token)`, which answers the Muse link the hook is on and
-  writes nothing. None opens an invite or marks anyone seen: in the whole Room
+  `museHookLook(token)`, which answers the Muse link the hook filed under
+  the seat's name is on, for the same seats, and writes nothing. None opens an invite or marks anyone seen: in the whole Room
   class `inv.used` and `inv.seen` are written only by `Room.access` (`grep
   -rn "UPDATE inv" worker/room/` lists every write of `inv`: those two,
   the avatar pointers, `kind`, `revoked`, `left_ts` and `posted`), and
@@ -1381,7 +1413,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `mq` | items waiting for a Muse hook (`MqRow`): a number from one room-wide counter (the hook's cursor follows it), the kind, and the frame's data. At most `MUSE_QUEUE_MAX` per hook. Schema step 7. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
-| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`, deleted whole by `DELETE /api/agent` (`deleteAll`) and by a person's creation that fails; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
+| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`. `DELETE /api/agent` first marks the slot's `kind` `cut` (from then on the key opens nothing but that DELETE); once every Muse wake its list records is off it deletes the identity whole (`deleteAll`), and until then the cut record holds only the entries of the rooms whose wakes did not settle, with those links, and goes with the DELETE that settles them (the same key, sent again). A person's creation that fails deletes its identity too; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
 | (object `__agent-quota`, `AGENT_QUOTA_ROOM`) | table `aq`: new agent keys' counters, one row per cap key (`net:<hash>:<hour>`, `all:<day>`, `room:<hash>:<day>`) with its window and count; rows of past windows go when the next creation comes in (`agentReserve`); a check only reads them (`agentPeek`). |
 
 ### KV keys (`REQUESTS` namespace)

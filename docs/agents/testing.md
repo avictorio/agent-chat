@@ -62,11 +62,18 @@ Playwright); `tests/fixtures/` holds the files they share.
   disconnect's and the take-off's wakes against the Muse bridge in the
   same process: `bridge-world.mjs`, and the record of those wakes: a set
   that throws, a Worker that stops between the record and the set, two
-  registrations at once, a second gadget, the bound, an older room whose
-  invites' names fold alike, and the work registered with `waitUntil`
-  before its first write, which `agent-world.mjs` records as
-  `waitedBeforeWrite`; the pending time is lowered there through
-  `TEST_HOOKS` and `AGENT_WAKE_FRESH_MS`), the catalog and its pinned
+  registrations at once, a set the room holds past another's final write
+  (at its deadline and one millisecond after), a look at the deadline and
+  past it, the two clocks seconds apart either way, an answer with no
+  clock, a second gadget, the bound, an older room whose invites' names
+  fold alike and that room put back on the key by each of the three adds,
+  the guard every write of the list goes through (`keepsWakes`), the cut
+  key (refused everywhere as an unknown key, its record after a disconnect
+  that left wakes, a Worker that stops after the cut or between two rooms,
+  the second DELETE), and the work registered with `waitUntil` before its
+  first write, which `agent-world.mjs` records as `waitedBeforeWrite`; a
+  room's clock is set there by replacing that room object's `museNow`,
+  which its three hook methods read, so no variable is needed), the catalog and its pinned
   (version, digest) pairs (`agent-catalog`), the size of
   `whats_waiting` on `AGENT_ROOMS_MAX` full rooms and the sealed list
   with every entry at the wake bound (`agent-glance-size`), a
@@ -78,7 +85,8 @@ Playwright); `tests/fixtures/` holds the files they share.
   answer was lost, a check with no inviter that reads no counter), the
   three hook methods (`agent-hooks`: the member's `inv` row the same
   before and after, a gone seat in a room whose invites' names fold
-  alike) and the Agent keys view's
+  alike, a set's deadline kept by the room's clock and that clock in
+  every answer) and the Agent keys view's
   name check against the server's (`agent-name`).
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
   in the same `npm run test:unit`, with the same hook, and need no
@@ -182,11 +190,13 @@ Playwright); `tests/fixtures/` holds the files they share.
   in each credential state and one `tools/call` per tool, the start page,
   the looks, members, messages, a Muse registration with room tokens
   against one fake Muse both bridges call, the agent key's routes and
-  address, the page shell, `/api/changes`, `/api`, `/llms.txt`) and
-  compares status, type, body and the headers a page or an agent reads,
-  with what differs per run masked (and this checkout's listed changes
-  taken out: the doc edits, the changed sentences, the new notices, each
-  named in a note where the two copies differ there). It first checks,
+  address with their refusals, a room that refused the key's invite, a
+  leave through the key and the disconnect after it, the page shell,
+  `/api/changes`, `/api`, `/llms.txt`) and compares status, type, body
+  and the headers a page or an agent reads, with what differs per run
+  masked (a counter window's retry time too) and this checkout's listed
+  changes taken out (the doc edits, the changed sentences, the new
+  notices), each named in a note where the two copies differ there. It first checks,
   on both sides, that each set-up call did what the list assumes (a room
   made, invites made, a key made, a gadget linked), so two identical
   refusals cannot pass. Run it before a push that must leave existing

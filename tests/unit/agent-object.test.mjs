@@ -74,31 +74,43 @@ test("a swap moves the version on; a stale one is refused, and a swap with a wro
   assert.equal(h.room.agentOpen("key", V).ver, 2);
 });
 
-test("agentDrop deletes the whole identity and hands back the list as it was: no table left, the key opens nothing", async () => {
+test("agentCut marks the key cut and hands back the list as it stands; a cut key opens and swaps nothing, and only its disconnect writes what is left or deletes it", async () => {
   const h = makeRoom({ bare: true });
   h.room.agentMake(V, "wrapped-dk", "ring-1");
   h.room.agentSwap("key", V, 1, "ring-2");
+  assert.deepEqual(h.room.agentCut("key", W), { ok: false }, "a wrong verifier cuts nothing");
+  assert.equal(h.one("SELECT kind FROM aks").kind, "key");
+  assert.deepEqual(h.room.agentRemain("key", V, 2, "x"), { ok: false }, "a key not cut has no remainder written");
+  assert.deepEqual(h.room.agentCut("key", V), { ok: true, wrapped: "wrapped-dk", ver: 2, ring: "ring-2" }, "the list's version and sealed list as they stood");
+  assert.deepEqual(tables(h), ["ak", "aks"], "the record stays until its wakes are off");
+  assert.equal(h.one("SELECT kind FROM aks").kind, "cut", "the slot's own kind carries the cut: no new column, no new table");
+  assert.deepEqual(h.room.agentOpen("key", V), { ok: false }, "a cut key opens nothing");
+  assert.deepEqual(h.room.agentSwap("key", V, 2, "x"), { ok: false }, "and swaps nothing");
+  // the disconnect again: the same list, then what is left of it, then nothing
+  assert.deepEqual(h.room.agentCut("key", V), { ok: true, wrapped: "wrapped-dk", ver: 2, ring: "ring-2" });
+  assert.deepEqual(h.room.agentRemain("key", V, 1, "stale"), { ok: false, code: "stale" });
+  assert.deepEqual(h.room.agentRemain("key", W, 2, "thief"), { ok: false });
+  assert.deepEqual(h.room.agentRemain("key", V, 2, "ring-left"), { ok: true });
+  assert.deepEqual(h.room.agentCut("key", V), { ok: true, wrapped: "wrapped-dk", ver: 3, ring: "ring-left" });
   assert.deepEqual(await h.room.agentDrop("key", W), { ok: false }, "a wrong verifier drops nothing");
-  assert.deepEqual(tables(h), ["ak", "aks"]);
-  assert.deepEqual(await h.room.agentDrop("key", V), { ok: true, ver: 2, ring: "ring-2" }, "the list's version and sealed list as they stood");
+  assert.deepEqual(await h.room.agentDrop("key", V), { ok: true });
   assert.deepEqual(tables(h), []);
-  assert.deepEqual(h.room.agentOpen("key", V), { ok: false });
-  assert.deepEqual(h.room.agentSwap("key", V, 1, "x"), { ok: false });
+  assert.deepEqual(h.room.agentCut("key", V), { ok: false }, "a key fully gone");
   assert.deepEqual(await h.room.agentDrop("key", V), { ok: false }, "a second drop finds nothing");
 });
 
-test("agentDrop cuts the key before its storage goes: an open or a swap that lands in between is refused", async () => {
+test("agentDrop deletes the slot before the storage goes: an open, a swap or a cut that lands in between is refused", async () => {
   const h = makeRoom({ bare: true });
   h.room.agentMake(V, "wrapped-dk", "ring-1");
-  // hold deleteAll: the slot is already gone when it starts
   const real = h.room.ctx.storage.deleteAll;
   let release;
   h.room.ctx.storage.deleteAll = () => new Promise((r) => { release = () => r(real()); });
   const drop = h.room.agentDrop("key", V);
-  assert.deepEqual(h.room.agentOpen("key", V), { ok: false }, "an open after the cut");
-  assert.deepEqual(h.room.agentSwap("key", V, 1, "raced"), { ok: false }, "a swap after the cut");
+  assert.deepEqual(h.room.agentOpen("key", V), { ok: false }, "an open after the drop began");
+  assert.deepEqual(h.room.agentSwap("key", V, 1, "raced"), { ok: false }, "a swap");
+  assert.deepEqual(h.room.agentCut("key", V), { ok: false }, "a cut");
   release();
-  assert.deepEqual(await drop, { ok: true, ver: 1, ring: "ring-1" });
+  assert.deepEqual(await drop, { ok: true });
   h.room.ctx.storage.deleteAll = real;
   assert.deepEqual(tables(h), []);
 });
@@ -123,6 +135,8 @@ test("every agent method refuses on a room, and writes nothing there", async () 
   assert.deepEqual(h.room.agentOpen("key", V), { ok: false });
   assert.deepEqual(h.room.agentSwap("key", V, 1, "r"), { ok: false });
   assert.deepEqual(await h.room.agentDrop("key", V), { ok: false });
+  assert.deepEqual(h.room.agentCut("key", V), { ok: false });
+  assert.deepEqual(h.room.agentRemain("key", V, 1, "r"), { ok: false });
   assert.equal(h.room.agentReserve([{ k: "all", max: 10, per: "day" }]), false);
   h.room.agentRelease(["all:2026-11-27"]);
   assert.deepEqual(tables(h), before, "no table made");

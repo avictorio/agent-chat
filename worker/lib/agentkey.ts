@@ -115,11 +115,12 @@ export async function agentDataKey(id: string, secret: Uint8Array<ArrayBuffer>):
  *  id is a bearer secret at the bridge. */
 export type AgentEntry = { room: string, token: string, name: string, added: number, state: "held" | "refused", code?: string, at?: number, hooks?: AgentWake[] };
 
-/** A Muse wake recorded on an entry: its link id, when it was recorded
- *  (unique on the entry, so the call that recorded it knows it), and done
- *  once that call has had the room's answer to its set (AGENT_WAKE_FRESH_MS
- *  in worker/limits.ts says what a pending one means). */
-export type AgentWake = { link: string, at: number, done?: true };
+/** A Muse wake recorded on an entry: its link id, and its deadline, the
+ *  last moment by the room's clock at which a set of it may still reach
+ *  the room (the room refuses a later one: AGENT_WAKE_SET_MS in
+ *  worker/limits.ts). One per link: a registration of a link already
+ *  recorded moves its deadline to the later of the two. */
+export type AgentWake = { link: string, deadline: number };
 
 /** The list sealed for the version the row will hold after the write:
  *  {v: 1, rooms} as JSON, padded with spaces to a multiple of

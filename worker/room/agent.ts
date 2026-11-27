@@ -13,7 +13,11 @@
 // row (when it was made, the list's version, the sealed list), and table aks,
 // one row, the key's slot (its verifier, and the data key wrapped under it);
 // the columns ak.client and aks.expires, used, bind and next are unused
-// (NULL): an agent key neither expires nor is used once. The object compares
+// (NULL): an agent key neither expires nor is used once. The slot's kind is
+// "key", or "cut" once its key is disconnected while the Muse wakes it set
+// up are being turned off: a cut key opens nothing and swaps nothing, and
+// only its own disconnect reads its list again (agentCut), writes what is
+// left of it (agentRemain) and deletes it (agentDrop). The object compares
 // verifiers and swaps the list on its version, and never sees a secret, a
 // data key or a token. Probing writes nothing: only agentMake creates
 // tables, every other method looks in sqlite_master first (as lookupInvite
@@ -61,11 +65,12 @@ function windowOf(per: number | "day", now: number): { w: string, ends: number }
 }
 
 /** Whether a slot's verifier matches, on an object that holds an identity
- *  and no room; nothing is written either way. */
-function slotOk(sql: SqlStorage, slot: string, verifier: string): boolean {
+ *  and no room, and the slot is of that kind ("key" for every use but the
+ *  disconnect's; null: either); nothing is written either way. */
+function slotOk(sql: SqlStorage, slot: string, verifier: string, kind: "key" | "cut" | null = "key"): boolean {
   if (hasTable(sql, "m") || !hasTable(sql, "ak")) return false;
-  const row = sql.exec<Pick<AksRow, "verifier">>("SELECT verifier FROM aks WHERE slot = ?", String(slot)).toArray()[0];
-  return !!row && sameText(row.verifier, String(verifier));
+  const row = sql.exec<Pick<AksRow, "verifier" | "kind">>("SELECT verifier, kind FROM aks WHERE slot = ?", String(slot)).toArray()[0];
+  return !!row && sameText(row.verifier, String(verifier)) && (kind === null || row.kind === kind);
 }
 
 /** A counter's cap, lowered by the API suite's test hook where it set one
@@ -99,8 +104,9 @@ export const AgentMethods = {
    *  is no identity, or the slot or verifier does not match. */
   agentOpen(slot: string, verifier: string): { ok: true, wrapped: string | null, ver: number, ring: string, created: number } | { ok: false } {
     if (hasTable(this.sql, "m") || !hasTable(this.sql, "ak")) return { ok: false };
-    const s = this.sql.exec<Pick<AksRow, "verifier" | "wrapped">>("SELECT verifier, wrapped FROM aks WHERE slot = ?", String(slot)).toArray()[0];
-    if (!s || !sameText(s.verifier, String(verifier))) return { ok: false };
+    const s = this.sql.exec<Pick<AksRow, "verifier" | "wrapped" | "kind">>("SELECT verifier, wrapped, kind FROM aks WHERE slot = ?", String(slot)).toArray()[0];
+    // a cut key opens nothing, as a key that does not exist
+    if (!s || !sameText(s.verifier, String(verifier)) || s.kind !== "key") return { ok: false };
     const a = this.sql.exec<Pick<AkRow, "created" | "ver" | "ring">>("SELECT created, ver, ring FROM ak WHERE k = 1").toArray()[0];
     if (!a) return { ok: false };
     return { ok: true, wrapped: s.wrapped, ver: a.ver, ring: a.ring, created: a.created };
@@ -118,21 +124,44 @@ export const AgentMethods = {
     return { ok: true };
   },
 
-  /** Disconnects the key everywhere: the whole identity goes. Nothing in
-   *  any room changes here. The list's version and sealed list are read and
-   *  the slot deleted in one synchronous step, so from that instant every
-   *  open and swap of the key is refused, and the list handed back is the
-   *  one as it stood when the key was cut (a wake recorded by a call that
-   *  raced the disconnect is in it): the Worker turns off the Muse wakes it
-   *  names (routes/agent.ts). Then the rest of the storage goes. */
-  async agentDrop(slot: string, verifier: string): Promise<{ ok: true, ver: number, ring: string } | { ok: false }> {
-    if (!slotOk(this.sql, slot, verifier)) return { ok: false };
+  /** The disconnect's first step: the key's slot marked cut, and the list
+   *  handed back as it stood at that instant (a wake recorded by a call that
+   *  raced the disconnect is in it), with the wrapped data key that opens it.
+   *  From then on every open and swap of the key is refused; nothing else
+   *  changes, and the record stays until the Muse wakes it names are off
+   *  (routes/agent.ts). A key already cut answers the same (its list as it
+   *  now is), so a second disconnect finishes what a first one did not.
+   *  Nothing in any room changes here. */
+  agentCut(slot: string, verifier: string): { ok: true, wrapped: string | null, ver: number, ring: string } | { ok: false } {
+    if (!slotOk(this.sql, slot, verifier, null)) return { ok: false };
+    this.sql.exec("UPDATE aks SET kind = 'cut' WHERE slot = ?", String(slot));
+    const s = this.sql.exec<Pick<AksRow, "wrapped">>("SELECT wrapped FROM aks WHERE slot = ?", String(slot)).toArray()[0];
     const a = this.sql.exec<Pick<AkRow, "ver" | "ring">>("SELECT ver, ring FROM ak WHERE k = 1").toArray()[0];
-    this.sql.exec("DELETE FROM aks");
-    await this.ctx.storage.deleteAll();
     // a slot with no list row (rows changed by hand) is cut all the same; its
     // list is answered as one that does not open
-    return a ? { ok: true, ver: a.ver, ring: a.ring } : { ok: true, ver: 0, ring: "" };
+    return a ? { ok: true, wrapped: s ? s.wrapped : null, ver: a.ver, ring: a.ring } : { ok: true, wrapped: null, ver: 0, ring: "" };
+  },
+
+  /** A cut key's list rewritten by its disconnect to hold only what is left
+   *  (the rooms whose Muse wakes did not settle), as agentSwap does on a
+   *  key: refused on a key that is not cut, and stale when the list moved. */
+  agentRemain(slot: string, verifier: string, ver: number, ring: string): { ok: true } | { ok: false, code?: "stale" } {
+    if (!slotOk(this.sql, slot, verifier, "cut")) return { ok: false };
+    const a = this.sql.exec<Pick<AkRow, "ver">>("SELECT ver FROM ak WHERE k = 1").toArray()[0];
+    if (!a || a.ver !== Number(ver)) return { ok: false, code: "stale" };
+    this.sql.exec("UPDATE ak SET ver = ver + 1, ring = ? WHERE ver = ?", String(ring), Number(ver));
+    return { ok: true };
+  },
+
+  /** The identity deleted, all of it: a cut key's once every Muse wake its
+   *  list names is off, or a key a failed creation made. The slot is
+   *  deleted in the same synchronous step as the check, so nothing opens it
+   *  after; then the rest of the storage goes. */
+  async agentDrop(slot: string, verifier: string): Promise<{ ok: true } | { ok: false }> {
+    if (!slotOk(this.sql, slot, verifier, null)) return { ok: false };
+    this.sql.exec("DELETE FROM aks");
+    await this.ctx.storage.deleteAll();
+    return { ok: true };
   },
 
   /** whats_waiting's gap, in this object's memory only (an evicted object

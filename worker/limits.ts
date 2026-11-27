@@ -290,16 +290,17 @@ export const AGENT_SWAP_TRIES = 3;
 // reported as left on.
 export const AGENT_WAKE_RETRY_MS = 1000;
 // The Muse wakes a key set up in a room (muse_register) are recorded on the
-// room's entry, each link before the room is asked to set it, and a link
-// comes off the entry only once a room has answered that no hook of that
-// link is there. A link is pending from its record until the call that
-// recorded it has had the room's answer; that call asks for no hook later
-// than AGENT_WAKE_SET_MS after recording it, so a link pending longer than
-// AGENT_WAKE_FRESH_MS can no longer be set by anyone and counts as
-// answered. An entry records at most AGENT_WAKE_LINKS_MAX links: one wake
-// and a registration's new link, with room for one more whose set threw.
+// room's entry, each link with its deadline before the room is asked to set
+// it: AGENT_WAKE_SET_MS after the record, by the Worker's clock. The room
+// refuses, by its own clock, a set that reaches it after the deadline, so a
+// link comes off the entry only on a room's answer: its refusal of that
+// link's own set, or an answer that shows no hook of it and carries a room
+// clock past its deadline (routes/agent.ts, "the record"). The Worker's
+// clock only says when to ask: a disconnect waits for
+// a deadline still to come at most this long, then asks again. An entry
+// records at most AGENT_WAKE_LINKS_MAX links: one wake and a registration's
+// new link, with room for one more whose set threw.
 export const AGENT_WAKE_SET_MS = 15000;
-export const AGENT_WAKE_FRESH_MS = 20000;
 export const AGENT_WAKE_LINKS_MAX = 3;
 
 /** A byte size as the texts quote it: "5 MB". */

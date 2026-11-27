@@ -226,23 +226,38 @@ export const MuseMethods = {
   // museMember (which runs it): neither opens an invite, stamps used or seen,
   // or confirms a genesis. In the whole class inv.used and inv.seen are
   // written only by Room.access; these read inv, and the first two write mh
-  // and mq, as museSetHook and museDrop do (museHookLook writes nothing). The room's own registration joins
-  // (museSetHook opens the invite), so a hook through a key never stands in
-  // for that join: an invite never opened is refused, and the agent joins
-  // first with any call that joins.
+  // and mq, as museSetHook and museDrop do (museHookLook writes nothing).
+  // The room's own registration joins (museSetHook opens the invite), so a
+  // hook through a key never stands in for that join: an invite never
+  // opened is refused, and the agent joins first with any call that joins.
+  //
+  // Every answer of the three, a refusal included, carries the room's clock
+  // (now, museNow): the key's record (routes/agent.ts) takes a link off on
+  // an answer that shows no hook of that link only when the room's clock in
+  // it is past the link's deadline, and museSetHookLook refuses, by that
+  // same clock, a set that reaches the room after its deadline, so no set of
+  // the link can arrive after such an answer.
+
+  /** The room's clock, as the three hook methods an agent key calls read it. */
+  museNow(): number {
+    return Date.now();
+  },
 
   /** Sets the token's member's hook to this Muse link, as museSetHook does
    *  (replacing any hook they had in the room, a webhook included, and its
    *  waiting items), without opening the invite: an invite never opened is
-   *  refused (not_joined) and stays unopened. */
-  museSetHookLook(token: string, link: string, routing: string, room: string): { ok: true, name: string, hook: MuseHookView } | Refusal {
-    if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name" };
+   *  refused (not_joined) and stays unopened. A set that reaches the room
+   *  after its deadline (notAfter, by the room's clock) is refused
+   *  (too_late) and sets nothing. */
+  museSetHookLook(token: string, link: string, routing: string, room: string, notAfter: number): ({ ok: true, name: string, hook: MuseHookView } | Refusal) & { now: number } {
+    const now = this.museNow();
+    if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };
+    if (!(now <= Number(notAfter))) return { ok: false, status: 409, code: "too_late", error: "This registration reached the room after its time, so nothing was set.", now };
     const l = this.lookupInvite(token);
-    if (!l.ok) return l;
-    if (!l.row.used) return { ok: false, status: 409, code: "not_joined", error: museNotJoined(true) };
+    if (!l.ok) return { ...l, now };
+    if (!l.row.used) return { ok: false, status: 409, code: "not_joined", error: museNotJoined(true), now };
     const name = l.row.name;
     const member = nameFold(name);
-    const now = Date.now();
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
     const old = this.museRow(member);
     this.museWrite(member, name, String(room), "muse", String(link), String(routing), null, null, old, now);
@@ -250,7 +265,7 @@ export const MuseMethods = {
     // moved to another link: the old one loses this room (the new one is told by the caller)
     if (old && old.kind === "muse" && old.link !== link) this.museReportGone([{ link: old.link, room: old.room }]);
     this.notifyMembers(name);
-    return { ok: true, name, hook: this.museView(this.museRow(member) as MhRow) };
+    return { ok: true, name, hook: this.museView(this.museRow(member) as MhRow), now };
   },
 
   /** Removes the hook filed under the token's member's name only when it
@@ -263,34 +278,42 @@ export const MuseMethods = {
    *  "Scout" and "scout" a wake the key set up outlives its seat. A token
    *  the room has no row for is refused (invite_invalid), as by
    *  lookupInvite. It says nothing of the seat but whether a hook went. */
-  museDropLook(token: string, link: string): { ok: true, removed: boolean } | Refusal {
-    if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name" };
-    const l = this.lookupInvite(token);
-    let name: string;
-    if (l.ok) name = l.row.name;
-    else if (l.code === "invite_revoked") {
-      const row = this.sql.exec<{ name: string }>("SELECT name FROM inv WHERE token = ?", String(token)).toArray()[0];
-      if (!row) return l;
-      name = row.name;
-    } else return l;
-    const h = this.museRow(nameFold(name));
-    if (!h || h.kind !== "muse" || h.link !== String(link)) return { ok: true, removed: false };
-    this.museDrop(name);
-    this.notifyMembers(name);
-    return { ok: true, removed: true };
+  museDropLook(token: string, link: string): ({ ok: true, removed: boolean } | Refusal) & { now: number } {
+    const now = this.museNow();
+    if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };
+    const s = this.museSeatName(token);
+    if (!s.ok) return { ...s, now };
+    const h = this.museRow(nameFold(s.name));
+    if (!h || h.kind !== "muse" || h.link !== String(link)) return { ok: true, removed: false, now };
+    this.museDrop(s.name);
+    this.notifyMembers(s.name);
+    return { ok: true, removed: true, now };
   },
 
-  /** The Muse link of the token's member's hook (null: no hook, or a
-   *  webhook), a look that writes nothing: how muse_register settles the
-   *  wakes a key recorded in this room before it records one more. A
-   *  revoked or left seat is refused, as by lookupInvite (muse_register
-   *  asks it only of a seat that passed its look). */
-  museHookLook(token: string): { ok: true, link: string | null } | Refusal {
-    if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name" };
+  /** The Muse link of the hook filed under the token's member's name (null:
+   *  no hook, or a webhook), a look that writes nothing, for every seat the
+   *  room has a row for, as museDropLook answers: how muse_register settles
+   *  the wakes a key recorded in this room before it records one more, and
+   *  how a take-off or a replaced entry learns, by the room's clock, whether
+   *  every link it recorded can be settled before it turns any off. */
+  museHookLook(token: string): ({ ok: true, link: string | null } | Refusal) & { now: number } {
+    const now = this.museNow();
+    if (!this.ready) return { ok: false, status: 404, code: "room_missing", error: "No room with that name", now };
+    const s = this.museSeatName(token);
+    if (!s.ok) return { ...s, now };
+    const h = this.museRow(nameFold(s.name));
+    return { ok: true, link: h && h.kind === "muse" ? h.link : null, now };
+  },
+
+  /** The name of the seat a token is for, as lookupInvite finds it, or, for
+   *  a seat revoked or left, from its row; a token the room has no row for
+   *  is refused as lookupInvite refuses it. Opens nothing. */
+  museSeatName(token: string): { ok: true, name: string } | Refusal {
     const l = this.lookupInvite(token);
-    if (!l.ok) return l;
-    const h = this.museRow(nameFold(l.row.name));
-    return { ok: true, link: h && h.kind === "muse" ? h.link : null };
+    if (l.ok) return { ok: true, name: l.row.name };
+    if (l.code !== "invite_revoked") return l;
+    const row = this.sql.exec<{ name: string }>("SELECT name FROM inv WHERE token = ?", String(token)).toArray()[0];
+    return row ? { ok: true, name: row.name } : l;
   },
 
   /** Writes a member's hook, replacing what they had; the cursor carries

@@ -169,16 +169,17 @@ export function unusedNote(rooms: string[], maybe: string[] = []) {
 
 /** What a disconnect ends and what it leaves (DELETE /api/agent's note):
  *  wakesLeft is the rooms that did not confirm the Muse wake the key set up
- *  there is off (each room still wakes until that room's own muse-hook
- *  route or the gadget's Disconnect stops it), or null when the key's list
- *  could not be read. It says the wakes are off only when none is left, and
- *  a seat only where a room still takes the invite: the key may hold rooms
- *  that refused it (the agent left, was removed, or the room is gone). */
+ *  there is off (the cut key's record keeps them, and the same DELETE again
+ *  tries them; that room's own muse-hook route or the gadget's Disconnect
+ *  stops each too), or null when the key's list could not be read. It says
+ *  the wakes are off only when none is left, and a seat only where a room
+ *  still takes the invite: the key may hold rooms that refused it (the agent
+ *  left, was removed, or the room is gone). */
 export function dropNote(wakesLeft: string[] | null) {
   const seats = "Every seat stays as it was: you are still a member of each of these rooms that still takes your invite, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire.";
   if (wakesLeft && !wakesLeft.length) return "This key works nowhere now, and the Muse wakes it set up are off. " + seats;
   if (!wakesLeft) return "This key works nowhere now. " + seats + " This key's record could not be read, so the Muse wakes it set up could not be turned off: Disconnect on the Muse gadget stops every wake at once.";
-  return "This key works nowhere now. " + seats + " These rooms did not confirm that the Muse wakes this key set up there are off (they could not be reached, or refused): " + wakesLeft.join(", ") + "; in each, DELETE /api/rooms/ROOM/muse-hook with that room's own token turns it off while your seat there is active, and Disconnect on the Muse gadget stops every wake at once.";
+  return "This key works nowhere now. " + seats + " These rooms did not confirm that the Muse wakes this key set up there are off (they could not be reached, or refused): " + wakesLeft.join(", ") + ". DELETE /api/agent again with this key tries them again (the key does nothing else now); in each, DELETE /api/rooms/ROOM/muse-hook with that room's own token turns its wake off while your seat there is active; and Disconnect on the Muse gadget stops every wake at once.";
 }
 
 // The refusals and notes of the key's routes that a page or a test shows
@@ -203,24 +204,31 @@ export function activeCapError(room: string) {
 export function notPersonInviteError(room: string) {
   return "Room \"" + room + "\": this invite is stored as an agent's. Only an invite the room stores as a person's can invite an agent onto a key.";
 }
-/** Taking R off the key: a room that did not settle every Muse wake the key recorded there. */
+/** Taking R off the key, or putting it back with another invite: a room
+ *  that did not settle every Muse wake the key recorded there. */
 export function wakeNotSettled(room: string) {
   return room + " did not confirm that the Muse wake this key set up there is off (it could not be reached, or refused), so it is still on this key and that wake may still be on. Try again shortly.";
 }
-/** Taking R off the key while a registration through the key still runs there. */
+/** Taking R off the key, or putting it back with another invite, while a
+ *  registration through the key may still set a wake there (a recorded
+ *  link's deadline is still to come by the room's clock). */
 export function wakeStillSetting(room: string, seconds: number) {
-  return room + " has a Muse registration through this key still running, so it is still on this key. Try again in " + spanS(seconds) + ".";
+  return room + " may still be reached by a Muse registration through this key, so it is still on this key as it was. Try again in " + spanS(seconds) + ".";
 }
-/** Taking off a room that refused the key's invite: no seat is claimed. */
-export function removedRefusedNote(room: string) {
-  return "The key forgets " + room + ", which no longer takes its invite: nothing else changes there.";
+/** Taking off a room that refused the key's invite: no seat is claimed;
+ *  wake: the Muse wake the key set up there was turned off with it. */
+export function removedRefusedNote(room: string, wake: boolean) {
+  return wake
+    ? "The key forgets " + room + ", which no longer takes its invite, and the Muse wake this key set up there is off."
+    : "The key forgets " + room + ", which no longer takes its invite: nothing else changes there.";
 }
 /** A room muse_register did not register this time, and why; spent: the
  *  gadget's code was claimed, so registering again needs a new one. */
-export function wakeAgain(room: string, why: "unreached" | "busy" | "full", spent: boolean) {
+export function wakeAgain(room: string, why: "unreached" | "late" | "busy" | "full", spent: boolean) {
   const what = why === "unreached" ? room + " could not be reached just now"
-    : why === "busy" ? room + " was changed on your key while it was being registered"
-      : room + " already records as many Muse wakes through this key as a room can until an earlier registration there settles";
+    : why === "late" ? room + " was reached too late to set its wake"
+      : why === "busy" ? room + " was changed on your key while it was being registered"
+        : room + " already records as many Muse wakes through this key as a room can until an earlier registration there settles";
   return what + ", so it was not registered: register it again shortly" +
     (spent ? " with a new code from the gadget, since this one was used." : "; this code was not used, so it still works until it expires.");
 }

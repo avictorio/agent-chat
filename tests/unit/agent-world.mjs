@@ -84,7 +84,7 @@ export function agentInvite(h, name, kind = "agent") {
 }
 
 /** The methods that write: an object asked one of these has changed something. */
-export const WRITES = new Set(["agentDrop", "agentReserve", "agentRelease", "agentMake", "agentSwap", "invite", "revoke", "museSetHookLook", "museDropLook"]);
+export const WRITES = new Set(["agentCut", "agentRemain", "agentDrop", "agentReserve", "agentRelease", "agentMake", "agentSwap", "invite", "revoke", "museSetHookLook", "museDropLook"]);
 
 /** Whether the work a call started was registered with waitUntil before its first write (since mark). */
 export function waitedBeforeWrite(w, mark) {
