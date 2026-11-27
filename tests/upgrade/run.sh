@@ -13,9 +13,10 @@
 #    brings back a retired one and clears the schema version - a room as
 #    an older deploy could have left it.
 # 3. This checkout's Worker starts on the same state and reads both rooms
-#    back, posts, opens a draft upload, and turns off the key's wakes
+#    back, posts, opens a draft upload, turns off the key's wakes, and has
+#    the member register again in the aged room on a third gadget's link
 #    (phase.js new). Then the aged room's schema version is cleared again
-#    and this checkout starts once more, so every step runs a second time
+#    and this checkout starts again, so every step runs a second time
 #    there on rows this code wrote (phase.js again); inspect.py checks every
 #    room reached the latest schema version with all its columns, and the
 #    holders of its Muse hooks.
@@ -57,7 +58,7 @@ fs.writeFileSync('$WORK/seal.json', JSON.stringify(k));
 fs.writeFileSync('$WORK/config-old', testConfig('$OLD'));
 fs.writeFileSync('$WORK/config-new', testConfig('$ROOT'));
 " || exit 1
-# the fake Muse, once for both phases; it writes its address and the gadgets' sealed tokens to muse.json
+# one fake Muse for both phases; it writes its address and the gadgets' sealed tokens to muse.json
 node "$HERE/phase.js" muse "$WORK" > "$WORK/muse.log" 2>&1 &
 MUSE_PID=$!
 for _ in $(seq 1 60); do [ -f "$WORK/muse.json" ] && break; kill -0 "$MUSE_PID" 2>/dev/null || break; sleep 0.5; done

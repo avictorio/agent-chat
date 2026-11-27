@@ -14,14 +14,14 @@
 //   I1: every tag holding the hook has its link on its identity's record
 //   I2: every identity whose set of the hook's link landed and that has not
 //       let go records the link
-//   I3: a Muse hook has a holder (once its room keeps holders)
+//   I3: a Muse hook has a holder (in a room that keeps holders)
 //   I4: the hook stays on only while someone who set it still holds it
 //       (the member's own registration, "self", among them)
 //   I5 (with LEGACY_HOLDS ["pre"]): a "self" hold goes only by the room's
 //       own controls, never by an identity's drop
 // Variants: holders (every room keeps holders), oldroom (a set reaches a
-// room on code that keeps none, and the room starts on the new code later:
-// step 10 gives the hook "pre"), rerun (step 10 runs again on a room that
+// room whose code keeps none, and the room then starts on code that keeps
+// them: step 10 gives the hook "pre"), rerun (step 10 runs again on a room that
 // ran it) with the step's backfill or one that would give "pre" to
 // every Muse hook. The unit suite (agent-wakes.test.mjs) runs the variants
 // that must break and the smaller cases; `npm run test:model` runs this
@@ -31,8 +31,9 @@ import { tagsKept } from "../../worker/lib/agentkey.ts";
 import { AGENT_WAKE_ITEMS_MAX } from "../../worker/limits.ts";
 import { LEGACY_HOLDS } from "../../worker/room/muse.ts";
 
-/** LEGACY_HOLDS as the rooms keep it now, and as it is once tags are made (narrowed to "pre"). */
-export const LEGACY_NOW = LEGACY_HOLDS;
+/** LEGACY_HOLDS as the rooms keep it: "pre" and "self". */
+export const LEGACY_ROOMS = LEGACY_HOLDS;
+/** LEGACY_HOLDS narrowed to "pre": an untagged entry's drop then never takes a "self" hold (I5). */
 export const LEGACY_PRE = ["pre"];
 
 const sorted = (a) => [...new Set(a)].sort();
@@ -106,11 +107,11 @@ const entryOf = (who, tagged) => ({ room: "lima", token: "tok-" + who, name: "Ha
  * @param regs [{id, who, link}]: registrations (a "self" one is the member's own, with the room's token)
  * @param offs [{who}]: take-offs (key identities only)
  * @param ticks how many times the room's clock moves on
- * @param o {legacy: LEGACY_HOLDS, backfill: step 10's ("only") or the earlier one ("every")}
+ * @param o {legacy: LEGACY_HOLDS, backfill: step 10's ("only") or one that gives "pre" to every Muse hook ("every")}
  * @returns {states, broken: {why, path} | null, goneWithSelf}
  */
 export function explore(variant, ids, regs, offs, ticks, o = {}) {
-  const legacy = o.legacy || LEGACY_NOW;
+  const legacy = o.legacy || LEGACY_ROOMS;
   const backfill = o.backfill || "only";
   const keys = Object.keys(ids).filter((w) => ids[w] !== "self");
   const init = {
@@ -139,7 +140,7 @@ export function explore(variant, ids, regs, offs, ticks, o = {}) {
     for (const who of s.setBy) if (ids[who] !== "self" && !records(s, who, hook.link)) return "I2: " + who + " set " + hook.link + ", has not let go, and its record does not have it";
     return null;
   };
-  // the room's answer to a call; on a room still on code that keeps no holders, a set keeps none
+  // the room's answer to a call; a room whose code keeps no holders keeps none for a set
   const call = (s, c) => {
     if (!s.upgraded && c.op === "set") return { st: { hook: { kind: "muse", link: c.link }, rows: [] }, ans: { ok: true } };
     return roomCall(s.room, c, legacy);
@@ -153,7 +154,7 @@ export function explore(variant, ids, regs, offs, ticks, o = {}) {
     const bad = check(s);
     if (bad) { broken = { why: bad, path }; return; }
     if (s.ticks < ticks) step({ ...s, T: s.T + TICK, ticks: s.ticks + 1 }, path.concat("tick"));
-    // the room starts on the new code: step 10 runs
+    // the room starts on code that keeps holders: step 10 runs
     if (!s.upgraded) step({ ...s, upgraded: true, room: roomCall(s.room, { op: "step10", backfill: "only" }, legacy).st }, path.concat("room.upgrade"));
     // step 10 runs again on a room that ran it
     if (variant === "rerun" && !s.rerun) step({ ...s, rerun: true, room: roomCall(s.room, { op: "step10", backfill }, legacy).st }, path.concat("room.step10-again"));
@@ -209,7 +210,7 @@ export function explore(variant, ids, regs, offs, ticks, o = {}) {
         const e = me.rooms[0];
         if (!s.upgraded && e.tag) return step(set(s, { pc: "done" }), path.concat("O" + who + ".drop-threw"));
         const before = s.room;
-        // a room on older code drops the hook on that link whoever set it
+        // a room whose code keeps no holders drops the hook on that link whoever set it
         const r = s.upgraded ? roomCall(before, { op: "drop", link: me.obs.link, ...asked(e) }, legacy)
           : before.hook && before.hook.link === me.obs.link ? { st: { hook: null, rows: [] }, ans: { link: null } } : { st: before, ans: { link: onLink(before) } };
         const hadSelf = before.rows.includes("self") && before.hook && before.hook.link === me.obs.link;
@@ -244,14 +245,15 @@ export const CASES = [
 /**
  * Every run, and what each must show: [variant, case index, options, expected: "held" | "broken"].
  * holders with both constants: held in every case (the last case with
- * LEGACY_NOW reaches a hook gone with its "self" hold, as before holders were
- * kept; with LEGACY_PRE it never does); oldroom: broken in the four cases
- * of two tagged identities (why tags wait until every room keeps holders); rerun: broken with
+ * LEGACY_ROOMS reaches a hook gone with its "self" hold, which the untagged
+ * drop counts as its own; with LEGACY_PRE it never does); oldroom: broken in
+ * the four cases of two tagged identities (so a Worker that sends tags needs
+ * every room to keep holders); rerun: broken with
  * the backfill that gives "pre" to every Muse hook, held with step 10's.
  */
 export function runs() {
   const out = [];
-  for (const [legacy, tag] of [[LEGACY_NOW, "now"], [LEGACY_PRE, "pre"]]) CASES.forEach((_, i) => out.push(["holders", i, { legacy, tag }, "held"]));
+  for (const [legacy, tag] of [[LEGACY_ROOMS, "rooms"], [LEGACY_PRE, "pre"]]) CASES.forEach((_, i) => out.push(["holders", i, { legacy, tag }, "held"]));
   for (let i = 0; i < 4; i++) out.push(["oldroom", i, { legacy: LEGACY_PRE, tag: "pre" }, "broken"]);
   for (let i = 0; i < 4; i++) out.push(["rerun", i, { legacy: LEGACY_PRE, tag: "pre", backfill: "every" }, "broken"]);
   for (let i = 0; i < 4; i++) out.push(["rerun", i, { legacy: LEGACY_PRE, tag: "pre", backfill: "only" }, "held"]);

@@ -214,8 +214,8 @@ async function scenario(srv, muse, suf) {
   for (const [name, args] of [['list_rooms', {}], ['get_start_page', { room }], ['get_invite', { room: room2 }], ['whats_waiting', {}], ['get_members', { room }], ['add_room', { room: room2, token: k3 }], ['remove_room', { room: room2 }], ['add_room', { room: room2, token: k3 }], ['post_message', { room, text: 'through the key', client_msg_id: 'k1' }], ['no_such_tool', { room }], ['whoami', { room: 'difftest-none-' + suf }]]) {
     await send('agent mcp tools/call ' + name + ' ' + JSON.stringify(args).replace(/"token":"[^"]+"/, '"token":"T"'), 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name, arguments: args }) });
   }
-  // a Muse wake set up through the key (a second gadget's code) in the room its seat joined: the set, its own write and its tidy,
-  // and later, after the leave through the key, the disconnect that settles it
+  // a Muse wake set up through the key (a second gadget's code) in the room its seat joined: the set, its own write and its tidy;
+  // the leave through the key and the disconnect further down settle it
   const gadget2 = await museGadget({ muse, SUF: suf + '-' + srv.port + '-k', sealPublicKey: srv.sealPublicKey }, handover((method, p, o) => send('agent: muse ' + p, method, p, o), '198.51.100.10'), 'diffkey');
   must('agent: a second gadget linked', gadget2.status === 200 && !!gadget2.code && !!gadget2.link);
   tokens.museCode2 = gadget2.code; tokens.museLink2 = gadget2.link;

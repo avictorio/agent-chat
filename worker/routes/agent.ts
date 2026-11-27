@@ -455,10 +455,9 @@ const NO_SEAT = new Set(["invite_invalid", "room_missing", "room_deleted"]);
  *  on; on, beside it, the link the hook is on whoever holds it (null for a
  *  gone seat, whose hook went with it); removed whether the drop took the
  *  hook off. Null when it threw twice, AGENT_WAKE_RETRY_MS apart, sent no
- *  clock, or refused in another way (as a room still on older code does for
- *  a gone seat, or one that does not know the tag: bad_holder,
- *  holder_mismatch). A drop's answer that does not say which link is on
- *  after it settles the link it dropped and no other. */
+ *  clock, or refused with a code NO_SEAT does not hold (bad_holder and
+ *  holder_mismatch among them). A drop's answer that does not say which
+ *  link is on after it settles the link it dropped and no other. */
 async function observe(env: Env, e: AgentEntry, ver: number, drop: string | null): Promise<(WakeSeen & { removed: boolean, on?: string | null }) | null> {
   for (let i = 0; i < 2; i++) {
     if (i) await sleep(AGENT_WAKE_RETRY_MS);
@@ -1542,9 +1541,10 @@ async function settleRooms(env: Env, u: Unsealed, which: Array<{ room: string, t
 // AGENT_WAKE_SET_MS from now), written before any hook is set; the hooks
 // set, AGENT_GLANCE_PARALLEL rooms at a time, each carrying its recording's
 // deadline, which the room keeps by its own clock, and the entry's holder
-// tag as the recording write wrote it, when it has one (this Worker makes
-// none), each sent once and never again; then this call's own write: each recording whose set the room
-// answered, ok or refused, goes, and one whose set threw stays outstanding
+// tag as the recording write wrote it, when it has one (a tag is only ever
+// read here), each sent once and never again; then this call's own write:
+// each recording whose set the room answered, ok or refused, goes, and one
+// whose set threw stays outstanding
 // (no set's answer takes a link off); then a tidy, once, best effort: each
 // room whose entry holds a link other than the one this call's set left on
 // (its own too after a refusal) is looked at after that write, and a
@@ -1694,7 +1694,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
     // cut meanwhile: the hooks this call set go again (the disconnect also turns off every link it recorded)
     for (const n of todo) {
       if (outcome.get(n) !== "ok") continue;
-      // only the hold this call set: by its tag, or, for an entry without one, as before holders were kept
+      // only the hold this call set: by its tag, or, for an entry without one, by the holds an untagged set makes (museDropLook)
       const a = accepted[n].e, tag = tagOf(a), stub = roomStub(env, a.room);
       try { await (tag === undefined ? stub.museDropLook(a.token, link) : stub.museHolderDrop(tag, link, a.token, false)); } catch { /* the disconnect asks it */ }
     }

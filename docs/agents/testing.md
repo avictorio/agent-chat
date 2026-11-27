@@ -106,9 +106,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   before and after, a gone seat in a room whose invites' names fold
   alike, a set's deadline kept by the room's clock and that clock in
   every answer, the drop saying which link is on after it; and the
-  holders: each writer's rule, the untagged look and drop answering as
-  before holders were kept, the two holder methods, schema step 10 run
-  twice and cut short, none on an identity object), the record's
+  holders: each writer's rule, the untagged look and drop answering every
+  untagged state as pinned literals, the two holder methods, schema step
+  10 run twice and cut short, none on an identity object), the record's
   guard, its three writes as pure functions and a bounded exhaustive
   model over them, and the holder model (`holders-model.mjs`: the
   holders of a member's Muse hook beside the record, identities tagged,
@@ -259,11 +259,15 @@ Playwright); `tests/fixtures/` holds the files they share.
   links two gadgets, a member registers its Muse hooks with its own
   tokens and an agent key sets up its wakes (`muse_register`); this
   checkout lists the key's wakes, keeps the member's hooks on and turns
-  the key's off on its disconnect, as before; then `age.py
-  --version-only` clears the aged room's schema version once more and a
+  the key's off on its disconnect (settling through the `pre` step 10
+  gave them), and the member registers again in the aged room on a third
+  gadget's link, so its hook there is held by `self` alone; then `age.py
+  --version-only` clears the aged room's schema version again and a
   second start runs every step again there; `inspect.py` checks the hooks'
-  holders (`mhh`): the member's hook held by exactly `pre`, no row left
-  for the key's, none for a member without a Muse hook. About 3 minutes,
+  holders (`mhh`): the member's hook held by exactly `pre` in one room and
+  exactly `self` in the aged one (a second run of step 10 that gave `pre`
+  to a hook held already would show there), no row left for the key's,
+  none for a member without a Muse hook. About 3 minutes,
   port 8799 (it stops if another server holds it), local only. Run it
   before shipping a schema step (`AGENTS.md` section 13, Schema changes).
 - **The UI suite:** see Visual checks for UI changes, step 1.

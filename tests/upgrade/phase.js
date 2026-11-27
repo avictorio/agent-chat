@@ -1,9 +1,9 @@
 // The schema upgrade test's client (run.sh): phase "old" fills two
 // throwaway local rooms on the older Worker, phase "new" reads them back on
-// this one, phase "again" reads each room once more after the aged one's
+// this one, phase "again" reads each room again after the aged one's
 // schema version was cleared again (so its steps run a second time), and
 // "muse" hosts the fake Muse both Workers' bridges call (it writes its
-// address and two gadgets' sealed tokens to muse.json, and runs until
+// address and three gadgets' sealed tokens to muse.json, and runs until
 // stopped). localhost only.
 const BASE = 'http://localhost:8799';
 const OWNER = 'upg-owner';
@@ -32,14 +32,14 @@ const connect = (sealed, n) => req('POST', '/api/muse/connect', { json: { sealed
 const tool = (key, name, args) => req('POST', '/api/mcp', { json: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, headers: { Authorization: 'Bearer ' + key } });
 (async () => {
   if (phase === 'muse') {
-    // the fake Muse (tests/api/fake-muse.mjs, the bridge's TypeScript through the unit tests' module hooks), and two Muse accounts whose tokens two gadgets seal to the run's key
+    // the fake Muse (tests/api/fake-muse.mjs, the bridge's TypeScript through the unit tests' module hooks), and three Muse accounts whose tokens three gadgets seal to the run's key
     const { register } = require('node:module');
     const { pathToFileURL } = require('node:url');
     register('../unit/txt-hooks.mjs', pathToFileURL(__filename));
     const muse = await (await import(pathToFileURL(path.join(__dirname, '..', 'api', 'fake-muse.mjs')).href)).startFakeMuse();
     const pub = JSON.parse(fs.readFileSync(path.join(WORK, 'seal.json'), 'utf8')).publicKey;
     const gadgets = [];
-    for (const n of [1, 2]) {
+    for (const n of [1, 2, 3]) {
       muse.account('tok-upg-' + n, 'vm-upg-' + n);
       gadgets.push({ sealed: await muse.seal({ accessToken: 'tok-upg-' + n, nodeId: 'gadget-upg-' + n }, pub) });
     }
@@ -77,7 +77,7 @@ const tool = (key, name, args) => req('POST', '/api/mcp', { json: { jsonrpc: '2.
       check(room + ' a duel declined', dec.status === 200 && dec.json.game && dec.json.game.status === 'cancelled', dec.text.slice(0, 120));
       t[room] = { H, A, msg: m1.json.id, game: g.json && g.json.game && g.json.game.id, off: off.json && off.json.game && off.json.game.id };
     }
-    // Muse hooks on the older code: two gadgets link two Muses; in each room
+    // Muse hooks on OLD_REF's code: two gadgets link two Muses; in each room
     // two agents join, WakeA registers its hook with its own tokens (the
     // first gadget's code, one batch), and WakeB's tokens make an agent key
     // whose muse_register sets its hooks (the second gadget's code): two
@@ -103,14 +103,14 @@ const tool = (key, name, args) => req('POST', '/api/mcp', { json: { jsonrpc: '2.
     fs.writeFileSync(TOK, JSON.stringify(t));
   } else {
     const t = JSON.parse(fs.readFileSync(TOK, 'utf8'));
-    // the hooks the older code set: the key still records its wakes, WakeA's are on, and the key's
-    // disconnect turns its own off as the older code did (on the holder step 10 gave them, pre), WakeA's staying on
+    // the hooks OLD_REF's code set: the key still records its wakes, WakeA's are on, and the key's
+    // disconnect turns its own off (settling through the holder step 10 gave them, pre), WakeA's staying on
     const g = await req('GET', '/api/agent', { headers: { Authorization: 'Bearer ' + t.key } });
     check('the key lists both rooms with their Muse wakes', g.status === 200 && JSON.stringify((g.json.rooms || []).map((x) => [x.room, x.muse_wake])) === JSON.stringify(ROOMS.map((room) => [room, true])), g.status + ' ' + g.text.slice(0, 200));
     const onFor = async (room) => { const h = await req('GET', '/api/rooms/' + room + '/muse-hook', { token: t[room].WA }); return h.status === 200 && !!h.json.hook && h.json.hook.kind === 'muse' && h.json.hook.enabled === true; };
     for (const room of ROOMS) check(room + ': WakeA\'s hook is on', await onFor(room));
     const cut = await req('DELETE', '/api/agent', { headers: { Authorization: 'Bearer ' + t.key } });
-    check('the key\'s disconnect turns off its wakes in both rooms, as before', cut.status === 200 && JSON.stringify(cut.json.muse_wakes_removed) === JSON.stringify(ROOMS) && JSON.stringify(cut.json.muse_wakes_left) === '[]', cut.status + ' ' + cut.text.slice(0, 200));
+    check('the key\'s disconnect turns off its wakes in both rooms, none left', cut.status === 200 && JSON.stringify(cut.json.muse_wakes_removed) === JSON.stringify(ROOMS) && JSON.stringify(cut.json.muse_wakes_left) === '[]', cut.status + ' ' + cut.text.slice(0, 200));
     for (const room of ROOMS) check(room + ': WakeA\'s hook is still on', await onFor(room));
     for (const room of ROOMS) {
       const R = '/api/rooms/' + room;
@@ -146,6 +146,13 @@ const tool = (key, name, args) => req('POST', '/api/mcp', { json: { jsonrpc: '2.
       const stays = ((after.json && after.json.members) || []).find((x) => x.name === 'OldHuman') || {};
       check(room + ': ... the list shows it revoked with left, the others with left null', gone.status === 'revoked' && gone.left === lv.json.left && stays.left === null, JSON.stringify([gone, stays]).slice(0, 200));
     }
+    // in the aged room WakeA registers again with its own token, on a third gadget's link: its hook there is
+    // held by "self" alone, which a second run of step 10 must leave as it is (inspect.py)
+    const m = JSON.parse(fs.readFileSync(path.join(WORK, 'muse.json'), 'utf8'));
+    const g3 = await connect(m.gadgets[2].sealed, 3);
+    const reg3 = await req('POST', '/api/muse/hooks', { json: { code: g3.json && g3.json.code, rooms: [{ room: 'upg-aged', token: t['upg-aged'].WA }] } });
+    const res3 = (reg3.json && reg3.json.results) || [];
+    check('upg-aged: WakeA registers again on a third gadget\'s link', g3.status === 200 && reg3.status === 200 && reg3.json.claimed === true && res3.length === 1 && res3[0].ok === true, g3.status + ' ' + reg3.status + ' ' + reg3.text.slice(0, 160));
   }
   console.log(fails ? 'UPGRADE: ' + fails + ' failure(s)' : 'UPGRADE: all checks passed');
   process.exit(fails ? 1 : 0);

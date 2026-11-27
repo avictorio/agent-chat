@@ -251,7 +251,7 @@ test("a set carries its deadline and the room keeps it by its own clock: just be
 // ---- The holders of a member's Muse hook (mhh, schema step 10) ----
 // Beside each member's hook the room keeps who set it up on its link: a
 // holder tag (an identity's), "self" (the room's own registration) or "pre"
-// (a set that sent no tag, or a hook from before the step). One test per
+// (a set that sent no tag, or a Muse hook step 10 found with no holder). One test per
 // writer and per method; then the model of holders-model.mjs (roomCall)
 // against the real Room on every state and call it takes.
 import { LEGACY_HOLDS } from "../../worker/room/muse.ts";
@@ -304,7 +304,7 @@ test("holders: the room's own registration is held by self, beside the holders a
   assert.equal(linkOf(h), "webhook");
 });
 
-test("holders: a hook removed takes its holders (museRemove, the revoke of a name's last invite, revoke everyone); in an older room whose two invites' names fold alike a revoke keeps the hook and its holders, and either seat finds the same member", async () => {
+test("holders: a hook removed takes its holders (museRemove, the revoke of a name's last invite, revoke everyone); in a room whose two invites' names fold alike a revoke keeps the hook and its holders, and either seat finds the same member", async () => {
   {
     const { h } = holderRoom();
     assert.ok(h.room.museSetHookLook("tok-Ada", "L", "agent-chat", R, LATER, TAG_A).ok);
@@ -347,7 +347,7 @@ test("holders: a hook changed in place keeps its holders (museUpdate, and the wa
   assert.deepEqual(rowsOf(h), [TAG_A], "still a Muse hook on its link, its holders kept");
 });
 
-test("holders: the untagged look and drop (museHookLook, museDropLook) answer every state the rooms make now as they did before holders were kept, with on beside; a tag's hold is not theirs", () => {
+test("holders: the untagged look and drop (museHookLook, museDropLook) answer every state an untagged set, the room's own registration and a webhook make as the pinned literals say, with on beside; a tag's hold is not theirs", () => {
   /** [state, its writer] */
   const states = {
     "no hook": () => {},
@@ -356,7 +356,7 @@ test("holders: the untagged look and drop (museHookLook, museDropLook) answer ev
     "a Muse hook on L held by pre and self": (h) => { h.room.museSetHookLook("tok-Ada", "L", "agent-chat", R, LATER); h.room.museSetHook("tok-Ada", "L", "main", R); },
     "a webhook": (h) => h.room.webhookSet("tok-Ada", "https://hooks.example.org/x", "s", R),
   };
-  // the answers before holders were kept, as literals, with on added
+  // the answers as literals: a Muse hook held by pre, self or both is the untagged look's and drop's alike; on, the link it is on
   const muse = { look: { ok: true, link: "L", on: "L" }, dropL: { ok: true, removed: true, link: null, on: null }, dropM: { ok: true, removed: false, link: "L", on: "L" } };
   const none = { look: { ok: true, link: null, on: null }, dropL: { ok: true, removed: false, link: null, on: null }, dropM: { ok: true, removed: false, link: null, on: null } };
   for (const [what, make] of Object.entries(states)) {
@@ -368,7 +368,7 @@ test("holders: the untagged look and drop (museHookLook, museDropLook) answer ev
       if (c === "dropL" && want === muse) assert.deepEqual([linkOf(h), rowsOf(h)], [null, []], what + ": the hook and its holders went");
     }
   }
-  // a tag's hold (no state the rooms make before tags are made): the untagged look sees none, and the drop leaves it
+  // a tag's hold (a state only a tagged set makes): the untagged look sees none, and the drop leaves it
   const { h } = holderRoom();
   h.room.museSetHookLook("tok-Ada", "L", "agent-chat", R, LATER, TAG_A);
   assert.deepEqual(noNow(h.room.museHookLook("tok-Ada")), { ok: true, link: null, on: "L" });
@@ -437,7 +437,7 @@ test("schema step 10: pre for a Muse hook with no holder, none for a webhook; ru
   h.member("Bo", "agent");
   h.room.museSetHookLook("tok-Ada", "L", "agent-chat", R, LATER);
   h.room.webhookSet("tok-Bo", "https://hooks.example.org/x", "s", R);
-  // a room as the code before the step left it: no mhh
+  // a room that has not run step 10: no mhh, schema version 9
   h.db.exec("DROP TABLE mhh");
   h.db.prepare("UPDATE cfg SET v = '9' WHERE k = 'schema_version'").run();
   h.room.ensureSchema();

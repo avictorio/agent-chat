@@ -205,19 +205,20 @@ test("a bounded exhaustive model of the record: two registrations of one link or
 // (tagged, untagged and the member's own registration), the room as one pure
 // function that agent-hooks.test.mjs shows equal to the real Room. Here: the
 // runs that must break (a tagged set reaching a room that keeps no holders;
-// step 10's backfill giving "pre" to every Muse hook when it runs again), and
+// a backfill that gives "pre" to every Muse hook, run a second time), and
 // the smaller cases that must hold, with LEGACY_HOLDS as the rooms keep it
 // and narrowed to "pre". Every case at full size: `npm run test:model`.
-import { CASES, LEGACY_NOW, LEGACY_PRE, run, runs } from "./holders-model.mjs";
-test("the holders: a tagged set on a room that keeps none, or step 10's earlier backfill run again, breaks the record; the smaller cases hold with either LEGACY_HOLDS; a hook goes with its self hold only with LEGACY_HOLDS as the rooms keep it", () => {
+import { CASES, LEGACY_PRE, LEGACY_ROOMS, run, runs } from "./holders-model.mjs";
+test("the holders: a tagged set on a room that keeps none, or a backfill giving pre to every Muse hook run again, breaks the record; the smaller cases hold with either LEGACY_HOLDS; a hook goes with its self hold only with LEGACY_HOLDS as the rooms keep it", () => {
   const chosen = runs().filter(([variant, i, , expect]) => expect === "broken" || (variant === "holders" && CASES[i][5]));
   assert.ok(chosen.length >= 16, String(chosen.length));
   for (const spec of chosen) {
     const r = run(spec);
     assert.ok(r.ok, r.label + ": " + r.states + " states, " + (r.broken ? "BROKEN " + r.broken.why + " after " + r.broken.path.join(" ") : "held"));
   }
-  // the member's own registration beside an untagged key on one link, the key taking off: the hook goes with it only as before tags
+  // the member's own registration beside an untagged key on one link, the key taking off: the hook goes with the key's drop only
+  // when the untagged drop counts "self" as its own, as LEGACY_HOLDS does
   const self = CASES.findIndex((c) => c[0].startsWith("S (the room's own token) and U"));
-  assert.equal(run(["holders", self, { legacy: LEGACY_NOW, tag: "now" }, "held"]).goneWithSelf, true, "with the rooms' LEGACY_HOLDS the key's drop takes it, as before holders were kept");
+  assert.equal(run(["holders", self, { legacy: LEGACY_ROOMS, tag: "rooms" }, "held"]).goneWithSelf, true, "with the rooms' LEGACY_HOLDS the key's drop takes it, self hold and all");
   assert.equal(run(["holders", self, { legacy: LEGACY_PRE, tag: "pre" }, "held"]).goneWithSelf, false, "narrowed to pre, never");
 });

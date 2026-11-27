@@ -32,14 +32,16 @@
 // Beside each member's Muse hook the room keeps who set it up on its link
 // (mhh, schema step 10): its holders, each a random tag per identity and
 // room (an agent key's, or a sign-in's), "self" (registered with the room's
-// own token, museSetHook) or "pre" (set by a call that sent no tag, or there
-// before holders were kept). A set on the hook's own link adds its holder
-// beside the others; a set on another link, a webhook or a removal clears
-// them. An identity looks at and lets go of its own hold (museHolderLook,
-// museHolderDrop), and the hook goes only when its last holder lets go, so
-// two identities on one seat never turn off each other's wake. An entry of a
-// key with no tag counts LEGACY_HOLDS as its own (museHookLook,
-// museDropLook).
+// own token, museSetHook) or "pre" (set by a call that sent no tag, or a
+// hook schema step 10 found with no holder: who set it is unknown). A set on
+// the hook's own link adds its holder beside the others; a set on another
+// link, a webhook or a removal clears them. An identity's look and drop are
+// of its own hold (museHolderLook, museHolderDrop), and the hook goes only
+// when its last holder lets go, so one identity's take-off or disconnect
+// never turns off a wake another holds; a leave or a revoke of the seat, the
+// member's own removal (museRemove), a webhook or a set on another link
+// still ends the hook for every holder. An entry of a key with no tag counts
+// LEGACY_HOLDS as its own (museHookLook, museDropLook).
 //
 // A hook can instead wake an HTTPS URL (kind "webhook", routes/webhook.ts,
 // lib/webhook.ts), for agents that are not on Muse: the same queue, cursor,
@@ -80,11 +82,11 @@ export type HookKind = "muse" | "webhook";
  *  written, for reading only. */
 export type MhhRow = { member: string, holder: string, at: number };
 
-/** The holds an entry of a key with no tag counts as its own: "pre" (set by
- *  a call that sent no tag, or there before holders were kept) and "self"
- *  (registered with the room's own token). While no tag is made anywhere,
- *  every Muse hook is held by these, so the looks and the drop for such an
- *  entry answer and write as they did before holders were kept. */
+/** The holds an entry of a key with no tag counts as its own: "pre", the
+ *  hold every set that sends no tag makes (and a hook step 10 found with no
+ *  holder), and "self", the room's own registration's. A Muse hook held by
+ *  nothing but these is one no tagged set has reached, so the look of such
+ *  an entry sees it and its drop takes it, whoever of the two set it. */
 export const LEGACY_HOLDS = ["pre", "self"];
 /** A holder tag: 16 random bytes, base64url (22 characters). */
 const HOLDER_TAG_RE = /^[A-Za-z0-9_-]{22}$/;
@@ -316,7 +318,7 @@ export const MuseMethods = {
    *  "Scout" and "scout" a wake the key set up outlives its seat. A token
    *  the room has no row for is refused (invite_invalid), as by
    *  lookupInvite. It is the drop of an entry with no tag: it lets go of
-   *  LEGACY_HOLDS (museLetGo), and the hook goes once no holder is left. It
+   *  LEGACY_HOLDS (museLetGo), and the hook goes when no holder is left. It
    *  says nothing of the seat but whether a hook went, the Muse link
    *  LEGACY_HOLDS hold after the call (link: null when they hold none) and
    *  the one the hook is on, whoever holds it (on: null for none, or a
@@ -368,7 +370,7 @@ export const MuseMethods = {
   /** An identity's drop of its own hold on link: the member and the
    *  refusals as museHolderLook. When the member's hook is a Muse hook on
    *  link held by the tag (or with legacy, the tag or LEGACY_HOLDS), those
-   *  holds go (museLetGo), and the hook only once no holder is left.
+   *  holds go (museLetGo), and the hook only when no holder is left.
    *  Answers whether the hook went, the link those holds hold after the
    *  call and the one the hook is on, as museDropLook. */
   museHolderDrop(tag: string, link: string, token: string | null, legacy: boolean): ({ ok: true, removed: boolean, link: string | null, on?: string | null } | Refusal) & { now: number } {
@@ -417,9 +419,9 @@ export const MuseMethods = {
   },
 
   /** Whether the member's hook is a Muse hook held by one of holders: a
-   *  row of one of them, or no row at all and holders take in "pre" (every
-   *  writer gives a hook a row, so a hook with none is one older code wrote:
-   *  who set it is unknown). */
+   *  row of one of them, or no row at all and holders take in "pre": every
+   *  writer gives a hook a row, so a hook with none is held by no one known,
+   *  which is what "pre" stands for. */
   museHeld(member: string, holders: string[]): boolean {
     const h = this.museRow(member);
     if (!h || h.kind !== "muse") return false;
@@ -471,7 +473,7 @@ export const MuseMethods = {
    *  nothing anyone can see changed. Whether the hook went. */
   museLetGo(member: string, name: string, link: string, holders: string[]): boolean {
     for (const x of holders) this.sql.exec("DELETE FROM mhh WHERE member = ? AND holder = ?", member, x);
-    // the hook goes only from the link it was held on, and only once no holder is left
+    // the hook goes only from the link it was held on, and only when no holder is left
     if (this.museHolders(member).length || this.museOnLink(member) !== link) return false;
     this.museDrop(name);
     this.notifyMembers(name);
@@ -506,7 +508,7 @@ export const MuseMethods = {
     this.sql.exec("DELETE FROM mq WHERE member = ?", member);
     const old = this.museRow(member);
     this.museWrite(member, who.name, room, "webhook", "", "", url, secret, old, now);
-    // a webhook has no holders: whoever set the Muse hook it replaces holds nothing now
+    // a webhook has no holders: whoever set the Muse hook it replaces holds nothing after it
     this.sql.exec("DELETE FROM mhh WHERE member = ?", member);
     this.roomName = room;
     // was a Muse hook: its link loses this room

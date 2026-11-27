@@ -115,10 +115,12 @@ export async function agentDataKey(id: string, secret: Uint8Array<ArrayBuffer>):
  *  id is a bearer secret at the bridge. tag, when the entry has one, is the
  *  holder its sets are held by in the room (room/muse.ts, mhh), and what its
  *  looks and drops go by (museHolderLook, museHolderDrop); pre: its looks
- *  and drops also count the room's untagged holds as its own (its wakes were
- *  set before it had a tag). This Worker passes both on and keeps them, and
- *  makes neither: an entry without a tag is looked at and dropped as before
- *  holders were kept. */
+ *  and drops also count the room's untagged holds as its own (wakes it
+ *  records may have been set without its tag). Both are only ever read here
+ *  (passed on to the room, observed by, kept on every write: tagsKept), so a
+ *  write keeps whatever an entry carries; an entry without a tag is looked
+ *  at and dropped by the holds a set without a tag makes (the room's
+ *  LEGACY_HOLDS). */
 export type AgentEntry = { room: string, token: string, name: string, added: number, state: "held" | "refused", code?: string, at?: number, hooks?: AgentWake[], tag?: string, pre?: true };
 
 /** The check beside keepsWakes (lib/wakes.ts) on every write of a key's

@@ -1733,11 +1733,11 @@ test("a disconnect's write on its last try that finds the record gone answers th
 });
 
 // ---- A key's entry with a holder tag (worker/lib/agentkey.ts AgentEntry.tag, pre) ----
-// This Worker makes no tag, and understands one: it looks and drops by it,
-// passes on the tag of the list its recording write wrote, drops by it when
-// cut meanwhile, and keeps it on every write (tagsKept beside keepsWakes).
-// The tests write a tag into a key's stored list by hand, as a Worker that
-// makes them would.
+// A tag on a key's entry is only ever read: the Worker looks and drops by
+// it, passes on the tag of the list its recording write wrote, drops by it
+// when cut meanwhile, and keeps it on every write (tagsKept beside
+// keepsWakes). The tests write a tag into a key's stored list by hand
+// (editStored), as no route writes one.
 import { agentSealRing } from "../../worker/lib/agentkey.ts";
 import { tagsKept } from "../../worker/lib/agentkey.ts";
 const TAG = "tttttttttttttttttttttT";
@@ -1767,14 +1767,14 @@ test("tagsKept: an entry recording a Muse wake keeps its tag, gains none without
   assert.doesNotThrow(() => tagsKept([e({ hooks: W })], [e({ hooks: W })]), "with no tag anywhere, nothing is refused");
 });
 
-test("an entry with a tag is looked at and dropped by its own hold (museHolderLook, museHolderDrop, with its token, legacy as its pre); one without, as before", async () => {
+test("an entry with a tag is looked at and dropped by its own hold (museHolderLook, museHolderDrop, with its token, legacy as its pre); its untagged set is held by pre", async () => {
   for (const pre of [false, true]) {
     const k = await museKeyed(["lima"]);
     try {
       k.w.harness("lima").room.access(k.tok.lima, false);
       assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
       assert.deepEqual(holdersIn(k.w, "lima"), ["pre"], "set with no tag: held by pre");
-      // a tag on the entry, and its hold in the room, as a Worker that makes tags leaves them
+      // a tag on the entry, and its hold in the room, as a tagged set leaves them
       await editStored(k.w, k.key, (rooms) => rooms.map((e) => ({ ...e, tag: TAG, ...(pre ? { pre: true } : {}) })));
       k.w.harness("lima").db.prepare("INSERT INTO mhh (member, holder, at) VALUES ('hank', ?, 1)").run(TAG);
       pastDeadlines(k.w, "lima");

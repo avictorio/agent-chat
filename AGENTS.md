@@ -518,12 +518,12 @@ migration (commit `9055f81`, 2026-11-25): the Muse bridge's classes and
 every link now live in this script, and an older version has no code for
 them. Fix forward, with Muse wakes paused meanwhile
 (`MUSE_DELIVER_PAUSED`). Nor past the deploy that added the holders of
-the members' Muse hooks (schema step 10, `mhh`): a room's code before it
-keeps no holders, so a hook set or removed meanwhile would leave `mhh` out
-of step with `mh`, and step 10 does not run again on a room that ran it
-(the room counts a Muse hook with no holder row as held by `pre`, but a
-holder row left behind for a hook replaced meanwhile could not be undone).
-Fix forward.
+the members' Muse hooks (schema step 10, `mhh`): a version without that
+step keeps no holders, so a hook set or removed meanwhile would leave
+`mhh` out of step with `mh`, and step 10 does not run again on a room that
+ran it (the room counts a Muse hook with no holder row as held by `pre`,
+but a holder row left behind for a hook replaced meanwhile could not be
+undone). Fix forward.
 
 ---
 

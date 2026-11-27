@@ -1149,8 +1149,8 @@ docs.txt section that owns its routes, caps and formats.
   it up on its link (`mhh`, schema step 10, `MhhRow`): a holder is a
   random tag per identity and room (16 bytes, base64url), `self` (the
   room's own registration, `museSetHook`) or `pre` (a set that sent no
-  tag, or a hook from before the step: who set it is unknown); no tag can
-  spell the last two. Every writer of a Muse hook applies one rule in the
+  tag, or a hook step 10 found with no holder: who set it is unknown); no
+  tag can spell the last two. Every writer of a Muse hook applies one rule in the
   same step as its write: on the same link the holders stay (a hook with
   no row first gets the `pre` it is held by) and the new holder joins
   (`INSERT OR IGNORE`); on another link, over a webhook or nothing, they
@@ -1162,8 +1162,8 @@ docs.txt section that owns its routes, caps and formats.
   `webhookRotate` and the delivery loop, which change a hook in place,
   keep them. A hook is held by holders H when it is a Muse hook with a row
   in H, or with no row at all and `pre` in H (every writer gives one, so
-  a hook with none is one older code wrote). An identity looks at and
-  lets go of its own hold: `museHolderLook(tag, token, legacy)` and
+  a hook with none is held by no one known, which `pre` stands for). An
+  identity looks at and lets go of its own hold: `museHolderLook(tag, token, legacy)` and
   `museHolderDrop(tag, link, token, legacy)` find the member by the tag's
   rows, else by the token's seat (a mismatch, or a tag under two members,
   is 409 `holder_mismatch`, logged `room.holder_mismatch`), and count the
@@ -1172,19 +1172,23 @@ docs.txt section that owns its routes, caps and formats.
   the bridge told, the members notified) only when no holder is left,
   otherwise nothing anyone can see changes. `museHookLook` and
   `museDropLook` are an untagged entry's look and drop: they count
-  `LEGACY_HOLDS` (`pre` and `self`) as its own, so while no tag is made
-  every Muse hook is held by them, and they answer and write as before
-  holders were kept. The four answer `on` beside `link`: the link the hook
-  is on whoever holds it. A key's entry may carry a `tag` (and `pre`:
-  its looks and drops also count the untagged holds); the Worker passes a
-  tag on to the set (`museRegister`, from the list its recording write
-  wrote), observes by it (`observe`) and keeps it on every write
-  (`tagsKept`, beside `keepsWakes`), and makes none, so a key's entries
-  are looked at and dropped as before. With tags, a hook goes only when
-  its last holder lets go, so two identities on one seat never turn off
-  each other's wake; a set sent with a tag to a room that keeps no
-  holders would be held as `pre` once the room starts on newer code, which
-  is why every room keeps holders before any tag is made (the model,
+  `LEGACY_HOLDS` (`pre`, the hold every set without a tag makes, and
+  `self`, the room's own registration's) as its own, so they see and take
+  every Muse hook no tagged set has reached. The four answer `on` beside
+  `link`: the link the hook is on whoever holds it. A key's entry may
+  carry a `tag` (and `pre`: its looks and drops also count the untagged
+  holds); the Worker only ever reads it: it passes the tag on to the set
+  (`museRegister`, from the list its recording write wrote), observes by
+  it (`observe`) and keeps it on every write (`tagsKept`, beside
+  `keepsWakes`), so an entry without one is looked at and dropped by the
+  untagged holds. A hook goes only when its last holder lets go, so one
+  identity's take-off or disconnect never turns off a wake another holds;
+  a leave or a revoke of the seat, the member's own removal (`DELETE
+  .../muse-hook`, `museRemove`), a webhook or a set on another link still
+  ends the hook for every holder. A set that carries a tag and reaches a
+  room keeping no holders leaves a hook that step 10 gives `pre`, which
+  the tagged entry does not count as its own, so a Worker that sends tags
+  needs every room to keep holders (the model,
   `tests/unit/holders-model.mjs`, variant `oldroom`). A hook has one
   routing, the last set's: a holder letting go changes no routing.
   None opens an invite or marks anyone seen: in the whole Room

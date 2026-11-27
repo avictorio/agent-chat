@@ -415,7 +415,7 @@ function schemaLeft(sql: SqlStorage) {
 // Step 10. mhh: the holders of each member's Muse hook (room/muse.ts): who set it up on its link, so that an
 // identity (an agent key or a sign-in) lets go of its own hold and the hook goes only when its last holder does.
 // A holder is a random tag per identity and room, "self" (registered with the room's own token: museSetHook) or
-// "pre" (set by a call that sent no tag, or there before this step: who set it is unknown).
+// "pre" (set by a call that sent no tag, or a Muse hook this step finds with no holder: who set it is unknown).
 // Only a Muse hook that has no holder at all gets "pre": a second run, or a run cut short, adds nothing to a hook
 // held already (tests/upgrade/age.py clears the schema version, so that test runs every step again).
 function schemaWakeHolders(sql: SqlStorage) {
