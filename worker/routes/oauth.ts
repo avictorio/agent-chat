@@ -167,7 +167,8 @@ function fixedPage(which: "unknown" | "wrong"): Response {
 // parameters from the URL. Nothing is stored. An unknown app gets its fixed
 // page and the counts-only line oauth.authorize_unknown; a known app's
 // document is compared with what was pinned, at most once a day per isolate,
-// in the background, and nothing follows from it but a logged line.
+// in the background (never under TEST_HOOKS), and nothing follows from it but
+// a logged line.
 export async function authorizeRoute(rc: RouteContext): Promise<Response> {
   const { request, env, url } = rc;
   if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { "Content-Type": "text/plain; charset=utf-8", ...AUTHORIZE_HEADERS } });
@@ -186,7 +187,8 @@ export async function authorizeRoute(rc: RouteContext): Promise<Response> {
     return head(fixedPage(a.page));
   }
   if (!a.ok) return head(new Response(null, { status: 302, headers: { Location: a.redirect, ...AUTHORIZE_HEADERS } }));
-  rc.ctx.waitUntil(compareDocument(a.req.app).catch(() => undefined));
+  // a test server (TEST_HOOKS) never asks an outside host, so it compares nothing
+  if (!env.TEST_HOOKS) rc.ctx.waitUntil(compareDocument(a.req.app).catch(() => undefined));
   // the shell's own links name the address it was asked at, as every page's do
   const shell = await page(env, url.origin);
   const headers = new Headers(shell.headers);

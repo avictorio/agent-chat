@@ -969,6 +969,26 @@ const heldStream = () => {
   };
 };
 const must = (c, msg) => { if (!c) throw new Error(msg); };
+// The Worker's own modules (its TypeScript, and their .js imports), through
+// the unit tests' module hooks, for a file that serves or quotes what the
+// Worker does: taken from there, the two cannot drift. rel is from the
+// repository's root.
+let workerHooked = false;
+async function workerModule(rel) {
+  const { register } = require('node:module');
+  const { pathToFileURL } = require('node:url');
+  const root = path.join(TESTS, '..', '..');
+  if (!workerHooked) { register(pathToFileURL(root + '/tests/unit/txt-hooks.mjs').href, pathToFileURL(__filename)); workerHooked = true; }
+  return import(pathToFileURL(path.join(root, rel)).href);
+}
+// GET /oauth/authorize as the Worker answers a request it checked: the app
+// shell with the headers it sets on every authorize answer, its own list
+// (worker/routes/pages.ts AUTHORIZE_HEADERS), so a header added there (COOP,
+// say) reaches the scenarios too.
+async function authorizePage() {
+  const { AUTHORIZE_HEADERS } = await workerModule('worker/routes/pages.ts');
+  return { status: 200, contentType: 'text/html', headers: { ...AUTHORIZE_HEADERS }, body: HTML };
+}
 // A scenario with its own harness (the home page) counts its failure here.
 function failed() {
   FAILURES++;
@@ -980,4 +1000,4 @@ function done(file) {
   process.exit(FAILURES ? 1 : 0);
 }
 
-module.exports = { ARENA_KIDS, fakePush, heldStream, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, START_PAGE, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };
+module.exports = { ARENA_KIDS, authorizePage, workerModule, fakePush, heldStream, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, START_PAGE, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };

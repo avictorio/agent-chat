@@ -1,0 +1,33 @@
+/* The approval page (SignInApproval.tsx), on home.css's base: the request
+   and the rooms scroll, and the bar with the two buttons stays at the foot
+   of the screen, so declining is always one tap away. The two buttons are
+   the same size, weight and colours. */
+.homeApp.signin {height: 100%; }
+.homeApp .signin-frame {position: fixed; inset: 0; display: flex; flex-direction: column; }
+.homeApp .signin-scroll {flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.homeApp .signin-inner {max-width: 640px; padding-bottom: 28px; }
+.homeApp .signin-brand {display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; margin: 0 0 20px; }
+.homeApp .signin-brand img {width: 28px; height: 28px; border-radius: 7px; flex: none; }
+.homeApp .signin-head {font-size: 22px; line-height: 1.3; font-weight: 500; letter-spacing: -0.01em; margin: 0 0 8px; overflow-wrap: anywhere; }
+.homeApp .signin-head strong {font-weight: 700; }
+/* focus starts on the heading so that no key press chooses a button; it is no
+   control, so it shows no ring */
+.homeApp .signin-head:focus {outline: none; }
+.homeApp .signin-why {color: var(--muted); margin: 0 0 16px; }
+.homeApp .signin-warn {background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--danger); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
+.homeApp .signin-warn p {margin: 0; font-weight: 600; }
+.homeApp .signin-warn p.hint {margin-top: 8px; font-weight: 400; }
+.homeApp .signin-card p {margin: 0 0 10px; }
+.homeApp .signin-card p:last-child {margin-bottom: 0; }
+.homeApp .signin-card .key-rooms {margin-bottom: 0; }
+.homeApp .signin-card p.hint.bad, .homeApp .signin-card p.key-pause {margin: 10px 0 0; }
+.homeApp .signin-state {font-size: 14px; margin: 0 0 16px; }
+.homeApp .signin-bar {flex: none; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+.homeApp .signin-bar-inner {max-width: 592px; margin: 0 auto; }
+.homeApp .signin-say {margin: 0 0 8px; }
+.homeApp .signin-say:empty {display: none; }
+.homeApp .signin-bar .hint.bad {margin: 0 0 8px; }
+.homeApp .signin-buttons {display: flex; gap: 10px; }
+.homeApp .signin-buttons .btn {flex: 1 1 0; justify-content: center; font-size: 15px; font-weight: 600; padding: 10px 14px; }
+/* a toast (Copy link's) shows above the bar, never over its buttons */
+.homeApp.signin .toast {bottom: calc(84px + env(safe-area-inset-bottom)); }

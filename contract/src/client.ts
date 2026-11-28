@@ -14,6 +14,9 @@ import type {
   PersonSeatEntry,
   SeatCheck,
   SeatsAdded,
+  SignInApproved,
+  SignInDisconnected,
+  SignInRedirect,
   VoiceState,
   VoiceUploadResult,
 } from "./types";
@@ -162,6 +165,41 @@ export class AgentKeyClient {
    *  same key, for the Muse wakes a first one left. */
   disconnect(): Promise<AgentKeyDropped> {
     return this.call<AgentKeyDropped>("DELETE", "/api/agent");
+  }
+}
+
+/** The sign-in's same-origin calls from the site's own pages: the
+ *  approval page's decide (params: the authorize URL's query string as the
+ *  page got it) and a disconnect-only code's disconnect. The person's
+ *  invite tokens go only in the body. A refusal is an ApiError whose body is
+ *  the answer's JSON, with retry_after added from a Retry-After header. */
+export class SignInClient {
+  private async call<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store", credentials: "same-origin" });
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string; retry_after?: number };
+    if (!res.ok) {
+      const ra = parseInt(res.headers.get("Retry-After") || "", 10);
+      const b = ra > 0 && data && typeof data === "object" && data.retry_after === undefined ? { ...data, retry_after: ra } : data;
+      throw new ApiError(res.status, data.error || "Request failed: " + res.status, b);
+    }
+    return data;
+  }
+
+  /** POST /api/oauth/decide: decline (nothing made), or approve with an
+   *  agent named name in the rooms, made with the person's invites (with
+   *  check: what it would do, written nowhere). A request the site finds
+   *  wrong answers a redirect to the app with its error. */
+  decide(params: string, approve: false): Promise<SignInRedirect>;
+  decide(params: string, approve: true, name: string, rooms: PersonSeatEntry[], check: true): Promise<SeatCheck | SignInRedirect>;
+  decide(params: string, approve: true, name: string, rooms: PersonSeatEntry[], check?: false): Promise<SignInApproved | SignInRedirect>;
+  decide(params: string, approve: boolean, name?: string, rooms?: PersonSeatEntry[], check?: boolean): Promise<SeatCheck | SignInApproved | SignInRedirect> {
+    if (!approve) return this.call("/api/oauth/decide", { params, approve: false });
+    return this.call("/api/oauth/decide", check ? { params, approve: true, name, rooms, check: true } : { params, approve: true, name, rooms });
+  }
+
+  /** POST /api/oauth/disconnect: the connection a disconnect-only code names, cut everywhere. */
+  disconnect(code: string): Promise<SignInDisconnected> {
+    return this.call<SignInDisconnected>("/api/oauth/disconnect", { code });
   }
 }
 

@@ -276,7 +276,7 @@ async function worker() {
     must((await row(page, 'keyRooms', 'family-trip')).includes('Scout is already taken here. Pick another name.') && !(await row(page, 'keyRooms', 'family-trip')).includes('Room "'), 'the problem, without the room prefix: ' + (await row(page, 'keyRooms', 'family-trip')));
     must((await row(page, 'keyRooms', 'book-club')).includes('You can create up to 5 invites a day'), 'the day cap');
     must((await row(page, 'keyRooms', 'trip-two')).includes("Use Scout's seat here (already a member, invited by you)"), 'the seat in use offered');
-    must((await row(page, 'keyRooms', 'trip-three')).includes("Uses Scout's unused invite here (invited by you). Anyone you gave that invite's link can still use it, and another key that holds this seat still works for it: disconnecting this key does not cut that one."), 'the unused seat reused, said, with the other key');
+    must((await row(page, 'keyRooms', 'trip-three')).includes("Uses Scout's unused invite here (invited by you). Anyone you gave that invite's link can still use it, and another key or connection that holds this seat still works for it: disconnecting this key does not cut that one."), 'the unused seat reused, said, with the other key');
     must(S.calls.filter((c) => c.p === '/api/agents/invite').length === 1 && S.calls.find((c) => c.p === '/api/agents/invite').body.check === true, 'one check, no real call');
     const sent = S.calls.find((c) => c.p === '/api/agents/invite').body;
     // in the device's order (Your rooms sorts them by name)
@@ -350,9 +350,9 @@ async function worker() {
     await tick(page, 'keyRooms', 'book-club');
     await page.click('#keyGo');
     await page.waitForSelector('#keyReuse', { timeout: 5000 });
-    must((await text(page, '#keyReuse')) === 'book-club reuses a seat that already exists. Another key that holds such a seat keeps working for it. Make key goes ahead.', await text(page, '#keyReuse'));
+    must((await text(page, '#keyReuse')) === 'book-club reuses a seat that already exists. Another key or connection that holds such a seat keeps working for it. Make key goes ahead.', await text(page, '#keyReuse'));
     must(await page.$eval('#keyReuse', (e) => e.getAttribute('role') === 'status'), 'said to a screen reader');
-    must((await row(page, 'keyRooms', 'book-club')).includes("Uses Scout's unused invite here (invited by you). Anyone you gave that invite's link can still use it, and another key that holds this seat still works for it: disconnecting this key does not cut that one."), 'the room\'s own line');
+    must((await row(page, 'keyRooms', 'book-club')).includes("Uses Scout's unused invite here (invited by you). Anyone you gave that invite's link can still use it, and another key or connection that holds this seat still works for it: disconnecting this key does not cut that one."), 'the room\'s own line');
     const calls = S.calls.filter((c) => c.p === '/api/agents/invite');
     must(calls.length === 1 && calls[0].body.check === true, 'the check only: no key made yet');
     must(!(await page.$('#keyMade')) && await page.$eval('#keyGo', (b) => !b.disabled), 'Make key, still there to go ahead');
@@ -374,7 +374,7 @@ async function worker() {
     await page.waitForSelector('#keyMade', { timeout: 5000 });
     const calls = S.calls.filter((c) => c.p === '/api/agents/invite');
     must(calls.length === 3 && !('check' in calls[2].body) && calls[2].body.name === 'Scouts', 'the call itself, as checked: ' + JSON.stringify(calls.map((c) => c.body.check)));
-    must((await text(page, '#keyMadeShared')) === 'An existing seat may be held by another key too: that key still works for it, and disconnecting this one does not cut it.', await text(page, '#keyMadeShared'));
+    must((await text(page, '#keyMadeShared')) === 'An existing seat may be held by another key or connection too: that one still works for it, and disconnecting this key does not cut it.', await text(page, '#keyMadeShared'));
     must((await text(page, '#keyMadeNote')).endsWith(W.SEAT_SHARED), 'the note says the same');
   });
   await scenario('keys-add-pause', { rooms: { ...MINE, 'trip-two': 'tok_two' }, api: { ...OPEN, looks: { tok_two: PERSON() }, add: async (body) => (body.check ? { body: { ok: true, rooms: [{ room: 'trip-two', name: 'Scout', seat: 'reused', opened: false }] } } : { status: 201, body: { rooms: [{ room: 'trip-two', name: 'Scout', opened: false, seat: 'reused' }], rooms_held: 4 } }) } }, async (page, S) => {
@@ -383,7 +383,7 @@ async function worker() {
     await tick(page, 'keyAddRooms', 'trip-two');
     await page.click('#keyAdd');
     await page.waitForSelector('#keyAddReuse', { timeout: 5000 });
-    must((await text(page, '#keyAddReuse')) === 'trip-two reuses a seat that already exists. Another key that holds such a seat keeps working for it. Add rooms goes ahead.', await text(page, '#keyAddReuse'));
+    must((await text(page, '#keyAddReuse')) === 'trip-two reuses a seat that already exists. Another key or connection that holds such a seat keeps working for it. Add rooms goes ahead.', await text(page, '#keyAddReuse'));
     await page.click('#keyAdd');
     await page.waitForFunction(() => /Added: trip-two\./.test(document.getElementById('keyHeldSay')?.textContent || ''), null, { timeout: 5000 });
     const adds = S.calls.filter((c) => c.p === '/api/agent/rooms/invite');
@@ -516,7 +516,7 @@ async function worker() {
     await page.click('#keyHeldRooms li[data-room="family-trip"] button');
     await page.waitForSelector('#keyOffDlg[open]', { timeout: 3000 });
     must((await text(page, '#keyOffTitle')) === 'Take family-trip off this key?', await text(page, '#keyOffTitle'));
-    must((await text(page, '#keyOffDlg')).includes('The key forgets this room. The agent stays a member of family-trip if it still is one: to take it out of family-trip, use Leave this room instead. The Muse wake set up with this key in family-trip is turned off.'), await text(page, '#keyOffDlg'));
+    must((await text(page, '#keyOffDlg')).includes('The key forgets this room. The agent stays a member of family-trip if it still is one: to take it out of family-trip, use Leave this room instead. This key lets go of the Muse wake set up with it in family-trip: the wake goes unless another key or connection holding the same seat, or a registration with the room\'s own token, also holds it.'), await text(page, '#keyOffDlg'));
     must(!/leave_room/.test(await text(page, '#keyOffDlg')), 'no tool named to a person');
     must(await page.$eval('#keyOffDlg', (d) => d.getAttribute('aria-labelledby') === 'keyOffTitle'), 'labelled by its title');
   });
@@ -550,7 +550,7 @@ async function worker() {
     must(t.includes("Take old-room off this key? The key forgets this room, which no longer takes the key's invite (revoked, or the agent left). Nothing else changes there."), t);
     must(!/stays a member/.test(t), 'it does not say the agent stays a member');
   });
-  // the same for a refused row whose Muse wake the key recorded: the dialog says that wake is turned off, and nothing contradicts it
+  // the same for a refused row whose Muse wake the key recorded: the dialog says the key lets go of that wake, and nothing contradicts it
   const INFO_REFUSED_WAKE = { ...INFO, rooms: INFO.rooms.map((r) => (r.room === 'old-room' ? { ...r, muse_wake: true } : r)) };
   await state('takeoff-refused-wake', { rooms: MINE, api: { info: async () => ({ body: INFO_REFUSED_WAKE }) } }, async (page) => {
     await paste(page, KEY);
@@ -558,7 +558,7 @@ async function worker() {
     await page.click('#keyHeldRooms li[data-room="old-room"] button');
     await page.waitForSelector('#keyOffDlg[open]', { timeout: 3000 });
     const t = await text(page, '#keyOffDlg');
-    must(t.includes("Take old-room off this key? The key forgets this room, which no longer takes the key's invite (revoked, or the agent left), and the Muse wake set up with this key there is turned off."), t);
+    must(t.includes("Take old-room off this key? The key forgets this room, which no longer takes the key's invite (revoked, or the agent left), and this key lets go of the Muse wake set up with it there (it stays on while another key or connection holding the same seat, or a registration with the room's own token, holds it)."), t);
     must(!/Nothing else changes/.test(t) && !/stays a member/.test(t), 'no "nothing else changes", no seat');
     must((t.match(/Muse wake/g) || []).length === 1, 'said once');
     must((await row(page, 'keyHeldRooms', 'old-room')).includes('Muse wake set up with this key'), 'the row says the key records one there: ' + (await row(page, 'keyHeldRooms', 'old-room')));
@@ -621,7 +621,7 @@ async function worker() {
     await page.click('#keyHeldRooms li[data-room="family-trip"] .key-leave');
     await page.waitForSelector('#keyLeaveDlg[open]', { timeout: 3000 });
     must((await text(page, '#keyLeaveTitle')) === 'Have Scout leave family-trip?', await text(page, '#keyLeaveTitle'));
-    must((await text(page, '#keyLeaveDlg')) === 'Have Scout leave family-trip? Scout leaves family-trip for good: its invite there stops working, here and on any other key that holds this seat. Matches not yet started that it created or was invited to are called off for everyone, with a line from the Referee; matches under way go on without it, its turns running out on their clocks. Its claimed questions are released, its picture and voice there are removed, a Muse wake or webhook it has there is turned off, and its uploads in flight end. Its messages and reactions stay, and a member of family-trip can invite it anew. family-trip then comes off this key, or stays listed as left if that cannot be finished yet. Cancel Leave room', await text(page, '#keyLeaveDlg'));
+    must((await text(page, '#keyLeaveDlg')) === 'Have Scout leave family-trip? Scout leaves family-trip for good: its invite there stops working, here and on any other key that holds this seat. Matches not yet started that it created or was invited to are called off for everyone, with a line from the Referee; matches under way go on without it, its turns running out on their clocks. Its claimed questions are released, its picture and voice there are removed, a Muse wake or webhook it has there is turned off, and its uploads in flight end. Its messages and reactions stay, and a member of family-trip can invite it anew. family-trip then comes off this key, or stays listed on it if that cannot be finished yet. Cancel Leave room', await text(page, '#keyLeaveDlg'));
     must(await page.$eval('#keyLeaveDlg', (d) => d.getAttribute('aria-labelledby') === 'keyLeaveTitle'), 'labelled by its title');
     must(JSON.stringify(await page.$$eval('#keyLeaveDlg .dlg-actions button', (bs) => bs.map((b) => [b.id, b.classList.contains('danger-solid')]))) === JSON.stringify([['keyLeaveNo', false], ['keyLeaveYes', true]]), 'Cancel, then the danger button last');
     // both controls fit the row (stacked on a phone, not cut off)
@@ -640,7 +640,7 @@ async function worker() {
   await state('leave-kept', { rooms: MINE, api: leaving(LEFT('family-trip', 'marked_wake'), (rooms) => rooms.map((r) => (r.room === 'family-trip' ? { ...r, state: 'refused', code: 'invite_revoked', at: NOW } : r))) }, async (page, S) => {
     await leaveAnswered(page, S, 'family-trip');
     await page.waitForFunction(() => !document.querySelector('#keyHeldRooms li[data-room="family-trip"] .key-leave'), null, { timeout: 5000 });
-    must((await text(page, '#keyHeldSay')) === 'Scout left family-trip. This key could not yet confirm that the Muse wake it set up in family-trip is off, so family-trip is still listed on this key, as left: Take off this key tries again.', await text(page, '#keyHeldSay'));
+    must((await text(page, '#keyHeldSay')) === 'Scout left family-trip. This key could not yet confirm that it has let go of the Muse wake it set up in family-trip, so family-trip is still listed on this key, as left: Take off this key tries again.', await text(page, '#keyHeldSay'));
     must(!/\/api\//.test(await text(page, '#keyHeld')), 'no API path shown to a person');
     must((await row(page, 'keyHeldRooms', 'family-trip')).includes("This room no longer takes the key's invite (revoked, or the agent left)"), 'the row as the key holds it now: ' + (await row(page, 'keyHeldRooms', 'family-trip')));
   }, '#keyHeld');
@@ -663,6 +663,26 @@ async function worker() {
       if (!after) must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
     }, '#keyHeld');
   }
+  // a leave whose mark found the entry refused already, with another code (the room deleted meanwhile): still listed, never "as left"
+  for (const kept of ['marked', 'marked_wake']) {
+    await scenario('keys-leave-' + kept + '-other-code', { rooms: MINE, api: leaving(LEFT('book-club', kept), (rooms) => rooms.map((r) => (r.room === 'book-club' ? { ...r, state: 'refused', code: 'room_deleted', at: NOW } : r))) }, async (page, S) => {
+      await leaveAnswered(page, S, 'book-club');
+      const said = kept === 'marked'
+        ? 'Scout left book-club. book-club is still listed on this key: Take off this key takes it off.'
+        : 'Scout left book-club. This key could not yet confirm that it has let go of the Muse wake it set up in book-club, so book-club is still listed on this key: Take off this key tries again.';
+      must((await text(page, '#keyHeldSay')) === said, kept + ': ' + (await text(page, '#keyHeldSay')));
+    });
+  }
+  // a leave the key could not record yet leaves the room shown as held; the disconnect after it names no membership there
+  await scenario('keys-leave-listed-then-disconnect', { rooms: MINE, api: { ...leaving(LEFT('book-club', 'listed'), (rooms) => rooms), drop: async () => ({ body: { deleted: true, rooms: ['family-trip', 'book-club', 'old-room'], muse_wakes_removed: [], muse_wakes_left: [], note: W.dropNote([]) } }) } }, async (page, S) => {
+    await leaveAnswered(page, S, 'book-club');
+    must(!!(await page.$('#keyHeldRooms li[data-room="book-club"] .key-leave')), 'book-club still shows as held');
+    await page.click('#keyDrop');
+    await page.waitForSelector('#keyDropDlg[open]', { timeout: 3000 });
+    await page.click('#keyDropYes');
+    await page.waitForSelector('#keyDropped', { timeout: 5000 });
+    must((await text(page, '#keyDropped')) === 'Disconnected. The agent stays a member of each of these rooms that still takes its invite: family-trip.', await text(page, '#keyDropped'));
+  });
   await state('leave-last-member', { rooms: MINE, api: leaving({ status: 409, body: { error: W.leaveLastMember('Scout', 'book-club', 2), code: 'last_member', room: 'book-club', unopened: 2 } }) }, async (page, S) => {
     await leaveAnswered(page, S, 'book-club');
     must((await text(page, '#keyHeldErr')) === 'Scout is the last member of book-club who has joined: leaving would delete the room, and this page never deletes a room. Nothing was changed.', await text(page, '#keyHeldErr'));
@@ -739,7 +759,7 @@ async function worker() {
     await page.waitForSelector('#keyOpened', { timeout: 5000 });
     await page.click('#keyDrop');
     await page.waitForSelector('#keyDropDlg[open]', { timeout: 3000 });
-    must((await text(page, '#keyDropDlg')).includes("Disconnect this key everywhere? It stops working at once, in every room. The agent stays a member of each room that still takes this key's invite until it leaves or the site's owner removes it; any room link it was given itself still works; links it already got for an upload or a file run until they expire. The Muse wakes this key set up are turned off."), await text(page, '#keyDropDlg'));
+    must((await text(page, '#keyDropDlg')).includes("Disconnect this key everywhere? It stops working at once, in every room. The agent stays a member of each room that still takes this key's invite until it leaves or the site's owner removes it; any room link it was given itself still works; links it already got for an upload or a file run until they expire. It lets go of the Muse wakes it set up: each goes, unless another key or connection holding the same seat, or a registration with the room's own token, also holds it."), await text(page, '#keyDropDlg'));
   });
   await state('disconnected', { rooms: MINE, api: { ...OPEN, drop: async () => ({ body: DROP_LEFT }) } }, async (page) => {
     await paste(page, KEY);
@@ -749,7 +769,7 @@ async function worker() {
     await page.click('#keyDropYes');
     await page.waitForSelector('#keyDropped', { timeout: 5000 });
     // old-room no longer took the key's invite: it is not named as a room the agent is a member of
-    must((await text(page, '#keyDropped')) === 'Disconnected. The agent is still a member of: family-trip, book-club. These rooms did not confirm that the Muse wakes this key set up there are off: family-trip. Try again turns them off once they answer; Disconnect on the Muse gadget stops every wake at once.', await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropped')) === 'Disconnected. The agent stays a member of each of these rooms that still takes its invite: family-trip, book-club. These rooms did not confirm that this key has let go of the Muse wakes it set up there: family-trip. Try again tries them again once they answer; Disconnect on the Muse gadget stops every wake at once.', await text(page, '#keyDropped'));
     must((await text(page, '#keyDropAgain')) === 'Try again' && await page.$eval('#keyDropAgain', (b) => !b.disabled), 'Try again, beside the result');
     must(!(await page.$('#keyOpened')) && await page.$eval('#keyPaste', (i) => i.value) === '', 'the key is cleared from the view');
     await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'keyPaste', null, { timeout: 3000 });
@@ -765,7 +785,7 @@ async function worker() {
     await page.waitForSelector('#keyDropAgain', { timeout: 5000 });
     await page.click('#keyDropAgain');
     await page.waitForFunction(() => !document.getElementById('keyDropAgain'), null, { timeout: 5000 });
-    must((await text(page, '#keyDropped')) === 'Disconnected. The agent is still a member of: family-trip, book-club. The Muse wakes this key set up are off.', await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropped')) === 'Disconnected. The agent stays a member of each of these rooms that still takes its invite: family-trip, book-club. This key has let go of every Muse wake it set up.', await text(page, '#keyDropped'));
     const drops = S.calls.filter((c) => c.p === '/api/agent' && c.m === 'DELETE');
     must(drops.length === 2 && drops.every((c) => c.auth === 'Bearer ' + KEY), 'the same DELETE, with the same key: ' + drops.length);
     must(!(await page.$('#keyOpened')), 'the key is still not shown');
@@ -785,8 +805,8 @@ async function worker() {
     await page.waitForSelector('#keyDropAgain', { timeout: 5000 });
     await page.click('#keyDropAgain');
     await until(() => S.drops === 2);
-    await page.waitForFunction(() => /are off: family-trip\. Try again/.test(document.getElementById('keyDropped')?.textContent || ''), null, { timeout: 5000 });
-    must((await text(page, '#keyDropped')).endsWith('These rooms did not confirm that the Muse wakes this key set up there are off: family-trip. Try again turns them off once they answer; Disconnect on the Muse gadget stops every wake at once.'), await text(page, '#keyDropped'));
+    await page.waitForFunction(() => /let go of the Muse wakes it set up there: family-trip\. Try again/.test(document.getElementById('keyDropped')?.textContent || ''), null, { timeout: 5000 });
+    must((await text(page, '#keyDropped')).endsWith('These rooms did not confirm that this key has let go of the Muse wakes it set up there: family-trip. Try again tries them again once they answer; Disconnect on the Muse gadget stops every wake at once.'), await text(page, '#keyDropped'));
     must(!!(await page.$('#keyDropAgain')), 'still offered while a wake is left');
     // a record gone meanwhile (another disconnect finished it): said, and nothing left to try
     await page.click('#keyDropAgain');
@@ -800,7 +820,7 @@ async function worker() {
     await paste(page, KEY);
     await page.waitForSelector('#keyFinish', { timeout: 5000 });
     must((await text(page, '#keyHeldErr')) === 'This key is not a current one: it was mistyped or disconnected.', await text(page, '#keyHeldErr'));
-    must((await text(page, '#keyFinish')) === 'If you disconnected this key and the page said some rooms did not confirm their Muse wakes were off, this tries again to turn them off (some may still not confirm); it changes nothing for a key that was mistyped or is fully disconnected. Try its Muse wakes again', await text(page, '#keyFinish'));
+    must((await text(page, '#keyFinish')) === 'If you disconnected this key and the page said some rooms did not confirm the key had let go of their Muse wakes, this tries them again (some may still not confirm); it changes nothing for a key that was mistyped or is fully disconnected. Try its Muse wakes again', await text(page, '#keyFinish'));
     must(!S.calls.some((c) => c.m === 'DELETE'), 'nothing sent until asked');
   }, '#keyHeld');
   await state('refused-key-done', { rooms: MINE, api: { ...REFUSED_KEY, drop: async (S) => { S.drops = (S.drops || 0) + 1; await new Promise((r) => setTimeout(r, 400)); return { body: { deleted: true, rooms: ['family-trip'], muse_wakes_removed: ['family-trip'], muse_wakes_left: [], note: W.dropNote([]) } }; } } }, async (page, S) => {
@@ -810,7 +830,7 @@ async function worker() {
     await page.waitForFunction(() => /Trying this key's Muse wakes again/.test(document.getElementById('keyHeldSay')?.textContent || ''), null, { timeout: 3000 });
     must(await page.$eval('#keyFinishGo', (b) => b.disabled), 'the button waits while it works');
     await page.waitForSelector('#keyDropped', { timeout: 5000 });
-    must((await text(page, '#keyDropped')) === 'Disconnected. The Muse wakes this key set up are off.', await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropped')) === 'Disconnected. This key has let go of every Muse wake it set up.', await text(page, '#keyDropped'));
     const drops = S.calls.filter((c) => c.m === 'DELETE' && c.p === '/api/agent');
     must(drops.length === 1 && drops[0].auth === 'Bearer ' + KEY, 'the DELETE, with the key');
     must(!(await page.$('#keyFinish')) && !(await page.$('#keyDropAgain')), 'nothing more to offer');
@@ -821,10 +841,10 @@ async function worker() {
     await page.waitForSelector('#keyFinishGo', { timeout: 5000 });
     await page.click('#keyFinishGo');
     await page.waitForSelector('#keyDropAgain', { timeout: 5000 });
-    must((await text(page, '#keyDropped')) === 'Disconnected. These rooms did not confirm that the Muse wakes this key set up there are off: family-trip. Try again turns them off once they answer; Disconnect on the Muse gadget stops every wake at once.', await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropped')) === 'Disconnected. These rooms did not confirm that this key has let go of the Muse wakes it set up there: family-trip. Try again tries them again once they answer; Disconnect on the Muse gadget stops every wake at once.', await text(page, '#keyDropped'));
     await page.click('#keyDropAgain');
     await page.waitForFunction(() => !document.getElementById('keyDropAgain'), null, { timeout: 5000 });
-    must((await text(page, '#keyDropped')) === 'Disconnected. The Muse wakes this key set up are off.', await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropped')) === 'Disconnected. This key has let go of every Muse wake it set up.', await text(page, '#keyDropped'));
     must(S.calls.filter((c) => c.m === 'DELETE').every((c) => c.auth === 'Bearer ' + KEY) && S.drops === 2, 'two DELETEs with the key');
   });
   await state('refused-key-unknown', { rooms: MINE, api: { ...REFUSED_KEY, drop: async () => ({ status: 403, body: { error: W.AGENT_KEY_INVALID, code: 'agent_key_invalid' } }) } }, async (page) => {
@@ -842,7 +862,7 @@ async function worker() {
     await page.waitForSelector('#keyDropDlg[open]', { timeout: 3000 });
     await page.click('#keyDropYes');
     await page.waitForSelector('#keyDropped', { timeout: 5000 });
-    must((await text(page, '#keyDropped')) === "Disconnected. This key's record could not be read, so the Muse wakes it set up could not be turned off: Disconnect on the Muse gadget stops every wake at once.", await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropped')) === "Disconnected. This key's record could not be read, so the Muse wakes it set up could not be let go of: Disconnect on the Muse gadget stops every wake at once.", await text(page, '#keyDropped'));
   });
 
   // ---- what the view never does, and its keyboard paths ----
@@ -936,7 +956,7 @@ async function worker() {
     await page.click('#keyDrop');
     await page.waitForSelector('#keyDropped', { timeout: 5000 });
     must(JSON.stringify(await page.evaluate(() => window.__asked)) === '["Disconnect this key everywhere?"]', 'confirm with the same question');
-    must((await text(page, '#keyDropped')) === 'Disconnected. The agent is still a member of: family-trip.', await text(page, '#keyDropped'));
+    must((await text(page, '#keyDropped')) === 'Disconnected. The agent stays a member of each of these rooms that still takes its invite: family-trip.', await text(page, '#keyDropped'));
   });
   done('agent-keys');
 })();

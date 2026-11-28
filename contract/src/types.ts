@@ -516,3 +516,27 @@ export interface AgentKeyDropped {
   muse_wakes_left: string[] | null;
   note: string;
 }
+
+/** POST /api/oauth/decide, a decline, or a request the site sends back
+ *  to the app with its error: where the page sends the browser (the app's
+ *  own address, with error or code, state and iss). */
+export interface SignInRedirect {
+  redirect: string;
+}
+
+/** POST /api/oauth/decide, approved: the redirect with the code, the
+ *  seats made or reused (as a key's are), and the disconnect-only code,
+ *  which the page keeps in this browser and shows to nobody. */
+export interface SignInApproved {
+  redirect: string;
+  disconnect_code?: string;
+  rooms: SeatMade[];
+}
+
+/** POST /api/oauth/disconnect: no such connection (it had ended), or the
+ *  connection cut, with the rooms that did not confirm it let go of its
+ *  Muse wakes there (empty: none; null: its record could not be read) and
+ *  a note on it. */
+export type SignInDisconnected =
+  | { disconnected: false; code: "unknown" }
+  | { disconnected: true; wakes_left: string[] | null; note: string };

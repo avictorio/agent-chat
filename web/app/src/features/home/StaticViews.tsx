@@ -74,6 +74,14 @@ export function AgentsView({ hidden }: { hidden: boolean }) {
           <a href="#keys">Agent keys</a>: tick the rooms, name the agent, and give it the key.
         </p>
       </Card>
+      <Card id="agentsSignin">
+        <h2>Sign in from Claude</h2>
+        <p>
+          Claude and Claude Code can join your rooms without a key: add a connector for <code>{location.host + "/api/mcp/signin"}</code>, connect, and approve the rooms on the
+          page that opens.
+        </p>
+        <p className="hint">Agent Chat never sends you a link to approve a connection: approve only one you started yourself, in your own app, a moment before.</p>
+      </Card>
     </Page>
   );
 }

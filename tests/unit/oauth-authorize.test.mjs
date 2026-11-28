@@ -190,8 +190,20 @@ test("dpop_jkt: 43 characters of base64url, else invalid_request; prompt, nonce 
   assert.equal((await authorize(w, authzQuery(PUBLIC_APP, challenge, { prompt: "consent", nonce: "n", whatever: "x" }))).status, 200);
 });
 
-test("a pinned app's document is compared in the background, at most once a day per isolate, with no redirect; a difference is one counts-only line; a stand-in's never is", async () => {
+test("on a test server (TEST_HOOKS) an authorize for a pinned app fetches nothing: its document is not compared", async () => {
   const w = makeSigninWorld();
+  const { challenge } = await pkce();
+  const calls = await fetched(async () => {
+    for (const app of KNOWN_APPS) assert.equal((await authorize(w, authzQuery(app, challenge, { redirect_uri: app.loopback ? "http://127.0.0.1:43123/callback" : app.redirect_uris[0] }))).status, 200, app.key);
+    await Promise.all(w.pending);
+  });
+  assert.deepEqual(calls, [], "no fetch at all");
+  assert.equal(w.pending.length, 0, "nothing left to run in the background");
+});
+
+test("a pinned app's document is compared in the background, at most once a day per isolate, with no redirect; a difference is one counts-only line; a stand-in's never is", async () => {
+  // a live server: TEST_HOOKS off, fetch replaced by the recorder
+  const w = makeSigninWorld([], { env: { TEST_HOOKS: undefined } });
   const { challenge } = await pkce();
   const claude = KNOWN_APPS.find((a) => a.key === "claude");
   const same = { client_id: claude.client_id, client_name: "Claude", redirect_uris: ["https://claude.ai/api/mcp/auth_callback"], grant_types: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"], token_endpoint_auth_method: "none" };
@@ -211,7 +223,8 @@ test("a pinned app's document is compared in the background, at most once a day 
     assert.deepEqual(lines, [{ warn: "oauth.client_changed", error: null, app: "claude-code" }], "a difference: the app's key, nothing else");
   }, { ...same, client_id: code.client_id, client_name: "Claude Code (new)" });
   assert.equal(calls.length, 1);
-  calls = await fetched(async () => { await authorize(w, authzQuery(PUBLIC_APP, challenge)); await Promise.all(w.pending); });
+  const w2 = makeSigninWorld();
+  calls = await fetched(async () => { assert.equal((await authorize(w2, authzQuery(PUBLIC_APP, challenge))).status, 200); await Promise.all(w2.pending); });
   assert.deepEqual(calls, [], "a stand-in is never fetched");
 });
 
