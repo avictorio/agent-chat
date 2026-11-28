@@ -58,21 +58,29 @@ test("whats_waiting on AGENT_ROOMS_MAX full rooms: its JSON under 60,000 charact
   assert.ok(sealed < 8192, "the sealed list is " + sealed + " bytes on " + AGENT_ROOMS_MAX + " rooms");
 });
 
-// The sealed list's size with every entry of a full key at the wake bound:
-// AGENT_ROOMS_MAX rooms, each name and token at its longest, each refused
-// (a code and a time besides), and each holding AGENT_WAKE_ITEMS_MAX links
+// The sealed lists' sizes with every entry of a full key or sign-in at the
+// wake bound: AGENT_ROOMS_MAX rooms, each name and token at its longest,
+// each refused (a code and a time besides), each with its holder tag (22
+// characters) and pre, its name MAX_NAME three-byte characters (the most
+// UTF-8 a stored name takes), and each holding AGENT_WAKE_ITEMS_MAX links
 // and outstanding recordings together, in every split (k links, the rest
-// recordings), every link at the longest a key records
-// (AGENT_WAKE_LINK_MAX: a longer one is neither recorded nor set) and at
-// the bridge's own length. Printed, and bounded: the list goes into
-// one SQLite row and one RPC with each change, and into each call's memory.
-import { agentDataKey, agentSealRing, newAgentKey, newRecordingId } from "../../worker/lib/agentkey.ts";
+// recordings), every link at the longest a key records (AGENT_WAKE_LINK_MAX:
+// a longer one is neither recorded nor set) and at the bridge's own length.
+// For a sign-in, its wake list too (wakesOf: each entry's tag in place of
+// its token, no name), which its one ak row holds beside the room list.
+// Measured on this sealing: the room list at most 24,604 bytes, the wake
+// list at most 19,484, the two together at most 44,088. Printed, and
+// bounded: each list under 32,768 and the two together under 49,152, far
+// inside SQLite's row and the RPC's limits; the lists go into one row and
+// one RPC with each change, and into each call's memory.
+import { agentDataKey, agentSealRing, agentSealWakes, newAgentKey, newRecordingId, newHolderTag, newKeyBytes, wakesOf } from "../../worker/lib/agentkey.ts";
 import { AGENT_WAKE_ITEMS_MAX, AGENT_WAKE_LINK_MAX } from "../../worker/limits.ts";
 import { wakeWeight } from "../../worker/lib/wakes.ts";
 
-test("the sealed list of a full key with every entry at the wake bound: printed, and under 24 KB", async () => {
+test("the sealed lists of a full key or sign-in with every entry at the wake bound, tagged, with pre and the longest names: printed; each under 32,768 bytes, the two together under 49,152", async () => {
   const k = newAgentKey();
   const { dk } = await agentDataKey(k.id, k.secret);
+  const wk = newKeyBytes();
   const at = Date.now();
   const sizes = {};
   for (const [what, len] of [["the bridge's links", ("ml_" + "0".repeat(32)).length], ["the longest links a key records", AGENT_WAKE_LINK_MAX]]) {
@@ -80,17 +88,24 @@ test("the sealed list of a full key with every entry at the wake bound: printed,
       const rooms = Array.from({ length: AGENT_ROOMS_MAX }, (_, i) => ({
         room: fit("room-" + i + "-with-a-name-as-long-as-room-names-are-allowed-to-be", 64),
         token: fit("tok" + i + "-xxxxxxxxxxxxxxxxxxxxxxxx", 24),
-        name: fit("Hank Hawthorne the Longest Named Agent", MAX_NAME),
+        name: "漢".repeat(MAX_NAME),
         added: at, state: "refused", code: "invite_revoked", at,
+        tag: newHolderTag(), pre: true,
         hooks: Array.from({ length: links }, (__, j) => ({
           link: fit("ml_" + i + "_" + j + "_" + "0".repeat(len), len),
           recs: j ? [] : Array.from({ length: AGENT_WAKE_ITEMS_MAX - links }, (___, r) => ({ id: newRecordingId(), deadline: at + 15000 + r })),
         })),
       }));
       assert.equal(wakeWeight(rooms[0]), AGENT_WAKE_ITEMS_MAX);
-      sizes[what + ", " + links + " links"] = b64urlDecode(await agentSealRing(dk, k.id, 1, rooms)).length;
+      const ring = b64urlDecode(await agentSealRing(dk, k.id, 1, rooms)).length;
+      const wakes = b64urlDecode(await agentSealWakes(wk, k.id, 1, wakesOf(rooms))).length;
+      sizes[what + ", " + links + " links"] = { ring, wakes, both: ring + wakes };
     }
   }
-  console.log("the sealed list on " + AGENT_ROOMS_MAX + " rooms at the wake bound (" + AGENT_WAKE_ITEMS_MAX + " links and recordings each): " + JSON.stringify(sizes) + " bytes");
-  for (const [what, n] of Object.entries(sizes)) assert.ok(n < 24576, what + ": " + n + " bytes");
+  console.log("the sealed lists on " + AGENT_ROOMS_MAX + " rooms at the wake bound (" + AGENT_WAKE_ITEMS_MAX + " links and recordings each): " + JSON.stringify(sizes) + " bytes");
+  for (const [what, n] of Object.entries(sizes)) {
+    assert.ok(n.ring < 32768, what + ": the room list " + n.ring + " bytes");
+    assert.ok(n.wakes < 32768, what + ": the wake list " + n.wakes + " bytes");
+    assert.ok(n.both < 49152, what + ": both " + n.both + " bytes");
+  }
 });

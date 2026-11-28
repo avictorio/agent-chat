@@ -124,8 +124,9 @@ for (const key of Object.keys(liveVars)) {
 // (the API suite passes it to its local server only). If it ever appears in the live
 // config - as a var or a secret - the outage simulation is one owner call
 // away from production. TEST_MUSE_ORIGIN, with TEST_HOOKS, sends the Muse
-// bridge's calls to the suite's fake Muse. Fail loudly and by name.
-for (const name of ["TEST_HOOKS", "TEST_MUSE_ORIGIN"]) {
+// bridge's calls to the suite's fake Muse, and TEST_SIGNIN_ORIGIN makes a
+// local server the sign-in's issuer. Fail loudly and by name.
+for (const name of ["TEST_HOOKS", "TEST_MUSE_ORIGIN", "TEST_SIGNIN_ORIGIN"]) {
   if (name in liveVars || liveSecrets.has(name))
     fail(name + ": TEST HOOK LIVE - remove it from the dashboard config immediately; it belongs only on the test suite's local server");
 }

@@ -62,14 +62,15 @@ import {
   MIB,
   MUSE_CODE_MAX,
   ROOM_RE,
+  SIGNIN_SCOPE,
   SETTLED_BODY_MAX,
   SMALL_BODY_MAX,
   pollGap,
   spanS,
 } from "../limits.js";
-import { BadRequest, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
+import { BadRequest, CORS_SIGNIN, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
 import { isGoneError } from "../lib/errors.js";
-import { AGENT_UNREADABLE, agentCredential, agentDataKey, agentSealRing, agentUnseal, agentVerifier, newAgentKey, newRecordingId, tagsKept, type AgentEntry } from "../lib/agentkey.js";
+import { AGENT_UNREADABLE, agentCredential, agentDataKey, agentSealRing, agentUnseal, agentVerifier, clearPre, newAgentKey, newHolderTag, newRecordingId, tagsKept, withTag, type AgentEntry } from "../lib/agentkey.js";
 import { keepsWakes, wakeAnswered, wakeExpired, wakeLinksAfter, wakeRecord, wakeSettle, wakeWeight, type WakeSeen } from "../lib/wakes.js";
 import { hashKey, networkKey } from "../lib/address.js";
 import { cleanName, memberNameProblem, nameFold, sameName } from "../lib/text.js";
@@ -77,11 +78,14 @@ import { warn } from "../lib/log.js";
 import {
   AGENT_KEY_INVALID, AGENT_KEY_MISSING, LEAVE_NO_DELETE, NOT_AGENT_KEY, activeCapError, agentInstructions, agentKeyNote, claudeCodeLine, dayCapError, dropBusy, dropNote, leaveEntryRefused,
   leaveLastMember, leaveNote, leaveNotJoined, leaveRoomGone, mcpJsonEntry, nameTakenError, notPersonInviteError, personKeyHandoff, personKeyNote, removedHeldNote, removedRefusedNote, seatInUseError, unusedNote,
-  wakeAgain, wakeLinkUnusable, wakeLost, wakeNotSettled, wakeStillSetting, type AgentVariant, type LeaveKept,
+  wakeAgain, wakeLinkUnusable, wakeLost, wakeNotSettled, wakeStillSetting, type AgentVariant, type LeaveKept, type WakeSaid, type Who,
+  AGENT_KEY_INVALID as KEY_INVALID_SENTENCE, SIGNIN_TOKEN_ENDED, signinInstructions, signinLeaveNote, signinNeeded, signinNotHeld, signinRemovedNote, signinRoomHeld, signinWrongInstructions, signinWrongInvite, signinWrongKey,
 } from "../agents/onboarding.js";
 import { leaveAfter, leaveAsk, leaveBody, leaveConfirmRefusal } from "./members.js";
 import type { LastMemberRefusal, LeaveResult } from "../room/members.js";
-import { MCP_AGENT_CATALOG_VERSION, agentServerInfo, mcpAgentCatalogBuilt, mcpCallOf, mcpErr, mcpHasAgentTool, mcpOk } from "../agents/mcp.js";
+import { MCP_AGENT_CATALOG_VERSION, MCP_SIGNIN_CATALOG_VERSION, agentServerInfo, mcpAgentCatalogBuilt, mcpCallOf, mcpErr, mcpHasAgentTool, mcpHasSigninTool, mcpOk, mcpSigninCatalogBuilt, signinServerInfo } from "../agents/mcp.js";
+import { signinCredential, signinOrigin } from "../lib/oauth.js";
+import { openSigninAccess } from "./oauth.js";
 import { mcpServe, roomToolAnswer, type ToolAnswer, type Worded } from "./agents.js";
 import { museClaim } from "./muse.js";
 import type { RouteContext } from "../index.js";
@@ -104,15 +108,50 @@ function quota(env: Env): DurableObjectStub {
 
 /** A current key: its identity's object, id, secret and verifier. */
 type Keyed = { stub: DurableObjectStub, id: string, secret: Uint8Array<ArrayBuffer>, verifier: string };
-/** ... and what its open read: the wrapped data key, the list's version and sealed list, when it was made. */
-type Opened = Keyed & { wrapped: string | null, ver: number, ring: string, created: number };
-/** ... and the list opened. */
-type Unsealed = Opened & { dk: Uint8Array<ArrayBuffer>, rooms: AgentEntry[] };
+/** What the routes' list functions need of an identity, a key or a sign-in
+ *  (routes/oauth.ts signinCred): its open (the list as it is now; null once
+ *  cut, revoked or gone, rewrite's "gone"), the room list opened from what
+ *  an open read (null when it does not open, logged as agentUnseal logs),
+ *  and the new list sealed at the next version and swapped in, compare-and-
+ *  set on the version read. Nothing else in the routes knows which kind of
+ *  identity it has but the words it answers with (via). */
+export type Cred = {
+  open(): Promise<Opened | null>,
+  unseal(o: Opened): Promise<Unsealed | null>,
+  swap(u: Unsealed, rooms: AgentEntry[]): Promise<{ ok: true, ring: string } | { ok: false, code?: "stale" }>,
+};
+/** An identity opened: its object and id, what its open read (the wrapped
+ *  data key; for a sign-in the wake key wrapped too; the list's version and
+ *  sealed list; when it was made), its credential, and which kind it is. */
+export type Opened = { stub: DurableObjectStub, id: string, wrapped: string | null, wk?: string | null, ver: number, ring: string, created: number, cred: Cred, via: Who };
+/** ... and the list opened (for a sign-in, with its wake key). */
+export type Unsealed = Opened & { dk: Uint8Array<ArrayBuffer>, rooms: AgentEntry[], wkBytes?: Uint8Array<ArrayBuffer> };
+
+/** The key's credential: the four calls the key's routes have always made,
+ *  agentOpen and agentSwap on its slot "key", agentUnseal and agentSealRing. */
+function keyCred(k: Keyed): Cred {
+  const cred: Cred = {
+    async open() {
+      const o = await k.stub.agentOpen("key", k.verifier);
+      return o.ok ? { stub: k.stub, id: k.id, wrapped: o.wrapped, ver: o.ver, ring: o.ring, created: o.created, cred, via: "key" } : null;
+    },
+    async unseal(o) {
+      const u = await agentUnseal(k.id, k.secret, o.wrapped, o.ver, o.ring);
+      return u ? { ...o, dk: u.dk, rooms: u.rooms } : null;
+    },
+    async swap(u, rooms) {
+      const ring = await agentSealRing(u.dk, u.id, u.ver + 1, rooms);
+      const s = await k.stub.agentSwap("key", k.verifier, u.ver, ring);
+      return s.ok ? { ok: true, ring } : s;
+    },
+  };
+  return cred;
+}
 
 /** A refusal: its status, code (when it has one), sentence, room (when it
  *  names one) and, for a cap that resets with time, the seconds until it
  *  does (sent over REST as Retry-After). */
-type Refused = { status: number, code?: string, error: string, room?: string, retry_after?: number };
+export type Refused = { status: number, code?: string, error: string, room?: string, retry_after?: number };
 
 /** The key's three refusals, over REST and (as -32001) over MCP. */
 const KEY_REFUSED: Record<Exclude<AgentVariant, "ok">, Refused & { code: string }> = {
@@ -131,21 +170,19 @@ async function openKey(env: Env, request: Request): Promise<{ variant: "ok", key
   if (c.kind === "bad") return { variant: "invalid" };
   const stub = identity(env, c.id);
   const verifier = await agentVerifier(c.id, c.secret);
-  const o = await stub.agentOpen("key", verifier);
-  if (!o.ok) return { variant: "invalid" };
-  return { variant: "ok", key: { stub, id: c.id, secret: c.secret, verifier, wrapped: o.wrapped, ver: o.ver, ring: o.ring, created: o.created } };
+  const o = await keyCred({ stub, id: c.id, secret: c.secret, verifier }).open();
+  if (!o) return { variant: "invalid" };
+  return { variant: "ok", key: o };
 }
 
-/** The key opened again (its list as it is now); null once disconnected. */
-async function reopen(k: Keyed): Promise<Opened | null> {
-  const o = await k.stub.agentOpen("key", k.verifier);
-  return o.ok ? { stub: k.stub, id: k.id, secret: k.secret, verifier: k.verifier, wrapped: o.wrapped, ver: o.ver, ring: o.ring, created: o.created } : null;
+/** The identity opened again (its list as it is now); null once disconnected. */
+async function reopen(k: Opened): Promise<Opened | null> {
+  return k.cred.open();
 }
 
-/** The list opened with the key's secret; null when it does not open (logged, lib/agentkey.ts). */
+/** The list opened with the identity's credential; null when it does not open (logged, lib/agentkey.ts). */
 async function unseal(k: Opened): Promise<Unsealed | null> {
-  const u = await agentUnseal(k.id, k.secret, k.wrapped, k.ver, k.ring);
-  return u ? { ...k, dk: u.dk, rooms: u.rooms } : null;
+  return k.cred.unseal(k);
 }
 
 /** The key opened again once a request's body is in, and its list as that
@@ -173,14 +210,16 @@ type Changed<T> = { rooms: AgentEntry[], then: T, seen?: WakeSeen[], own?: strin
  *  its swap), an answer that wrote nothing, or a swap that did not happen. */
 type Rewritten<T> = { done: T, after: Unsealed } | { answer: T } | { busy: true } | { gone: true } | { unreadable: true };
 
-/** Changes the key's list, compare-and-set: change gets the list as stored
- *  (asking a room anything it needs after that read, so an observation it
- *  makes is stamped with that version); the new list is checked
- *  (keepsWakes, against the version read), sealed at the next version and
- *  swapped in, and on a stale swap (another call wrote meanwhile) the list
- *  is read again and the change made again, its observations taken again,
- *  tries times at most. A swap the object refuses otherwise means the key
- *  was disconnected (cut) meanwhile (gone). */
+/** Changes the identity's list, compare-and-set: change gets the list as
+ *  stored (asking a room anything it needs after that read, so an
+ *  observation it makes is stamped with that version); pre is dropped from
+ *  every entry the new list leaves with no recorded link (clearPre); the new
+ *  list is checked (keepsWakes, against the version read, and tagsKept),
+ *  sealed at the next version and swapped in (the credential's swap), and on
+ *  a stale swap (another call wrote meanwhile) the list is read again and
+ *  the change made again, its observations taken again, tries times at most.
+ *  A swap the object refuses otherwise means the identity was disconnected
+ *  (cut) meanwhile (gone). */
 async function rewrite<T>(first: Unsealed, change: (u: Unsealed) => Promise<Changed<T>>, tries = AGENT_SWAP_TRIES): Promise<Rewritten<T>> {
   let u: Unsealed | null = first;
   for (let i = 0; i < tries; i++) {
@@ -192,11 +231,11 @@ async function rewrite<T>(first: Unsealed, change: (u: Unsealed) => Promise<Chan
     }
     const c = await change(u);
     if ("answer" in c) return { answer: c.answer };
-    keepsWakes(u.ver, u.rooms, c.rooms, c.seen || [], c.own || []);
-    tagsKept(u.rooms, c.rooms);
-    const ring = await agentSealRing(u.dk, u.id, u.ver + 1, c.rooms);
-    const s = await u.stub.agentSwap("key", u.verifier, u.ver, ring);
-    if (s.ok) return { done: c.then, after: { ...u, ver: u.ver + 1, ring, rooms: c.rooms } };
+    const rooms = clearPre(c.rooms);
+    keepsWakes(u.ver, u.rooms, rooms, c.seen || [], c.own || []);
+    tagsKept(u.rooms, rooms);
+    const s = await u.cred.swap(u, rooms);
+    if (s.ok) return { done: c.then, after: { ...u, ver: u.ver + 1, ring: s.ring, rooms } };
     if (s.code !== "stale") return { gone: true };
     u = null;
   }
@@ -326,7 +365,7 @@ const BODY_TOO_LARGE = "That request's body is too large: send {\"rooms\": [{\"r
  *  site per UTC day, and each room the key holds (every one has taken its
  *  token by then) per UTC day, the network and the rooms as hashes. The
  *  counters' object puts each in its window by its own clock. */
-async function creationCaps(request: Request, rooms: string[]): Promise<AgentCap[]> {
+export async function creationCaps(request: Request, rooms: string[]): Promise<AgentCap[]> {
   const caps: AgentCap[] = [
     { k: "net:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))), max: AGENT_KEYS_PER_IP, per: AGENT_KEYS_WINDOW_S },
     { k: "all", max: AGENT_KEYS_PER_DAY, per: "day" },
@@ -382,7 +421,7 @@ async function agentKeyNow(env: Env, url: URL, caps: AgentCap[], found: Array<{ 
   let made = false;
   try {
     const now = Date.now();
-    const rooms: AgentEntry[] = found.map((f) => ({ room: f.room, token: f.token, name: f.name, added: now, state: "held" }));
+    const rooms: AgentEntry[] = found.map((f) => ({ room: f.room, token: f.token, name: f.name, added: now, state: "held", tag: newHolderTag() }));
     // a fresh random id names an object nobody made; one that exists all
     // the same gets one more try with a new id
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -433,7 +472,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *  with waitUntil before it starts, so before its first write (the platform
  *  gives such work about 30 seconds after the answer), and awaited by the
  *  answer. */
-function outlive<T>(rc: RouteContext, work: () => Promise<T>): Promise<T> {
+export function outlive<T>(rc: RouteContext, work: () => Promise<T>): Promise<T> {
   let start = () => {};
   const p = new Promise<void>((r) => { start = r; }).then(work);
   rc.ctx.waitUntil(p.catch(() => undefined));
@@ -448,8 +487,10 @@ const NO_SEAT = new Set(["invite_invalid", "room_missing", "room_deleted"]);
 /** Asks the room about an entry's seat, after the list was read at version
  *  ver: a look, or a drop of one link; for an entry with a holder tag its
  *  own hold's (museHolderLook, museHolderDrop, with its token, counting the
- *  room's untagged holds as its own when it has pre), for one without the
- *  untagged holds' (museHookLook, museDropLook). Its answer as an
+ *  room's untagged holds as its own when it has pre; a sign-in's wake-list
+ *  entry, whose token is its tag, with no token and no untagged holds: the
+ *  tag's rows find its seat), for one without the untagged holds'
+ *  (museHookLook, museDropLook). Its answer as an
  *  observation stamped with ver: link the Muse link the asked holds hold
  *  after the call, which is what lib/wakes.ts reads as the link the hook is
  *  on; on, beside it, the link the hook is on whoever holds it (null for a
@@ -464,8 +505,12 @@ async function observe(env: Env, e: AgentEntry, ver: number, drop: string | null
     let r: { ok: boolean, removed?: boolean, link?: unknown, on?: unknown, code?: string, now?: unknown };
     try {
       const stub = roomStub(env, e.room);
-      if (e.tag !== undefined) r = drop === null ? await stub.museHolderLook(e.tag, e.token, e.pre === true) : await stub.museHolderDrop(e.tag, drop, e.token, e.pre === true);
-      else r = drop === null ? await stub.museHookLook(e.token) : await stub.museDropLook(e.token, drop);
+      if (e.tag !== undefined) {
+        // a wake-list entry is told by its token, which is its tag (a room's invite token is 18 bytes, a tag 16)
+        const tok = e.token === e.tag ? null : e.token;
+        const legacy = tok !== null && e.pre === true;
+        r = drop === null ? await stub.museHolderLook(e.tag, tok, legacy) : await stub.museHolderDrop(e.tag, drop, tok, legacy);
+      } else r = drop === null ? await stub.museHookLook(e.token) : await stub.museDropLook(e.token, drop);
     } catch { continue; /* asked once more, then none; the caller counts it */ }
     if (typeof r.now !== "number" || !Number.isFinite(r.now)) return null;
     const base = { room: e.room, token: e.token, ver, now: r.now };
@@ -494,7 +539,7 @@ function stillOut(e: AgentEntry, now: number): number {
  *  to: the last observation (null: none), the entry's links that stay
  *  after it, whether a hook went, and how long a recording may still land
  *  (wait: 0 once none may). */
-type Cleared = { seen: WakeSeen | null, stay: string[], removed: boolean, wait: number };
+type Cleared = { seen: (WakeSeen & { on?: string | null }) | null, stay: string[], removed: boolean, wait: number };
 async function clear(env: Env, e: AgentEntry, ver: number, waitMax: number): Promise<Cleared> {
   const links = (e.hooks || []).map((h) => h.link);
   let o = await observe(env, e, ver, null);
@@ -514,20 +559,30 @@ async function clear(env: Env, e: AgentEntry, ver: number, waitMax: number): Pro
   return { seen: o, stay: wakeLinksAfter(e, o).map((h) => h.link), removed, wait };
 }
 
-/** Turns off every Muse wake the key recorded in one room, before its entry
- *  is taken off or replaced, from the list read at version ver (clear,
- *  waiting for nothing). Ready, with its observation, only when every link
- *  of the entry may leave on it; otherwise the try_again the caller
- *  answers, changing nothing: a recording that may still reach the room
- *  (nothing dropped), or a room that did not let every link go. */
-async function dropWake(env: Env, e: AgentEntry, ver: number): Promise<{ ok: true, seen: WakeSeen, removed: boolean } | { ok: false, refused: Refused }> {
+/** Lets go of every Muse wake the identity recorded in one room, before its
+ *  entry is taken off or replaced, from the list read at version ver
+ *  (clear, waiting for nothing). Ready, with its observation, only when
+ *  every link of the entry may leave on it; otherwise the try_again the
+ *  caller answers, changing nothing: a recording that may still reach the
+ *  room (nothing dropped), or a room that did not let every link go. Its
+ *  on is the observation's: the link the hook is on after the call,
+ *  whoever holds it (absent when the room found no member). */
+async function dropWake(env: Env, e: AgentEntry, ver: number, who: Who = "key"): Promise<{ ok: true, seen: WakeSeen, removed: boolean, on?: string | null } | { ok: false, refused: Refused }> {
   const c = await clear(env, e, ver, 0);
   if (c.seen && c.wait > 0) {
     const sec = Math.max(1, Math.ceil(c.wait / 1000));
-    return { ok: false, refused: { status: 503, code: "try_again", error: wakeStillSetting(e.room, sec), room: e.room, retry_after: sec } };
+    return { ok: false, refused: { status: 503, code: "try_again", error: wakeStillSetting(e.room, sec, who), room: e.room, retry_after: sec } };
   }
-  if (!c.seen || c.stay.length) return { ok: false, refused: { status: 503, code: "try_again", error: wakeNotSettled(e.room), room: e.room, retry_after: 1 } };
-  return { ok: true, seen: c.seen, removed: c.removed };
+  if (!c.seen || c.stay.length) return { ok: false, refused: { status: 503, code: "try_again", error: wakeNotSettled(e.room, who), room: e.room, retry_after: 1 } };
+  const on = c.seen.on;
+  return on === undefined ? { ok: true, seen: c.seen, removed: c.removed } : { ok: true, seen: c.seen, removed: c.removed, on };
+}
+
+/** What a take-off says of a wake it let go of: kept when the room says
+ *  the hook is still on one of the links the entry recorded (another
+ *  holder keeps it), else off; a missing on is not kept. */
+function wakeSaid(e: AgentEntry, d: { on?: string | null }): "off" | "kept" {
+  return typeof d.on === "string" && (e.hooks || []).some((h) => h.link === d.on) ? "kept" : "off";
 }
 
 /** The wakes a cut key set up, turned off from its list read at version
@@ -536,7 +591,7 @@ async function dropWake(env: Env, e: AgentEntry, ver: number): Promise<{ ok: tru
  *  AGENT_WAKE_SET_MS + AGENT_WAKE_SKEW_MS. Which rooms did not let every
  *  link go (with their entries as they stay), which let every link go with
  *  a hook taken off (never one of the first), and the observations. */
-async function dropWakes(env: Env, rooms: AgentEntry[], ver: number): Promise<{ removed: string[], left: string[], remain: AgentEntry[], seen: WakeSeen[] }> {
+export async function dropWakes(env: Env, rooms: AgentEntry[], ver: number): Promise<{ removed: string[], left: string[], remain: AgentEntry[], seen: WakeSeen[] }> {
   const hooked = rooms.filter((e) => e.hooks && e.hooks.length);
   const got: Cleared[] = [];
   let next = 0;
@@ -688,7 +743,7 @@ async function addRooms(env: Env, u: Unsealed, entries: Array<{ room: string, to
     const now = Date.now();
     const rooms = x.rooms.slice();
     for (const f of found) {
-      const entry: AgentEntry = { room: f.room, token: f.token, name: f.name, added: now, state: "held" };
+      const entry: AgentEntry = { room: f.room, token: f.token, name: f.name, added: now, state: "held", tag: newHolderTag() };
       const at = rooms.findIndex((e) => e.room === f.room);
       if (at >= 0) rooms[at] = entry;
       else rooms.push(entry);
@@ -697,28 +752,33 @@ async function addRooms(env: Env, u: Unsealed, entries: Array<{ room: string, to
   });
 }
 
-/** Takes one room off the key. A room where the key recorded a Muse wake
- *  (the entry's hooks) has it turned off first (dropWake, after this
+/** Takes one room off the identity. A room where it recorded a Muse wake
+ *  (the entry's hooks) has its hold let go of first (dropWake, after this
  *  write's read of the list), and goes off the list only when every link of
- *  it may leave on the room's answer: once the room is off the key nothing
- *  but the gadget could turn that wake off (with a key a person made, the
- *  agent holds no token of that room), and a wake for a room the agent can
- *  no longer read through its key serves nobody. A recording that may still
- *  reach the room (outstanding and not expired), or a room that does not
- *  let every link go, keeps the room on the key, its wake as it was:
- *  try_again. A room that refused the key's invite says so instead of
- *  the seat, and says its wake is off when it had one. */
+ *  it may leave on the room's answer: once the room is off the identity
+ *  nothing but the gadget could turn that wake off (with a key a person made,
+ *  or a sign-in, the agent holds no token of that room), and a wake for a
+ *  room the agent can no longer read through it serves nobody. A recording
+ *  that may still reach the room (outstanding and not expired), or a room
+ *  that does not let every link go, keeps the room on, its wake as it was:
+ *  try_again. A room that refused the invite says so instead of the seat.
+ *  Of the wake it says what the room said after the drop: off, and only then
+ *  muse_wake_removed, or kept on by another holder. A sign-in takes off only
+ *  a refused room (its caller refuses a held one) and says so in its words. */
 type Removed = Refused | { room: string, removed: true, muse_wake_removed?: true, note: string };
 async function removeRoom(env: Env, u: Unsealed, room: string): Promise<Rewritten<Removed>> {
+  const note = (e: AgentEntry, wake: WakeSaid) => (u.via === "signin" ? signinRemovedNote(room, wake) : e.state === "refused" ? removedRefusedNote(room, wake) : removedHeldNote(room, wake));
   return rewrite<Removed>(u, async (x): Promise<Changed<Removed>> => {
     const e = x.rooms.find((y) => y.room === room);
-    if (!e) return { answer: { status: 404, code: "room_not_held", error: room + " is not on this key.", room } };
+    if (!e) return { answer: { status: 404, code: "room_not_held", error: room + (u.via === "signin" ? " is not on this sign-in." : " is not on this key."), room } };
+    // a sign-in takes a room off only by leaving it, or once its seat is gone (refused)
+    if (u.via === "signin" && e.state === "held") return { answer: { status: 409, code: "room_held", error: signinRoomHeld(room), room } };
     const rooms = x.rooms.filter((y) => y.room !== room);
-    if (!(e.hooks && e.hooks.length)) return { rooms, then: { room, removed: true as const, note: e.state === "refused" ? removedRefusedNote(room, false) : removedHeldNote(room, false) } };
-    const d = await dropWake(env, e, x.ver);
+    if (!(e.hooks && e.hooks.length)) return { rooms, then: { room, removed: true as const, note: note(e, false) } };
+    const d = await dropWake(env, e, x.ver, u.via);
     if (!d.ok) return { answer: d.refused };
-    const note = e.state === "refused" ? removedRefusedNote(room, true) : removedHeldNote(room, true);
-    return { rooms, then: { room, removed: true as const, muse_wake_removed: true as const, note }, seen: [d.seen] };
+    const wake = wakeSaid(e, d);
+    return { rooms, then: wake === "off" ? { room, removed: true as const, muse_wake_removed: true as const, note: note(e, wake) } : { room, removed: true as const, note: note(e, wake) }, seen: [d.seen] };
   });
 }
 
@@ -888,7 +948,7 @@ async function leaveOff(env: Env, u: Unsealed, e: AgentEntry): Promise<LeaveKept
       if (!y) return { answer: elsewhere(x) };
       const rooms = x.rooms.filter((z) => z !== y);
       if (!(y.hooks && y.hooks.length)) return { rooms, then: "off" };
-      const d = await dropWake(env, y, x.ver);
+      const d = await dropWake(env, y, x.ver, u.via);
       if (!d.ok) return marked(x, y);
       return { rooms, then: "off", seen: [d.seen] };
     });
@@ -949,7 +1009,7 @@ type Inviter = { name: string, created: number };
 type Seat = { seat: "new", name: string } | { seat: "reused", name: string, token: string, opened: boolean };
 /** An entry and what was found for it so far: its inviter once its look
  *  passed, its seat once planned, or why not. */
-type Planned = { e: PersonEntry, inviter?: Inviter, seat?: Seat, problem?: Refused };
+export type Planned = { e: PersonEntry, inviter?: Inviter, seat?: Seat, problem?: Refused };
 
 const PERSON_BODY_TOO_LARGE = "That request's body is too large: send {\"name\", \"rooms\": [{\"room\", \"inviter_token\"}]}.";
 
@@ -981,7 +1041,7 @@ function personShape(v: unknown, i: number, seen: Set<string>, topName: unknown)
  *  itself, and any other value (a string, a number, null) is refused as the
  *  field readers refuse a flag of the wrong type, so a check is never taken
  *  for the call. */
-function personBody(b: Body | null): { entries: PersonEntry[], check: boolean } | Refused {
+export function personBody(b: Body | null): { entries: PersonEntry[], check: boolean } | Refused {
   const list = b ? b.rooms : undefined;
   if (!Array.isArray(list) || list.length < 1 || list.length > AGENT_ROOMS_MAX) return { status: 400, error: "\"rooms\" must list 1 to " + AGENT_ROOMS_MAX + " rooms: [{\"room\", \"inviter_token\"}], with your own invites" };
   const seen = new Set<string>();
@@ -1027,7 +1087,7 @@ function asProblem(r: Refused): { status: number, code?: string, error: string }
 /** Every entry still without a problem gets its inviter looked up, in
  *  order. all (a check) records each refusal as its entry's problem;
  *  otherwise the first refusal is the answer. */
-async function lookInviters(env: Env, planned: Planned[], all: boolean): Promise<Refused | null> {
+export async function lookInviters(env: Env, planned: Planned[], all: boolean): Promise<Refused | null> {
   for (const p of planned) {
     if (p.problem) continue;
     const l = await inviterLookup(env, p.e);
@@ -1077,7 +1137,7 @@ async function planSeat(stub: DurableObjectStub, e: PersonEntry, inv: Inviter): 
 /** Every entry whose inviter passed gets its seat planned, in order; all
  *  (a check) records each refusal as its entry's problem, otherwise the
  *  first is the answer. No other entry's room is asked anything. */
-async function planSeats(env: Env, planned: Planned[], all: boolean): Promise<Refused | null> {
+export async function planSeats(env: Env, planned: Planned[], all: boolean): Promise<Refused | null> {
   for (const p of planned) {
     if (p.problem || !p.inviter) continue;
     const s = await planSeat(roomStub(env, p.e.room), p.e, p.inviter);
@@ -1094,7 +1154,7 @@ async function planSeats(env: Env, planned: Planned[], all: boolean): Promise<Re
 
 /** An entry as a check answers it: its seat, or its problem alone (a
  *  refused inviter's entry says nothing else about its room). */
-function plannedView(p: Planned) {
+export function plannedView(p: Planned) {
   if (p.problem || !p.seat) return { room: p.e.room, name: p.e.name, problem: asProblem(p.problem || { status: 500, error: "Not checked." }) };
   return { room: p.e.room, name: p.seat.name, seat: p.seat.seat, opened: p.seat.seat === "reused" ? p.seat.opened : false };
 }
@@ -1113,7 +1173,7 @@ type SeatNow = { seat: "new" | "reused", token: string, name: string, opened: bo
 /** The rooms where a call made invites: sure (the room answered with the
  *  invite) and maybe (the room's answer was lost, and a look afterwards
  *  could not say whether it wrote one). */
-type Made = { sure: string[], maybe: string[] };
+export type Made = { sure: string[], maybe: string[] };
 async function seatNow(env: Env, p: Planned, made: Made, unreached: string): Promise<SeatNow | Refused> {
   const room = p.e.room, inv = p.inviter as Inviter;
   const stub = roomStub(env, room);
@@ -1152,7 +1212,7 @@ async function seatNow(env: Env, p: Planned, made: Made, unreached: string): Pro
 /** The fields a failed call adds once it has made invites, or may have:
  *  the rooms where it did (left_unused), those where it cannot tell
  *  (maybe_unused), and the sentence that says they stay unused. */
-function unusedFields(made: Made): Record<string, unknown> | undefined {
+export function unusedFields(made: Made): Record<string, unknown> | undefined {
   if (!made.sure.length && !made.maybe.length) return undefined;
   const out: Record<string, unknown> = {};
   if (made.sure.length) out.left_unused = made.sure.slice();
@@ -1163,8 +1223,8 @@ function unusedFields(made: Made): Record<string, unknown> | undefined {
 
 /** A new identity with no rooms yet, and its key: made first, so that each
  *  seat goes on it the moment it is made. One more try with a new id when
- *  the id names an object that exists. */
-async function emptyIdentity(env: Env): Promise<{ key: string, u: Unsealed } | null> {
+ *  the id names an object that exists. drop deletes it again (agentDrop). */
+async function emptyIdentity(env: Env): Promise<{ key: string, u: Unsealed, drop: () => Promise<unknown> } | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const k = newAgentKey();
     const verifier = await agentVerifier(k.id, k.secret);
@@ -1172,7 +1232,7 @@ async function emptyIdentity(env: Env): Promise<{ key: string, u: Unsealed } | n
     const stub = identity(env, k.id);
     const ring = await agentSealRing(dk, k.id, 1, []);
     const r = await stub.agentMake(verifier, wrapped, ring);
-    if (r.ok) return { key: k.key, u: { stub, id: k.id, secret: k.secret, verifier, wrapped, ver: 1, ring, created: r.created, dk, rooms: [] } };
+    if (r.ok) return { key: k.key, u: { stub, id: k.id, wrapped, ver: 1, ring, created: r.created, cred: keyCred({ stub, id: k.id, secret: k.secret, verifier }), via: "key", dk, rooms: [] }, drop: () => stub.agentDrop("key", verifier) };
     if (r.code !== "exists") return null;
   }
   return null;
@@ -1236,26 +1296,42 @@ export async function agentInviteCreateRoute(rc: RouteContext): Promise<Response
   });
 }
 
+/** A seat made or reused, as a new identity's answer names it. */
+export type SeatMade = { room: string, name: string, opened: boolean, seat: "new" | "reused" };
+/** The seats of a new identity, in order (personKeyNow's and the sign-in
+ *  approval's one loop, routes/oauth.ts signinSeatsNow): each planned entry's
+ *  seat made or reused (seatNow), then put on the identity at once, with a
+ *  new holder tag, through rewrite. The seats, or the first refusal (busy:
+ *  the list kept moving; gone: the identity's swap was refused, its code
+ *  expired or it was cut meanwhile), with made holding the rooms where
+ *  invites were made either way. */
+export async function seatsNow(env: Env, first: Unsealed, planned: Planned[], made: Made, unreached: string): Promise<{ ok: true, rooms: SeatMade[], u: Unsealed } | { ok: false, refused: Refused } | { ok: false, busy: true } | { ok: false, gone: true }> {
+  let u = first;
+  const rooms: SeatMade[] = [];
+  for (const p of planned) {
+    const s = await seatNow(env, p, made, unreached);
+    if ("status" in s) return { ok: false, refused: s };
+    const entry: AgentEntry = { room: p.e.room, token: s.token, name: s.name, added: Date.now(), state: "held", tag: newHolderTag() };
+    const w = await rewrite<true>(u, async (x): Promise<Changed<true>> => ({ rooms: x.rooms.concat([entry]), then: true }));
+    if (!("done" in w)) return "busy" in w ? { ok: false, busy: true } : { ok: false, gone: true };
+    u = w.after;
+    rooms.push({ room: p.e.room, name: s.name, opened: s.opened, seat: s.seat });
+  }
+  return { ok: true, rooms, u };
+}
+
 async function personKeyNow(env: Env, url: URL, q: DurableObjectStub, got: string[], planned: Planned[]): Promise<Response> {
   const made: Made = { sure: [], maybe: [] };
-  let id: Unsealed | null = null;
+  let drop: (() => Promise<unknown>) | null = null;
   let kept = false;
   const fail = (r: Refused) => refusedJson(r, undefined, unusedFields(made));
   try {
     const k = await emptyIdentity(env);
     if (!k) return json({ error: "The key could not be made; nothing was kept. Try again." }, 500);
-    id = k.u;
-    let u = k.u;
-    const rooms: Array<{ room: string, name: string, opened: boolean, seat: "new" | "reused" }> = [];
-    for (const p of planned) {
-      const s = await seatNow(env, p, made, "could not be reached, so no key was made. Try again.");
-      if ("status" in s) return fail(s);
-      const entry: AgentEntry = { room: p.e.room, token: s.token, name: s.name, added: Date.now(), state: "held" };
-      const w = await rewrite<true>(u, async (x): Promise<Changed<true>> => ({ rooms: x.rooms.concat([entry]), then: true }));
-      if (!("done" in w)) return fail("busy" in w ? { ...BUSY, retry_after: 1 } : { status: 500, error: "The key could not be made. Try again." });
-      u = w.after;
-      rooms.push({ room: p.e.room, name: s.name, opened: s.opened, seat: s.seat });
-    }
+    drop = k.drop;
+    const run = await seatsNow(env, k.u, planned, made, "could not be reached, so no key was made. Try again.");
+    if (!run.ok) return fail("refused" in run ? run.refused : "busy" in run ? { ...BUSY, retry_after: 1 } : { status: 500, error: "The key could not be made. Try again." });
+    const rooms = run.rooms;
     kept = true;
     const address = url.origin + "/api/mcp";
     return json({
@@ -1272,7 +1348,7 @@ async function personKeyNow(env: Env, url: URL, q: DurableObjectStub, got: strin
   } finally {
     // a key not made whole goes, and its places come back once
     if (!kept) {
-      if (id) { try { await id.stub.agentDrop("key", id.verifier); } catch (e) { warn("agent.drop", e && (e as Error).name ? (e as Error).name : "failed"); } }
+      if (drop) { try { await drop(); } catch (e) { warn("agent.drop", e && (e as Error).name ? (e as Error).name : "failed"); } }
       try { await q.agentRelease(got); } catch (e) { warn("agent.release", e); }
     }
   }
@@ -1353,7 +1429,7 @@ async function personAddNow(env: Env, first: Unsealed, planned: Planned[]): Prom
     for (const p of planned) {
       const s = await seatNow(env, p, made, "could not be reached, so it was not added. Try again.");
       if ("status" in s) return fail(s);
-      const entry: AgentEntry = { room: p.e.room, token: s.token, name: s.name, added: Date.now(), state: "held" };
+      const entry: AgentEntry = { room: p.e.room, token: s.token, name: s.name, added: Date.now(), state: "held", tag: newHolderTag() };
       let was: AgentEntry | undefined;
       const w = await rewrite<Refused | null>(u, async (x): Promise<Changed<Refused | null>> => {
         const h = x.rooms.find((y) => y.room === entry.room);
@@ -1409,11 +1485,24 @@ function keyError(r: Refused & { code: string }): ToolAnswer {
   return { error: { code: -32001, message: r.error, data: { code: r.code } } };
 }
 const UNREADABLE_RPC: ToolAnswer = { error: { code: -32603, message: AGENT_UNREADABLE } };
+/** The sign-in's: its token no longer opens it (cut, idle, revoked, or
+ *  replaced while a request held its body back), its record unreadable,
+ *  or its list busy. */
+const SIGNIN_ENDED_RPC: ToolAnswer = { error: { code: -32001, message: SIGNIN_TOKEN_ENDED, data: { code: "invalid_token" } } };
+const SIGNIN_UNREADABLE_RPC: ToolAnswer = { error: { code: -32603, message: "This sign-in's record could not be read." } };
+const SIGNIN_BUSY: Refused = { status: 503, code: "try_again", error: "This sign-in is busy; try again." };
+/** An identity that no longer opens, and one whose record does not, as a tools/call answers each. */
+function goneRpc(who: Who): ToolAnswer {
+  return who === "signin" ? SIGNIN_ENDED_RPC : keyError(KEY_REFUSED.invalid);
+}
+function unreadableRpc(who: Who): ToolAnswer {
+  return who === "signin" ? SIGNIN_UNREADABLE_RPC : UNREADABLE_RPC;
+}
 /** A rewrite that did not happen, as a tools/call answers it. */
-function rewriteRpc(r: { busy: true } | { gone: true } | { unreadable: true }): ToolAnswer {
-  if ("gone" in r) return keyError(KEY_REFUSED.invalid);
-  if ("unreadable" in r) return UNREADABLE_RPC;
-  return refusedTool(BUSY);
+function rewriteRpc(r: { busy: true } | { gone: true } | { unreadable: true }, who: Who = "key"): ToolAnswer {
+  if ("gone" in r) return goneRpc(who);
+  if ("unreadable" in r) return unreadableRpc(who);
+  return refusedTool(who === "signin" ? SIGNIN_BUSY : BUSY);
 }
 
 // POST /api/mcp with the key as Authorization: Bearer: one MCP server for
@@ -1494,11 +1583,31 @@ type WakeResult = { room: string, ok: true, name: string, hook: unknown } | { ro
  *  than AGENT_WAKE_LINK_MAX, so it was neither recorded nor set:
  *  link_unusable). */
 type Skip = "unreached" | "late" | "busy" | "full" | "not_joined" | "lost" | "unusable";
-function skipped(room: string, why: Skip, spent: boolean): WakeResult {
+function skipped(room: string, why: Skip, spent: boolean, who: Who = "key"): WakeResult {
   if (why === "not_joined") return { room, ok: false, status: 409, code: "not_joined", error: museNotJoined(spent) };
-  if (why === "lost") return { room, ok: false, status: 503, code: "answer_lost", error: wakeLost(room) };
-  if (why === "unusable") return { room, ok: false, status: 502, code: "link_unusable", error: wakeLinkUnusable(room) };
-  return { room, ok: false, status: 503, code: "try_again", error: wakeAgain(room, why, spent) };
+  if (why === "lost") return { room, ok: false, status: 503, code: "answer_lost", error: wakeLost(room, who) };
+  if (why === "unusable") return { room, ok: false, status: 502, code: "link_unusable", error: wakeLinkUnusable(room, who) };
+  return { room, ok: false, status: 503, code: "try_again", error: wakeAgain(room, why, spent, who) };
+}
+
+/** muse_register's and the room tools' sentences that name the identity,
+ *  a key's or a sign-in's. */
+function heldWords(who: Who) {
+  return who === "signin"
+    ? {
+      rule: "\"rooms\" must list 1 to " + AGENT_ROOMS_MAX + " rooms of this sign-in by name, or be left out for every room of it",
+      notHeld: (room: string) => signinNotHeld(room),
+      refusedEntry: (code: string | undefined) => "This room has refused the seat this sign-in holds" + (code ? " (" + code + ")" : "") + ": take it off with remove_room.",
+      noRooms: "No room of this sign-in took its invite, so the code was not used.",
+      gone: (room: string) => room + " is no longer on this sign-in.",
+    }
+    : {
+      rule: "\"rooms\" must list 1 to " + AGENT_ROOMS_MAX + " rooms on your key by name, or be left out for every room on it",
+      notHeld: (room: string) => room + " is not on your key: list_rooms lists yours; add_room adds one.",
+      refusedEntry: (code: string | undefined) => "This room has refused the invite on your key" + (code ? " (" + code + ")" : "") + ": take it off with remove_room.",
+      noRooms: "No room on your key took its invite, so the code was not used.",
+      gone: (room: string) => room + " is no longer on your key.",
+    };
 }
 
 /** A settling write for these entries (by room and token) from the list u:
@@ -1562,11 +1671,12 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
   const rawRouting = fieldText(args.routing).trim();
   const routing = rawRouting ? museRouting(rawRouting) : MUSE_ROUTING_DEFAULT;
   if (!routing) return { result: mcpErr(MUSE_ROUTING_ERROR) };
+  const say = heldWords(u.via);
   let asked: AgentEntry[];
   if (args.rooms === undefined || args.rooms === null) asked = u.rooms.filter((e) => e.state === "held");
   else {
     const list = args.rooms;
-    const rule = "\"rooms\" must list 1 to " + AGENT_ROOMS_MAX + " rooms on your key by name, or be left out for every room on it";
+    const rule = say.rule;
     if (!Array.isArray(list) || list.length < 1 || list.length > AGENT_ROOMS_MAX) return { result: mcpErr(rule) };
     asked = [];
     for (const raw of list) {
@@ -1574,7 +1684,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
       const room = raw.trim().toLowerCase();
       if (!ROOM_RE.test(room)) return { result: mcpErr(ROOM_NAME_RULE) };
       const e = u.rooms.find((x) => x.room === room);
-      if (!e) return { result: mcpErr(room + " is not on your key: list_rooms lists yours; add_room adds one.", { code: "room_not_held", room }) };
+      if (!e) return { result: mcpErr(say.notHeld(room), { code: "room_not_held", room }) };
       if (!asked.includes(e)) asked.push(e);
     }
   }
@@ -1586,7 +1696,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
   const full: Array<{ i: number, e: AgentEntry }> = [];
   for (const e of asked) {
     if (e.state === "refused") {
-      results.push({ room: e.room, ok: false, status: e.code === "room_deleted" ? 404 : 403, code: e.code || "invite_invalid", error: "This room has refused the invite on your key" + (e.code ? " (" + e.code + ")" : "") + ": take it off with remove_room." });
+      results.push({ room: e.room, ok: false, status: e.code === "room_deleted" ? 404 : 403, code: e.code || "invite_invalid", error: say.refusedEntry(e.code) });
       continue;
     }
     const stub = roomStub(env, e.room);
@@ -1617,8 +1727,8 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
       accepted.splice(0, accepted.length, ...accepted.filter((a) => a.i !== f.i));
     }
   }
-  const told = (spent: boolean) => results.map((r, i) => (typeof r === "string" ? skipped(asked[i].room, r, spent) : r));
-  if (!accepted.length) return { result: mcpErr("No room on your key took its invite, so the code was not used.", { code: "no_rooms", results: told(false) }) };
+  const told = (spent: boolean) => results.map((r, i) => (typeof r === "string" ? skipped(asked[i].room, r, spent, u.via) : r));
+  if (!accepted.length) return { result: mcpErr(say.noRooms, { code: "no_rooms", results: told(false) }) };
   // the code, claimed once for every room
   const bridge = museBridge(env);
   const c = await museClaim(bridge, code);
@@ -1629,20 +1739,22 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
     for (const a of accepted) results[a.i] = "unusable";
     return { result: mcpOk({ claimed: true, results: told(true) }) };
   }
-  // a recording on each entry (by its room and token), written before any hook is set
+  // a recording on each entry (by its room and token), written before any
+  // hook is set; an entry with no holder tag gets one here (withTag: with
+  // pre when it already records a link), and only here
   const deadline = Date.now() + AGENT_WAKE_SET_MS;
   const ids = accepted.map(() => newRecordingId());
   const rec = await rewrite<Set<number>>(base, async (x): Promise<Changed<Set<number>>> => {
     const recorded = new Set<number>();
     let rooms = x.rooms;
     accepted.forEach((a, n) => {
-      const next = wakeRecord(rooms, a.e.room, a.e.token, link, { id: ids[n], deadline }, AGENT_WAKE_ITEMS_MAX);
+      const next = wakeRecord(withTag(rooms, a.e.room, a.e.token), a.e.room, a.e.token, link, { id: ids[n], deadline }, AGENT_WAKE_ITEMS_MAX);
       if (next) { rooms = next; recorded.add(n); }
     });
     return { rooms, then: recorded };
   });
-  if ("gone" in rec) return keyError(KEY_REFUSED.invalid);
-  if ("unreadable" in rec || "answer" in rec) return UNREADABLE_RPC;
+  if ("gone" in rec) return goneRpc(u.via);
+  if ("unreadable" in rec || "answer" in rec) return unreadableRpc(u.via);
   if ("busy" in rec) {
     for (const a of accepted) results[a.i] = "busy";
     return { result: mcpOk({ claimed: true, results: told(true) }) };
@@ -1652,7 +1764,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
   for (const [n, a] of accepted.entries()) {
     if (recorded.has(n)) continue;
     const e = rec.after.rooms.find((y) => same(y, a.e));
-    results[a.i] = e && e.state === "held" ? (wakeWeight(e) + 2 > AGENT_WAKE_ITEMS_MAX ? "full" : "busy") : { room: a.e.room, ok: false, status: 404, code: "room_not_held", error: a.e.room + " is no longer on your key." };
+    results[a.i] = e && e.state === "held" ? (wakeWeight(e) + 2 > AGENT_WAKE_ITEMS_MAX ? "full" : "busy") : { room: a.e.room, ok: false, status: 404, code: "room_not_held", error: say.gone(a.e.room) };
   }
   // the hooks, each set with a look at the room's own invite, carrying its recording's deadline; sent once, never again
   const tagOf = (x: { room: string, token: string }) => { const y = rec.after.rooms.find((z) => same(z, x)); return y ? y.tag : undefined; };
@@ -1698,7 +1810,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
       const a = accepted[n].e, tag = tagOf(a), stub = roomStub(env, a.room);
       try { await (tag === undefined ? stub.museDropLook(a.token, link) : stub.museHolderDrop(tag, link, a.token, false)); } catch { /* the disconnect asks it */ }
     }
-    return keyError(KEY_REFUSED.invalid);
+    return goneRpc(u.via);
   }
   if ("done" in post) {
     // a room whose entry changed under the call (taken off, or put back with another invite): its result says so
@@ -1706,7 +1818,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
       if (post.done.has(n)) continue;
       const a = accepted[n];
       const onKey = post.after.rooms.some((e) => e.room === a.e.room);
-      results[a.i] = onKey ? "busy" : { room: a.e.room, ok: false, status: 404, code: "room_not_held", error: a.e.room + " is no longer on your key." };
+      results[a.i] = onKey ? "busy" : { room: a.e.room, ok: false, status: 404, code: "room_not_held", error: say.gone(a.e.room) };
     }
     // the tidy: one look after this call's own write, one settling write from the version it wrote
     const tidy = answered.filter((n) => post.done.has(n)).map((n) => accepted[n].e).filter((a) => {
@@ -1724,19 +1836,23 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
   return { result: mcpOk({ claimed: true, results: told(true) }) };
 }
 
-/** A room tool through the key: the room it names must be on the key; then
- *  the room is asked exactly what the same call at its own address asks -
- *  the look that address makes once per request (lookupInvite, which opens
- *  nothing), then roomToolAnswer with the token the key holds, owner false.
- *  A refusal of the token is the tool's error {code, room}, and the room is
- *  marked refused on the key; a leave marks it left. */
+/** A room tool through the key or a sign-in: the room it names must be on
+ *  the identity; then the room is asked exactly what the same call at its
+ *  own address asks - the look that address makes once per request
+ *  (lookupInvite, which opens nothing), then roomToolAnswer with the token
+ *  the identity holds, owner false. A refusal of the token is the tool's
+ *  error {code, room}, and the room is marked refused on the identity. A
+ *  leave through the key marks the room left; through a sign-in it takes
+ *  the room off as POST /api/agent/rooms/leave does (leaveOff: off when every
+ *  recorded link may leave on its observation, else marked left with its
+ *  links), and the answer's signin line says which. */
 async function roomTool(rc: RouteContext, u: Unsealed, name: string, args: Body): Promise<ToolAnswer> {
   const raw = args.room;
   if (typeof raw !== "string" || !raw.trim()) return { result: mcpErr("\"room\" is required: one of your rooms, as list_rooms gives it") };
   const room = raw.trim().toLowerCase();
   if (!ROOM_RE.test(room)) return { result: mcpErr(ROOM_NAME_RULE) };
   const e = u.rooms.find((x) => x.room === room);
-  if (!e) return { result: mcpErr(room + " is not on your key: list_rooms lists yours; add_room adds one.", { code: "room_not_held", room }) };
+  if (!e) return { result: mcpErr(heldWords(u.via).notHeld(room), { code: "room_not_held", room }) };
   const stub = roomStub(rc.env, room);
   const look = stub.lookupInvite(e.token).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l));
   let refused: string | null = null;
@@ -1744,13 +1860,16 @@ async function roomTool(rc: RouteContext, u: Unsealed, name: string, args: Body)
   const tk: { ok: true } | Refusal = await look;
   // the tool's own arguments, as the room's address takes them
   const targs: Body = Object.fromEntries(Object.entries(args).filter(([key]) => key !== "room"));
-  let a: ToolAnswer = tk.ok ? await roomToolAnswer({ rc, stub, room, invite: e.token, owner: false, checkToken: () => look, missing: inviteMissing, refuse, viaKey: true }, name, targs) : refuse(tk);
-  // the mark is the key's own bookkeeping: if it cannot be written, the
+  let a: ToolAnswer = tk.ok ? await roomToolAnswer({ rc, stub, room, invite: e.token, owner: false, checkToken: () => look, missing: inviteMissing, refuse, viaKey: true, viaSignin: u.via === "signin" }, name, targs) : refuse(tk);
+  // the mark is the identity's own bookkeeping: if it cannot be written, the
   // room's answer goes out as it was (the next call marks it)
   if (refused) await markRefused(u, [{ room, token: e.token, code: refused }]);
   else if (name === "leave_room" && "result" in a && !(a.result as { isError?: boolean }).isError) {
     const left = (a.result as { structuredContent?: Record<string, unknown> }).structuredContent || {};
-    if (await markRefused(u, [{ room, token: e.token, code: left.room_deleted ? "room_deleted" : "invite_revoked" }])) {
+    if (u.via === "signin") {
+      const kept = await leaveOff(rc.env, u, e);
+      a = { result: mcpOk({ ...left, signin: signinLeaveNote(room, kept === "other" ? "listed" : kept, !!left.room_deleted) }) };
+    } else if (await markRefused(u, [{ room, token: e.token, code: left.room_deleted ? "room_deleted" : "invite_revoked" }])) {
       a = { result: mcpOk({ ...left, key: room + " is marked left on your key; take it off with remove_room." }) };
     }
   }
@@ -1776,7 +1895,7 @@ async function glanceGapMs(env: Env): Promise<number> {
 // unavailable, not marked. The lines it logs carry counts only, never a room.
 async function glance(env: Env, u: Unsealed): Promise<ToolAnswer> {
   const wait = await u.stub.agentGlanceTake(await glanceGapMs(env));
-  if (wait > 0) return { result: mcpErr("whats_waiting answers at most once " + pollGap(AGENT_GLANCE_GAP_S) + " for a key; try again in " + spanS(wait) + ".", { code: "rate_limited", retry_after: wait }) };
+  if (wait > 0) return { result: mcpErr("whats_waiting answers at most once " + pollGap(AGENT_GLANCE_GAP_S) + (u.via === "signin" ? " for a sign-in" : " for a key") + "; try again in " + spanS(wait) + ".", { code: "rate_limited", retry_after: wait }) };
   const seen: Array<{ e: AgentEntry, v: StartView | Refusal | null }> = u.rooms.map((e) => ({ e, v: null }));
   const asked = seen.filter((s) => s.e.state === "held");
   let next = 0, failed = 0;
@@ -1804,4 +1923,94 @@ async function glance(env: Env, u: Unsealed): Promise<ToolAnswer> {
   if (failed) warn("agent.glance", null, { unavailable: failed });
   if (marks.length) await markRefused(u, marks);
   return { result: mcpOk({ rooms, refused }) };
+}
+
+/* ---------- POST /api/mcp/signin ---------- */
+
+/** Every answer of the sign-in address with CORS_SIGNIN in place of CORS,
+ *  so a browser client can read a 401's WWW-Authenticate. */
+function signinCors(res: Response): Response {
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(CORS_SIGNIN)) headers.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+// POST /api/mcp/signin: the sign-in's MCP address, for an access token the
+// sign-in (routes/oauth.ts) issued for it. Before any body is read, the
+// credential decides, from Authorization: Bearer alone: an access token
+// that opens its sign-in live, not idle, issued for this address, is signed
+// in; any other sign-in token (expired, unknown, ended, idle, the default
+// token, another resource's, a code, a refresh token, a disconnect code) is
+// 401 invalid_token, and no credential is 401 sign_in_required, each with
+// WWW-Authenticate naming this address's metadata, for every method in both
+// kinds of revision; an agent key, a room's invite token or another dot form
+// is 200, the tools -32001 wrong_address with where it works (a 401 would
+// start a sign-in in a key holder's client: the one deliberate exception to
+// MCP's "invalid tokens MUST receive a 401", for credentials that are not
+// this server's tokens). Signed in, mcpServe answers as the key's address
+// does, with the sign-in's catalog and instructions, and every tools/call
+// opens the sign-in again once the body is in (signinTool). Every answer
+// carries CORS_SIGNIN.
+export async function signinMcpRoute(rc: RouteContext): Promise<Response> {
+  const { request, env } = rc;
+  const origin = signinOrigin(env), address = origin + "/api/mcp/signin";
+  if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405, CORS_SIGNIN);
+  const c = signinCredential(request);
+  const unauthorized = async (code: "sign_in_required" | "invalid_token"): Promise<Response> => {
+    // decided before the body; what was sent is read away, bounded, so the client gets this answer rather than a reset
+    await settleBody(request, SMALL_BODY_MAX);
+    const meta = origin + "/.well-known/oauth-protected-resource/api/mcp/signin";
+    const www = code === "invalid_token" ? "Bearer error=\"invalid_token\", resource_metadata=\"" + meta + "\"" : "Bearer resource_metadata=\"" + meta + "\", scope=\"" + SIGNIN_SCOPE + "\"";
+    return json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: signinNeeded(origin), data: { code } } }, 401, { ...CORS_SIGNIN, "WWW-Authenticate": www });
+  };
+  if (c.kind === "none") return unauthorized("sign_in_required");
+  let opened: Opened | null = null;
+  if (c.kind === "token") {
+    opened = await openSigninAccess(env, c.t, address);
+    if (!opened) return unauthorized("invalid_token");
+  }
+  const body = await settleBody(request, opened ? SETTLED_BODY_MAX : SMALL_BODY_MAX);
+  if (!body) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: opened ? "Request too large: a request can be up to " + Math.floor(SETTLED_BODY_MAX / MIB) + " MiB" : "Request too large: without a sign-in a request can be up to " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" } }, 413, CORS_SIGNIN);
+  let rpcBody: unknown = null;
+  try { rpcBody = await body.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400, CORS_SIGNIN); }
+  if (Array.isArray(rpcBody)) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request: this address takes no batches; send each request as its own POST." } }, 400, CORS_SIGNIN);
+  const signedIn = opened;
+  // a credential that is no sign-in: where it works, for every method but ping, initialize and server/discover
+  const wrong = c.kind === "token" ? null : { error: c.kind === "key" ? signinWrongKey(origin) : c.kind === "invite" ? signinWrongInvite(origin) : KEY_INVALID_SENTENCE, code: "wrong_address" };
+  return signinCors(await mcpServe(rc, {
+    serverInfo: signinServerInfo(origin),
+    catalog: mcpSigninCatalogBuilt,
+    catalogVersion: MCP_SIGNIN_CATALOG_VERSION,
+    has: mcpHasSigninTool,
+    instructions: signedIn ? signinInstructions(origin) : signinWrongInstructions(origin),
+    verdict: async () => (wrong ? { ok: false as const, ...wrong } : { ok: true as const }),
+    unknownVerdict: async () => wrong,
+    say: (r: Worded) => r,
+    tool: async (name, args) => (wrong || !signedIn ? { error: { code: -32001, message: wrong ? wrong.error : SIGNIN_TOKEN_ENDED, data: { code: wrong ? wrong.code : "invalid_token" } } } : signinTool(rc, signedIn, name, args)),
+  }, rpcBody));
+}
+
+/** A tools/call at the sign-in address, of a tool in its catalog. The
+ *  sign-in is opened again first, now that the body is in, with the access
+ *  slot's write grace: one cut, idle or revoked while its request held the
+ *  body back acts nowhere (-32001 invalid_token), and one whose token merely
+ *  expired meanwhile still serves the request it opened live. */
+async function signinTool(rc: RouteContext, first: Opened, name: string, args: Body): Promise<ToolAnswer> {
+  const { env } = rc;
+  const o = await reopen(first);
+  if (!o) return SIGNIN_ENDED_RPC;
+  const u = await unseal(o);
+  if (!u) return SIGNIN_UNREADABLE_RPC;
+  if (name === "list_rooms") return { result: mcpOk({ rooms: u.rooms.map(entryView), max_rooms: AGENT_ROOMS_MAX, created: u.created }) };
+  if (name === "whats_waiting") return glance(env, u);
+  if (name === "remove_room") {
+    const room = fieldText(args.room).trim().toLowerCase();
+    if (!ROOM_RE.test(room)) return { result: mcpErr(ROOM_NAME_RULE) };
+    const r = await outlive(rc, () => removeRoom(env, u, room));
+    if (!("done" in r) && !("answer" in r)) return rewriteRpc(r, "signin");
+    const out = "done" in r ? r.done : r.answer;
+    return "status" in out ? refusedTool(out) : { result: mcpOk(out) };
+  }
+  if (name === "muse_register") return outlive(rc, () => museRegister(env, u, args));
+  return roomTool(rc, u, name, args);
 }

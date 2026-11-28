@@ -36,7 +36,7 @@ import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
 import { MuseMethods } from "./muse.js";
 import type { MuseHookView } from "./muse.js";
-import { AgentMethods, isIdentity } from "./agent.js";
+import { AgentMethods, SigninMethods, isIdentity } from "./agent.js";
 import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { AwaitingItem, GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
@@ -156,13 +156,27 @@ export type CountRow = { n: number };
 /** ak: an agent key's identity (room/agent.ts), one row in an object no
  *  room name reaches: when it was made, its list's version (one more per
  *  write, compared on every swap) and the list of its rooms, sealed
- *  (lib/agentkey.ts); client is unused (NULL). */
+ *  (lib/agentkey.ts); client is unused (NULL) for a key, a sign-in's app
+ *  (its client_id, in clear) for a sign-in. */
 export type AkRow = { k: number, created: number, ver: number, client: string | null, ring: string };
-/** aks: the key's slot in its identity: its kind, the verifier of its
- *  secret, the data key wrapped under it, when it was made; expires, used,
- *  bind and next are unused (NULL): an agent key neither expires nor is
- *  used once. */
+/** A sign-in's ak row: AkRow's columns and two a key's table lacks: its
+ *  wake list, sealed under the wake key, and when it was cut (null before). */
+export type SigninAkRow = AkRow & { wakes: string, cut: number | null };
+/** aks: a slot in an identity: its kind, the verifier of its secret, the
+ *  key it wraps (the data key; the wake key on a sign-in's disconnect
+ *  slot), when it was made, and for a sign-in's slots when it expires (ms),
+ *  when it was used (a code redeemed, a refresh token spent), what it is
+ *  bound to (JSON, in clear: the app, the redirect, the challenge, the
+ *  resources, the DPoP key's thumbprint, and the wake key wrapped) and a
+ *  spent refresh token's replacement pair, sealed (next). An agent key's one
+ *  slot leaves the last four NULL: it neither expires nor is used once. */
 export type AksRow = { slot: string, kind: string, verifier: string, wrapped: string | null, created: number, expires: number | null, used: number | null, bind: string | null, next: string | null };
+/** oj: a known app's seen hashes (OAUTH_CLIENT_PREFIX objects): an
+ *  assertion's jti (a:), a DPoP proof's (d:), an approved authorization
+ *  request (r:), each until exp (ms). */
+export type OjRow = { h: string, exp: number };
+/** ok: the time of the app's last key-set fetch attempt (ms). */
+export type OkRow = { k: number, tried: number | null };
 /** aq: one creation counter of agent keys (AGENT_QUOTA_ROOM): its key (a
  *  network's or a room's hash, or the site's, and the window), the window,
  *  the count. */
@@ -1081,3 +1095,4 @@ Object.assign(Room.prototype, GameMachineryMethods);
 Object.assign(Room.prototype, MuseMethods);
 Object.assign(Room.prototype, TestHookMethods);
 Object.assign(Room.prototype, AgentMethods);
+Object.assign(Room.prototype, SigninMethods);

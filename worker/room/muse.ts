@@ -84,10 +84,11 @@ export type MhhRow = { member: string, holder: string, at: number };
 
 /** The holds an entry of a key with no tag counts as its own: "pre", the
  *  hold every set that sends no tag makes (and a hook step 10 found with no
- *  holder), and "self", the room's own registration's. A Muse hook held by
- *  nothing but these is one no tagged set has reached, so the look of such
- *  an entry sees it and its drop takes it, whoever of the two set it. */
-export const LEGACY_HOLDS = ["pre", "self"];
+ *  holder). Never "self": a registration the member made with the room's own
+ *  token stays through every identity's take-off and disconnect, and goes
+ *  only by the member's own removal, a revoke, a webhook or a set on another
+ *  link. */
+export const LEGACY_HOLDS = ["pre"];
 /** A holder tag: 16 random bytes, base64url (22 characters). */
 const HOLDER_TAG_RE = /^[A-Za-z0-9_-]{22}$/;
 /** A tag this room does not keep: only a Worker fault sends one. */

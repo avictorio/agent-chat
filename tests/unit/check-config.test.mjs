@@ -66,7 +66,7 @@ test("a retired secret still live is noted for deletion; a required one missing 
 });
 
 test("a test hook in the live config fails the check by name", { skip: noPython && "no python3" }, () => {
-  for (const name of ["TEST_HOOKS", "TEST_MUSE_ORIGIN"]) {
+  for (const name of ["TEST_HOOKS", "TEST_MUSE_ORIGIN", "TEST_SIGNIN_ORIGIN"]) {
     let r = check({ vars: { ...fileVars(), [name]: "1" }, secrets: REQUIRED });
     assert.equal(r.status, 1, r.out);
     assert.match(r.out, new RegExp("DRIFT {2}" + name + ": TEST HOOK LIVE"));

@@ -17,8 +17,9 @@
 //   I3: a Muse hook has a holder (in a room that keeps holders)
 //   I4: the hook stays on only while someone who set it still holds it
 //       (the member's own registration, "self", among them)
-//   I5 (with LEGACY_HOLDS ["pre"]): a "self" hold goes only by the room's
-//       own controls, never by an identity's drop
+//   I5: a "self" hold goes only by the room's own controls, never by an
+//       identity's drop (LEGACY_HOLDS counts only "pre" as an untagged
+//       entry's own)
 // Variants: holders (every room keeps holders), oldroom (a set reaches a
 // room whose code keeps none, and the room then starts on code that keeps
 // them: step 10 gives the hook "pre"), rerun (step 10 runs again on a room that
@@ -31,10 +32,8 @@ import { tagsKept } from "../../worker/lib/agentkey.ts";
 import { AGENT_WAKE_ITEMS_MAX } from "../../worker/limits.ts";
 import { LEGACY_HOLDS } from "../../worker/room/muse.ts";
 
-/** LEGACY_HOLDS as the rooms keep it: "pre" and "self". */
+/** LEGACY_HOLDS as the rooms keep it: "pre" alone, so an untagged entry's drop never takes a "self" hold (I5). */
 export const LEGACY_ROOMS = LEGACY_HOLDS;
-/** LEGACY_HOLDS narrowed to "pre": an untagged entry's drop then never takes a "self" hold (I5). */
-export const LEGACY_PRE = ["pre"];
 
 const sorted = (a) => [...new Set(a)].sort();
 
@@ -244,19 +243,18 @@ export const CASES = [
 
 /**
  * Every run, and what each must show: [variant, case index, options, expected: "held" | "broken"].
- * holders with both constants: held in every case (the last case with
- * LEGACY_ROOMS reaches a hook gone with its "self" hold, which the untagged
- * drop counts as its own; with LEGACY_PRE it never does); oldroom: broken in
- * the four cases of two tagged identities (so a Worker that sends tags needs
- * every room to keep holders); rerun: broken with
- * the backfill that gives "pre" to every Muse hook, held with step 10's.
+ * holders, with LEGACY_HOLDS as the rooms keep it: held in every case, and
+ * no hook ever goes with its "self" hold; oldroom: broken in the four cases
+ * of two tagged identities (so a Worker that sends tags needs every room to
+ * keep holders); rerun: broken with the backfill that gives "pre" to every
+ * Muse hook, held with step 10's.
  */
 export function runs() {
   const out = [];
-  for (const [legacy, tag] of [[LEGACY_ROOMS, "rooms"], [LEGACY_PRE, "pre"]]) CASES.forEach((_, i) => out.push(["holders", i, { legacy, tag }, "held"]));
-  for (let i = 0; i < 4; i++) out.push(["oldroom", i, { legacy: LEGACY_PRE, tag: "pre" }, "broken"]);
-  for (let i = 0; i < 4; i++) out.push(["rerun", i, { legacy: LEGACY_PRE, tag: "pre", backfill: "every" }, "broken"]);
-  for (let i = 0; i < 4; i++) out.push(["rerun", i, { legacy: LEGACY_PRE, tag: "pre", backfill: "only" }, "held"]);
+  CASES.forEach((_, i) => out.push(["holders", i, { legacy: LEGACY_ROOMS, tag: "rooms" }, "held"]));
+  for (let i = 0; i < 4; i++) out.push(["oldroom", i, { legacy: LEGACY_ROOMS, tag: "rooms" }, "broken"]);
+  for (let i = 0; i < 4; i++) out.push(["rerun", i, { legacy: LEGACY_ROOMS, tag: "rooms", backfill: "every" }, "broken"]);
+  for (let i = 0; i < 4; i++) out.push(["rerun", i, { legacy: LEGACY_ROOMS, tag: "rooms", backfill: "only" }, "held"]);
   return out;
 }
 

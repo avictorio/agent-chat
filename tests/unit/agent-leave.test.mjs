@@ -209,7 +209,7 @@ test("in an older room where two active invites' names fold alike, the leave kee
     try {
       const r = await leave(k.w, k.key, OK);
       assert.deepEqual([r.status, r.json.off_key, r.json.note], [200, true, leaveNote("Hank", "lima", "off")]);
-      assert.deepEqual(r.asked.filter((a) => a.name === "lima").map((a) => a.method), ["leave", "museHookLook", "museDropLook"]);
+      assert.deepEqual(r.asked.filter((a) => a.name === "lima").map((a) => a.method), ["leave", "museHolderLook", "museHolderDrop"]);
       assert.deepEqual(hooksAll(h), [], "the key's wake is off");
       assert.deepEqual((await storedOf(k.w, k.key)).rooms, []);
     } finally {
@@ -225,7 +225,7 @@ test("in an older room where two active invites' names fold alike, the leave kee
       assert.equal(s.ok, true);
       const r = await leave(k.w, k.key, OK);
       assert.deepEqual([r.status, r.json.off_key], [200, true]);
-      assert.deepEqual(r.asked.filter((a) => a.name === "lima").map((a) => a.method), ["leave", "museHookLook"], "nothing dropped");
+      assert.deepEqual(r.asked.filter((a) => a.name === "lima").map((a) => a.method), ["leave", "museHolderLook"], "nothing dropped");
       assert.deepEqual(hooksAll(h), [{ member: "hank", kind: "muse", link: g2.link }], "the other invite's own hook is untouched");
       assert.deepEqual((await storedOf(k.w, k.key)).rooms, []);
     } finally {
@@ -254,19 +254,19 @@ test("a wake the key cannot confirm is off (the room not reached for it, or a re
       return { k: kk, h: kk.w.harness("lima") };
     })();
     try {
-      if (how === "not reached") h.room.museHookLook = () => { throw new Error("the room did not answer"); };
+      if (how === "not reached") h.room.museHolderLook = () => { throw new Error("the room did not answer"); };
       const r = await leave(k.w, k.key, OK);
       assert.equal(r.status, 200, how + ": " + r.text);
       assert.deepEqual([r.json.off_key, r.json.kept, r.json.note], [false, "marked_wake", leaveNote("Hank", "lima", "marked_wake")], how);
       assert.equal(h.one("SELECT left_ts FROM inv WHERE token = ?", k.tok.lima).left_ts, r.json.left, how + ": the seat left all the same");
       const kept = (await storedOf(k.w, k.key)).rooms;
       assert.deepEqual(kept.map((e) => [e.room, e.state, e.code, (e.hooks || []).map((x) => x.link)]), [["lima", "refused", "invite_revoked", [k.link]]], how + ": marked left, its link kept");
-      assert.deepEqual(r.asked.filter((a) => a.name === "lima").map((a) => a.method).filter((m) => m === "museDropLook"), [], how + ": nothing dropped");
+      assert.deepEqual(r.asked.filter((a) => a.name === "lima").map((a) => a.method).filter((m) => m === "museHolderDrop"), [], how + ": nothing dropped");
       // later: the room answers, the set's deadline has passed by its clock
-      delete h.room.museHookLook;
+      delete h.room.museHolderLook;
       pastDeadlines(k.w, "lima");
       const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
-      assert.deepEqual(t.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedRefusedNote("lima", true) }, how);
+      assert.deepEqual(t.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedRefusedNote("lima", "off") }, how);
       assert.deepEqual(hooksAll(h), [], how + ": the wake is off");
       assert.deepEqual((await storedOf(k.w, k.key)).rooms, [], how);
     } finally {

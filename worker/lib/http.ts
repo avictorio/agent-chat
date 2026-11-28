@@ -14,6 +14,21 @@ export const CORS = {
   "Access-Control-Expose-Headers": "Retry-After",
 };
 
+/** The sign-in address's CORS (POST /api/mcp/signin): a Poppy agent in a
+ *  browser sends the Session headers, and a browser client must be able to
+ *  read a 401's WWW-Authenticate to start its sign-in. On every answer of
+ *  that address and its OPTIONS. */
+export const CORS_SIGNIN = {
+  ...CORS,
+  "Access-Control-Allow-Headers": CORS["Access-Control-Allow-Headers"] + ", Poppy-Session, Poppy-Version, Poppy-Extensions",
+  "Access-Control-Expose-Headers": CORS["Access-Control-Expose-Headers"] + ", WWW-Authenticate",
+};
+/** The token and revocation endpoints' CORS: a client sends its DPoP proof in a header. */
+export const CORS_OAUTH = {
+  ...CORS,
+  "Access-Control-Allow-Headers": CORS["Access-Control-Allow-Headers"] + ", DPoP",
+};
+
 export const SSE_HEADERS = Object.assign({
   "Content-Type": "text/event-stream; charset=utf-8",
   "Cache-Control": "no-cache",
@@ -62,6 +77,17 @@ export function json(data: unknown, status?: number, headers?: Record<string, st
   return new Response(JSON.stringify(data), {
     status: status || 200,
     headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, CORS, headers || {}),
+  });
+}
+
+/** A JSON answer with its own CORS (null: none) and Cache-Control, for the
+ *  answers that must not carry what json() adds by itself: the sign-in's
+ *  same-origin calls (no CORS at all), its documents (cached an hour) and
+ *  its token and revocation answers (CORS_OAUTH, no-store with Pragma). */
+export function jsonAs(data: unknown, status: number, cors: Record<string, string> | null, cache: string, headers?: Record<string, string>) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": cache }, cors || {}, headers || {}),
   });
 }
 

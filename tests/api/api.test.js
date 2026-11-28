@@ -45,6 +45,7 @@ const { mcpClients } = require('./mcp-clients.js');
 const { mcpModern } = require('./mcp-modern.js');
 const { agentKey } = require('./agent-key.js');
 const { agentPerson } = require('./agent-person.js');
+const { signinApi } = require('./signin.js');
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -276,6 +277,8 @@ async function watcherScript({ R, RNAME, ORIGIN, TA, TB }) {
     await agentKey({ req, check, SUF, IPO });
     // A key a person makes, and Muse wakes through it (tests/api/agent-person.js).
     await agentPerson(museCtx);
+    // The sign-in for known apps, with stand-in apps (tests/api/signin.js).
+    await signinApi(museCtx);
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);

@@ -51,6 +51,8 @@ interface Env {
   MUSE_DELIVER_PAUSED?: string;
   /** test only, with TEST_HOOKS: the API suite's fake Muse (http://127.0.0.1:PORT), where the bridge's calls to Muse hosts go (worker/bridge/util.ts museFetch) */
   TEST_MUSE_ORIGIN?: string;
+  /** test only, with TEST_HOOKS: a local server's own origin (http://localhost:PORT), the sign-in's issuer there (worker/lib/oauth.ts signinOrigin) */
+  TEST_SIGNIN_ORIGIN?: string;
 }
 
 // What the Muse bridge's code (worker/bridge) reads from the env: the chat

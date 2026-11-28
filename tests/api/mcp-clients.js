@@ -292,8 +292,143 @@ async function mcpClients(ctx) {
     await req('DELETE', R2 + '?confirm=' + room2, { owner: true });
   }
 
+  // ---- The sign-in address and the standing rule, with an OAuth provider set (as Claude Code has one) ----
+  // K1 to K8: a client holding a provider signs in only where the sign-in
+  // address asks it to (its 401), and nowhere else: a key, no credential
+  // and a room's token never meet a 401 or start a sign-in, at the key's
+  // address, the sign-in address or a room's own. The approval in the
+  // browser is scripted: the authorize page fetched, the person's decide
+  // posted, the redirect handed back to the client.
+  await signinCases({ req, check, BASE, SUF, v1, v2, url, room, R });
+
   await req('DELETE', R + '/invites', { owner: true });
   await req('DELETE', R + '?confirm=' + room, { owner: true });
+}
+
+async function signinCases(ctx) {
+  const { req, check, BASE, SUF, v1, v2, url, room, R } = ctx;
+  // the sign-in's issuer on this local server: its own address (worker/lib/oauth.ts signinOrigin)
+  const ORIGIN = String(((await req('GET', '/.well-known/oauth-authorization-server')).json || {}).issuer || '');
+  check('mcp clients, sign-in: the issuer is this local server\'s own address', ORIGIN === BASE, ORIGIN + ' ' + BASE);
+  const APP = { key: 'apitest-mcpc-public', client_id: 'https://standin.example/apitest/' + SUF + '/mcpc.json', kind: 'public', name: 'Stand-in', host: 'standin.example', redirect_uris: ['http://127.0.0.1/callback'], loopback: true, page: 'agent' };
+  const hook = await req('POST', '/api/test-hooks/oauth-app', { owner: true, json: { app: APP } });
+  check('mcp clients, sign-in: a stand-in public app on this local server', hook.status === 200, hook.text.slice(0, 120));
+  const pat = ((await req('POST', R + '/invites', { owner: true, json: { name: 'PatC', kind: 'human' } })).json || {}).token;
+  await req('GET', R + '/messages?limit=1', { token: pat });
+  const agentTok = ((await req('POST', R + '/invites', { owner: true, json: { name: 'McpSign', kind: 'agent' } })).json || {}).token;
+  const keyMade = await req('POST', '/api/agents', { json: { rooms: [{ room, token: agentTok }] }, headers: { 'CF-Connecting-IP': '10.251.' + (parseInt(SUF, 36) % 200) + '.1' } });
+  const KEY = keyMade.json && keyMade.json.key;
+  check('mcp clients, sign-in: a key for the key cases', keyMade.status === 201 && !!KEY, keyMade.text.slice(0, 120));
+  const signinUrl = new URL(BASE + '/api/mcp/signin'), keyUrl = new URL(BASE + '/api/mcp');
+  /** an in-memory OAuth provider, as a client with an auth flow holds one; redirects are recorded */
+  const provider = () => {
+    let info, tokens, verifier, disc;
+    const p = {
+      redirects: [],
+      get redirectUrl() { return 'http://127.0.0.1:43777/callback'; },
+      get clientMetadata() { return { client_name: 'apitest', redirect_uris: ['http://127.0.0.1:43777/callback'], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' }; },
+      clientMetadataUrl: APP.client_id,
+      state: () => 'st-' + Math.random().toString(36).slice(2),
+      clientInformation: () => info,
+      saveClientInformation: (i) => { info = i; },
+      tokens: () => tokens,
+      saveTokens: (t) => { tokens = t; },
+      redirectToAuthorization: (u) => { p.redirects.push(new URL(String(u))); },
+      saveCodeVerifier: (v) => { verifier = v; },
+      codeVerifier: () => verifier,
+      discoveryState: () => disc,
+      saveDiscoveryState: (d) => { disc = d; },
+    };
+    return p;
+  };
+  /** the person's approval of an authorize URL in the browser: the page, then decide; the redirect back */
+  const approve = async (u) => {
+    const page = await req('GET', u.pathname + u.search);
+    const d = await req('POST', '/api/oauth/decide', { json: { params: u.search.slice(1), approve: true, name: 'McpOAuth', rooms: [{ room, inviter_token: pat, reuse: 'any' }] }, headers: { 'Sec-Fetch-Site': 'same-origin', 'CF-Connecting-IP': '10.252.' + (parseInt(SUF, 36) % 200) + '.' + Math.floor(Math.random() * 200) } });
+    return { page, decide: d, back: d.json && d.json.redirect ? new URL(d.json.redirect) : null };
+  };
+  const wellKnown = (calls) => calls.filter((c) => c.path.startsWith('/.well-known/'));
+  /** a value as JSON for a check's detail, also when there is none (a client that failed to connect) */
+  const js = (x) => String(JSON.stringify(x));
+  /** a fetch that records each request's method, path, status and Authorization */
+  const recorder2 = () => {
+    const calls = [];
+    const fetchFn = async (input, init) => {
+      const res = await fetch(input, init);
+      const h = new Headers((init && init.headers) || {});
+      calls.push({ http: (init && init.method) || 'GET', path: new URL(String(input instanceof Request ? input.url : input)).pathname, status: res.status, auth: h.get('authorization') });
+      return res;
+    };
+    return { calls, fetchFn };
+  };
+  for (const [lib, mk] of [
+    ['v1', (u, o) => [new v1.Client({ name: 'apitest-v1-oauth', version: '0.0.0' }), new v1.Transport(u, o)]],
+    ['v2', (u, o) => [new v2.Client({ name: 'apitest-v2-oauth', version: '0.0.0' }), new v2.StreamableHTTPClientTransport(u, o)]],
+  ]) {
+    const run = async (u, headers, prov, work) => {
+      const rec = recorder2();
+      const [client, transport] = mk(u, { authProvider: prov, fetch: rec.fetchFn, requestInit: { headers: headers || {} } });
+      let out, error;
+      try { await client.connect(transport); out = await work(client); } catch (e) { error = e; }
+      try { await client.close(); } catch {}
+      return { out, error, calls: rec.calls, transport };
+    };
+    const listOrCode = async (client) => { try { return { tools: (await client.listTools()).tools.map((t) => t.name) }; } catch (e) { return { code: e.code, data: e.data }; } };
+    // K1: the key at /api/mcp
+    {
+      const p = provider();
+      const g = await run(keyUrl, { Authorization: 'Bearer ' + KEY }, p, listOrCode);
+      check('mcp ' + lib + ', K1: a key at /api/mcp with a provider: works, every request carries the key, no metadata asked, no sign-in', !g.error && Array.isArray(g.out.tools) && g.calls.length > 0 && g.calls.every((c) => c.auth === 'Bearer ' + KEY) && !wellKnown(g.calls).length && !p.redirects.length && g.calls.every((c) => c.status !== 401), JSON.stringify(g.calls).slice(0, 300) + ' ' + String(g.error && g.error.message));
+    }
+    // K2: no credential at /api/mcp
+    {
+      const p = provider();
+      const g = await run(keyUrl, {}, p, async (client) => ({ instructions: client.getInstructions(), ...(await listOrCode(client)) }));
+      check('mcp ' + lib + ', K2: no credential at /api/mcp: connects (200), tools -32001 agent_key_missing, no metadata, no sign-in', !g.error && /no agent key/.test(g.out.instructions || '') && g.out.code === -32001 && g.out.data && g.out.data.code === 'agent_key_missing' && !wellKnown(g.calls).length && !p.redirects.length && g.calls.every((c) => c.status !== 401), js(g.out).slice(0, 200) + ' ' + JSON.stringify(g.calls).slice(0, 200));
+    }
+    // K5 then K3: no credential at the sign-in address: 401, the metadata, the authorize redirect; approved, it signs in and lists tools
+    const signed = provider();
+    {
+      const g = await run(signinUrl, {}, signed, listOrCode);
+      const paths = g.calls.map((c) => c.path);
+      check('mcp ' + lib + ', K5: no credential at /api/mcp/signin: 401, then its metadata and the issuer\'s, then the authorize page', !!g.error && g.calls.length > 0 && g.calls[0].status === 401 && paths.includes('/.well-known/oauth-protected-resource/api/mcp/signin') && paths.includes('/.well-known/oauth-authorization-server') && signed.redirects.length === 1 && signed.redirects[0].pathname === '/oauth/authorize', JSON.stringify(paths) + ' ' + String(g.error && g.error.message));
+      const u = signed.redirects[0];
+      check('mcp ' + lib + ', K5: the authorize request names the app, PKCE S256, the sign-in address as resource', !!u && u.searchParams.get('client_id') === APP.client_id && u.searchParams.get('code_challenge_method') === 'S256' && u.searchParams.get('resource') === ORIGIN + '/api/mcp/signin', u && u.search);
+      if (u) {
+        const a = await approve(u);
+        check('mcp ' + lib + ', K3: the page is served and the approval redirects back with the code', a.page.status === 200 && !!a.back && !!a.back.searchParams.get('code') && a.back.searchParams.get('iss') === ORIGIN, a.decide.status + ' ' + a.decide.text.slice(0, 160));
+        if (a.back) {
+          try { await g.transport.finishAuth(lib === 'v1' ? a.back.searchParams.get('code') : a.back.searchParams); } catch (e) { check('mcp ' + lib + ', K3: the code exchange', false, String(e && e.message)); }
+          const g2 = await run(signinUrl, {}, signed, async (client) => ({ server: client.getServerVersion(), ...(await listOrCode(client)) }));
+          check('mcp ' + lib + ', K3: signed in: the sign-in server, its tools listed, no add_room', !g2.error && g2.out.server && g2.out.server.name === 'agent-chat-signin' && Array.isArray(g2.out.tools) && g2.out.tools.includes('list_rooms') && !g2.out.tools.includes('add_room') && g2.calls.every((c) => c.status !== 401), js(g2.out).slice(0, 200) + ' ' + String(g2.error && g2.error.message));
+          // K4: the same provider, its tokens for the sign-in address, at /api/mcp beside a key header. v2 sends
+          // the provider's token in place of the key, which the key's address refuses in band; v1 keeps the
+          // configured header, so the key works. Either way: 200, never 401, no metadata asked, no sign-in.
+          const g4 = await run(keyUrl, { Authorization: 'Bearer ' + KEY }, signed, listOrCode);
+          const sent = g4.calls.filter((c) => c.http === 'POST').map((c) => c.auth);
+          const answered = lib === 'v2'
+            ? sent.every((x) => /^Bearer \.ao1\./.test(x || '')) && g4.out && g4.out.code === -32001 && g4.out.data && g4.out.data.code === 'agent_key_invalid'
+            : sent.every((x) => x === 'Bearer ' + KEY) && g4.out && Array.isArray(g4.out.tools);
+          check('mcp ' + lib + ', K4: a provider holding the sign-in\'s tokens at /api/mcp with a key header: 200, never 401, no metadata asked, no sign-in; ' + (lib === 'v2' ? 'its token in place of the key, refused in band (agent_key_invalid)' : 'the key kept, which works'), g4.calls.length > 0 && g4.calls.every((c) => c.status === 200 || c.status === 202 || c.status === 405) && !wellKnown(g4.calls).length && signed.redirects.length === 1 && answered, JSON.stringify(g4.calls.map((c) => [c.http, c.status, (c.auth || '').slice(0, 12)])) + ' ' + js(g4.out).slice(0, 120));
+        }
+      }
+    }
+    // K6: the key at the sign-in address
+    {
+      const p = provider();
+      const g = await run(signinUrl, { Authorization: 'Bearer ' + KEY }, p, listOrCode);
+      check('mcp ' + lib + ', K6: a key at /api/mcp/signin: 200 wrong_address, no sign-in', !g.error && g.out.code === -32001 && g.out.data && g.out.data.code === 'wrong_address' && !p.redirects.length && !wellKnown(g.calls).length && g.calls.every((c) => c.status !== 401), JSON.stringify(g.out) + ' ' + JSON.stringify(g.calls).slice(0, 200));
+    }
+    // K7, K8: a room's own address, with its token and with none
+    for (const [k, headers] of [['K7', { 'X-Invite-Token': agentTok }], ['K8', {}]]) {
+      const p = provider();
+      const g = await run(url, headers, p, listOrCode);
+      const ok = k === 'K7' ? Array.isArray(g.out && g.out.tools) : !!g.out && g.out.code === -32001;
+      check('mcp ' + lib + ', ' + k + ': a room\'s own address (' + (k === 'K7' ? 'its token' : 'no credential') + '): 200, in band, no metadata, no sign-in', !g.error && ok && !wellKnown(g.calls).length && !p.redirects.length && g.calls.every((c) => c.status !== 401), js(g.out).slice(0, 160) + ' ' + JSON.stringify(g.calls).slice(0, 200));
+    }
+  }
+  await req('DELETE', '/api/agent', { headers: { Authorization: 'Bearer ' + KEY } });
+  await req('POST', '/api/test-hooks/oauth-app', { owner: true, json: { clear: true } });
 }
 
 module.exports = { mcpClients };

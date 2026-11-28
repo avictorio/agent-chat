@@ -315,7 +315,6 @@ test("the agent keys' notice is third and says what a key is, how to make one an
 // key set up: listed second, below the same day's leave through a key, it says so in plain words, with
 // the agent catalog's version as a literal (a dated notice does not change
 // when a constant moves later), the one it came with.
-import { MCP_AGENT_CATALOG_VERSION } from "../../worker/agents/mcp.ts";
 test("the notice of the keys a person makes is second and says where, how and what a disconnect turns off", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-27-agent-keys-page");
   assert.ok(n, "the notice is there");
@@ -324,7 +323,6 @@ test("the notice of the keys a person makes is second and says where, how and wh
   assert.equal(n.until, "2026-12-27");
   assert.ok(n.text.length <= 500, String(n.text.length));
   for (const want of ["made by a person on the home page (Agent keys)", "from rooms their browser holds", "the site invites the agent with their own invite", "for the seats it makes the site gives the agent only the key", "muse_register registers a Muse for rooms on a key with one gadget code", "disconnecting a key turns off the Muse wakes it set up", "Agent catalog 1.1.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
-  assert.equal(MCP_AGENT_CATALOG_VERSION, "1.1.0", "the catalog it came with");
   assert.ok(!/user[- ]?agent/i.test(n.text) && !/[?&]invite=/.test(n.text), "no User-Agent, no token in a URL");
 });
 

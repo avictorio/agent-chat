@@ -1,7 +1,7 @@
 // Source of truth: https://github.com/avictorio/agent-chat (worker/; this is the main module).
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
-import { BadRequest, CORS, json, settleBody } from "./lib/http.js";
+import { BadRequest, CORS, CORS_OAUTH, CORS_SIGNIN, json, settleBody } from "./lib/http.js";
 import { GONE_MSG, isGoneError } from "./lib/errors.js";
 import { AUDIO_MAX, AVATAR_MAX, IMAGE_MAX, inlineBodyCap, mb, mediaTooBig, MIB, ROOM_RE, SETTLED_BODY_MAX, VIDEO_MAX, VOICE_SAMPLE_MAX } from "./limits.js";
 import { MCP_PATH, headerToken } from "./lib/tokens.js";
@@ -37,6 +37,7 @@ import {
   hookLetterGrid,
   hookLiarsDice,
   hookMuse,
+  hookOauthApp,
   hookR2Delay,
   hookR2Fail,
   hookSigv4,
@@ -52,7 +53,8 @@ import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "
 import { speakRoute, voiceRoute } from "./routes/voices.js";
 import { museHandoverRoute, museHookRoute, museRegisterRoute, type MuseHandover } from "./routes/muse.js";
 import { webhookHookRoute } from "./routes/webhook.js";
-import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentLeaveRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute } from "./routes/agent.js";
+import { agentCreateRoute, agentInviteAddRoute, agentInviteCreateRoute, agentLeaveRoute, agentMcpRoute, agentRemoveRoute, agentRoomsRoute, agentRoute, signinMcpRoute } from "./routes/agent.js";
+import { authorizeRoute, decideRoute, disconnectRoute, revokeRoute, tokenRoute, wellKnownRoute } from "./routes/oauth.js";
 
 import {
   attachmentsRoute,
@@ -165,12 +167,26 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     const invite = headerToken(request);
     const rc: RouteContext = { request, env, url, path, owner, invite, ctx };
 
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    // the sign-in's paths answer their preflight with their own CORS: the
+    // sign-in address lets a browser client read WWW-Authenticate, the token
+    // and revocation endpoints take a DPoP header, and the page's own calls
+    // (decide, disconnect) are same-origin only, so their preflight allows
+    // no other origin
+    if (request.method === "OPTIONS") {
+      if (path === "/api/mcp/signin" || path === "/api/mcp/signin/") return new Response(null, { status: 204, headers: CORS_SIGNIN });
+      if (path === "/api/oauth/token" || path === "/api/oauth/revoke") return new Response(null, { status: 204, headers: CORS_OAUTH });
+      if (path === "/api/oauth/decide" || path === "/api/oauth/disconnect") return new Response(null, { status: 204 });
+      return new Response(null, { status: 204, headers: CORS });
+    }
     {
       const early = await settleRoomBody(rc);
       if (early) return early;
     }
     if (path === "/") return page(env, url.origin);
+    // the sign-in (routes/oauth.ts): its documents, and the approval page's
+    // checks before the shell it shows
+    if (path.startsWith("/.well-known/")) { const r = wellKnownRoute(rc); if (r !== undefined) return r; }
+    if (path === "/oauth/authorize") return authorizeRoute(rc);
     if (path === "/api/build") {
       // Every open page asks this every few minutes, which makes it the
       // place to keep the direct-upload check fresh (r2-direct-check.ts),
@@ -192,6 +208,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (path === "/api/test-hooks/liarsdice") { const r = await hookLiarsDice(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/muse") { const r = await hookMuse(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/agent-limits") { const r = await hookAgentLimits(rc); if (r !== undefined) return r; }
+    if (path === "/api/test-hooks/oauth-app") { const r = await hookOauthApp(rc); if (r !== undefined) return r; }
     const usm = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/(part|sign|status|finish|abort)\/?$/);
     if (usm) { const r = await uploadLinkStepRoute(rc, usm); if (r !== undefined) return r; }
     const um = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/?$/);
@@ -211,6 +228,11 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (path === "/api/agent/rooms/remove" || path === "/api/agent/rooms/remove/") return agentRemoveRoute(rc);
     if (path === "/api/agent/rooms/leave" || path === "/api/agent/rooms/leave/") return agentLeaveRoute(rc);
     if (path === "/api/mcp" || path === "/api/mcp/") return agentMcpRoute(rc);
+    if (path === "/api/mcp/signin" || path === "/api/mcp/signin/") return signinMcpRoute(rc);
+    if (path === "/api/oauth/decide") return decideRoute(rc);
+    if (path === "/api/oauth/token") return tokenRoute(rc);
+    if (path === "/api/oauth/revoke") return revokeRoute(rc);
+    if (path === "/api/oauth/disconnect") return disconnectRoute(rc);
     {
       // the Muse gadget's handover (no member token: routes/muse.ts)
       const hm = /^\/api\/muse\/(connect|update|disconnect|status|seal-key)\/?$/.exec(path);

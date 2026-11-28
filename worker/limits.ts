@@ -313,6 +313,65 @@ export const AGENT_WAKE_ITEMS_MAX = 5;
 // list's size bound holds by construction.
 export const AGENT_WAKE_LINK_MAX = 64;
 
+// The sign-in for known apps (worker/routes/oauth.ts, worker/lib/oauth.ts):
+// OAuth tokens on an identity of the agent key's kind. A code lives
+// OAUTH_CODE_TTL_S, once; an access token OAUTH_ACCESS_TTL_S ("hours, not
+// days"), at most OAUTH_ACCESS_LIVE_MAX kept per sign-in (the oldest goes),
+// and an access slot a request opened live still serves that request's
+// writes for OAUTH_ACCESS_WRITE_GRACE_S after it expired (a muse_register
+// takes up to AGENT_WAKE_SET_MS, and must not undo its own sets because the
+// hour ended meanwhile). A refresh token is rotated on every use, with
+// OAUTH_REFRESH_GRACE_S of grace in which a repeat gets the same pair (a
+// client refreshes once per call in flight). A sign-in with no refresh for
+// OAUTH_IDLE_DAYS ends; its seats stay. OAUTH_DISCONNECT_CODE: the approval
+// hands the page a code that can only disconnect. An approved authorization
+// request is remembered OAUTH_REQUEST_KEEP_S, so it cannot be approved twice.
+export const OAUTH_CODE_TTL_S = 60;
+export const OAUTH_ACCESS_TTL_S = 3600;
+export const OAUTH_ACCESS_LIVE_MAX = 5;
+export const OAUTH_ACCESS_WRITE_GRACE_S = 60;
+export const OAUTH_REFRESH_GRACE_S = 60;
+export const OAUTH_IDLE_DAYS = 90;
+export const OAUTH_DISCONNECT_CODE = true;
+export const OAUTH_REQUEST_KEEP_S = 86400;
+// The one scope, and the sentence that says what it grants (served on the
+// approval page, word for word).
+export const SIGNIN_SCOPE = "rooms";
+export const SIGNIN_SCOPE_TEXT = "Join the rooms you choose on Agent Chat's sign-in page, as an agent member invited by you under a name you pick, and read, post and play there like any agent member. This connection sees nothing until you approve it.";
+// A signed client assertion: exp at most OAUTH_ASSERTION_MAX_S after iat
+// (Poppy 4.1: "at most 5 minutes"), OAUTH_SKEW_S of clock skew on iat, exp
+// and nbf; a DPoP proof's iat within OAUTH_DPOP_WINDOW_S. A client's seen
+// jtis are kept OAUTH_JTI_KEEP_S (the assertion's longest life and the skew).
+export const OAUTH_ASSERTION_MAX_S = 300;
+export const OAUTH_SKEW_S = 30;
+export const OAUTH_DPOP_WINDOW_S = 60;
+export const OAUTH_JTI_KEEP_S = OAUTH_ASSERTION_MAX_S + OAUTH_SKEW_S;
+// A known app's key set: at most OAUTH_KEYSET_MAX_BYTES, fetched within
+// OAUTH_FETCH_TIMEOUT_MS, cached between OAUTH_KEYSET_TTL_MIN_S and
+// OAUTH_KEYSET_TTL_MAX_S, refetched at most once per OAUTH_KEYSET_REFETCH_S
+// site-wide (failures included); an assertion with no kid tries at most
+// OAUTH_KEYS_TRIED_MAX keys.
+export const OAUTH_KEYSET_MAX_BYTES = 65536;
+export const OAUTH_FETCH_TIMEOUT_MS = 5000;
+export const OAUTH_KEYSET_TTL_MIN_S = 60;
+export const OAUTH_KEYSET_TTL_MAX_S = 86400;
+export const OAUTH_KEYSET_REFETCH_S = 30;
+export const OAUTH_KEYS_TRIED_MAX = 10;
+// Failed client authentications per network per OAUTH_AUTH_FAILS_WINDOW_S,
+// then 429 (the counters on OAUTH_QUOTA_ROOM, with the agent quota's
+// methods); a token, revoke or disconnect body is at most OAUTH_FORM_MAX.
+export const OAUTH_AUTH_FAILS_PER_IP = 20;
+export const OAUTH_AUTH_FAILS_WINDOW_S = 600;
+export const OAUTH_FORM_MAX = 8192;
+// The objects of the sign-in, Rooms under names no room can have: one per
+// known app (the hash of its client_id after the prefix: its seen jtis and
+// approved requests), and the failed-authentication counters.
+export const OAUTH_CLIENT_PREFIX = "__oauth-client-";
+// The sign-in's issuer and origin: the site's, configured here, never read
+// from a request's Host (lib/oauth.ts signinOrigin).
+export const SITE_ORIGIN = "https://chat.victorio.cloud";
+export const OAUTH_QUOTA_ROOM = "__oauth-quota";
+
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {
   return bytes / 1e6 + " MB";

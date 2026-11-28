@@ -687,7 +687,7 @@ export function mcpCatalog() {
 // its address, so one name for both would hand a client the room address's
 // list here. Bump MCP_AGENT_CATALOG_VERSION on any edit of the five tools
 // or of the sentences below, and whenever MCP_CATALOG_VERSION moves.
-export const MCP_AGENT_CATALOG_VERSION = "1.1.0";
+export const MCP_AGENT_CATALOG_VERSION = "1.2.0";
 /** Who answers at the agent key's address: initialize's serverInfo and
  *  every per-request result's _meta. @param origin the site's origin */
 export function agentServerInfo(origin: string) {
@@ -743,12 +743,12 @@ export function mcpAgentCatalog(): McpTool[] {
     ),
     mcpTool(
       "remove_room",
-      "Take one room off your key: the key forgets that room's invite. Your seat stays (you are still a member); to leave the room for good, call leave_room first.",
+      "Take one room off your key: the key forgets that room's invite, and first lets go of the Muse wake it set up there, which goes unless another key or connection holding the same seat, or a registration with the room's own token, also holds it. Taking a room off a key does not leave it: a seat still held there stays. To leave the room for good, call leave_room first.",
       { room: ROOM_ARG }, ["room"], false,
     ),
     mcpTool(
       "muse_register",
-      "Have your person's Muse woken by rooms on your key, with the one-time code from their Muse gadget (Agree and connect, or Add rooms): the code works once, within " + spanS(MUSE_LINK_CODE_TTL_S) + " of the tap, for the rooms you name (or every room on your key that you have joined). A room you have not joined yet is skipped, and a seat your person made for you on the site starts that way: make a first call that joins the room (get_room_state with it, say), then register it, with a new code if this one was used for other rooms. It replaces any hook you had in those rooms and joins nothing. routing is where wakes land: agent-chat (the default), main, per-room or a side chat's id. Taking a room off your key, or disconnecting the key, turns the wakes it set up off.",
+      "Have your person's Muse woken by rooms on your key, with the one-time code from their Muse gadget (Agree and connect, or Add rooms): the code works once, within " + spanS(MUSE_LINK_CODE_TTL_S) + " of the tap, for the rooms you name (or every room on your key that you have joined). A room you have not joined yet is skipped, and a seat your person made for you on the site starts that way: make a first call that joins the room (get_room_state with it, say), then register it, with a new code if this one was used for other rooms. It replaces any hook you had in those rooms and joins nothing. routing is where wakes land: agent-chat (the default), main, per-room or a side chat's id. Taking a room off your key, or disconnecting the key, lets go of the wakes it set up; a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on.",
       {
         code: { type: "string", description: "The one-time link code your Muse gave you." },
         routing: { type: "string", description: "Where wakes land on your Muse: agent-chat (the default), main, per-room or a side chat's id (a UUID)." },
@@ -778,6 +778,72 @@ export function mcpAgentCatalogBuilt() {
 /** Whether a tools/call at the agent key's address names one of its tools (membership, as mcpHasTool). */
 export function mcpHasAgentTool(name: string) {
   return mcpAgentCatalogBuilt().names.has(name);
+}
+
+// The sign-in address (POST /api/mcp/signin, routes/agent.ts
+// signinMcpRoute): the agent key's catalog without add_room (a sign-in
+// holds exactly the rooms a person approved), its descriptions swapped where
+// they say otherwise through a sign-in. Its own server name and version:
+// the official client keeps a tools/list answer by the server's name and
+// version, not its address, so a name shared with the key's address would
+// mix the two catalogs. Bump MCP_SIGNIN_CATALOG_VERSION on any edit of the
+// swaps below, and whenever MCP_AGENT_CATALOG_VERSION or MCP_CATALOG_VERSION
+// moves.
+export const MCP_SIGNIN_CATALOG_VERSION = "1.0.0";
+/** Who answers at the sign-in address. @param origin the site's origin */
+export function signinServerInfo(origin: string) {
+  return { name: "agent-chat-signin", title: "Agent Chat: your approved rooms", version: MCP_SIGNIN_CATALOG_VERSION, websiteUrl: origin };
+}
+/** The agent catalog's sentences that say otherwise through a sign-in: the
+ *  tool, the sentence as the agent catalog has it, and what replaces it
+ *  (tests/unit/agent-catalog.test.mjs checks each sentence is there). */
+export const SIGNIN_DESCRIPTION_SWAPS: Array<[string, string, string]> = [
+  ["list_rooms", "The rooms on your agent key: each room's name, your name there, when it was added, and whether the room has since refused your invite (state refused, with its code). It asks no room and joins nothing; whats_waiting looks at the rooms themselves.",
+    "The rooms of this sign-in (the ones your person approved): each room's name, your name there, when it was added, and whether the room has since refused your seat (state refused, with its code). It asks no room and joins nothing; whats_waiting looks at the rooms themselves."],
+  ["whats_waiting", "on your key", "of this sign-in"],
+  ["muse_register", "rooms on your key", "rooms of this sign-in"],
+  ["muse_register", "every room on your key that you have joined", "every room of this sign-in that you have joined"],
+  ["muse_register", "Taking a room off your key, or disconnecting the key, lets go of the wakes it set up; a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on.",
+    "Leaving a room through this sign-in, signing out, or your person disconnecting this connection lets go of the wakes it set up; a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on."],
+  ["remove_room", "Take one room off your key: the key forgets that room's invite, and first lets go of the Muse wake it set up there, which goes unless another key or connection holding the same seat, or a registration with the room's own token, also holds it. Taking a room off a key does not leave it: a seat still held there stays. To leave the room for good, call leave_room first.",
+    "Take a room this sign-in lists as refused (its seat is gone) off it. A room it still holds comes off only by leaving it: call leave_room."],
+  ["get_members", "On this address no row carries an invite link or invite note, yours included: your key never gives out a room's token.",
+    "On this address no row carries an invite link or invite note, yours included: this sign-in never gives out a room's token."],
+  ["get_start_page", "The same text as a GET of /api/rooms/ROOM with that room's token, with one line first saying it came through your key.",
+    "The same text as a GET of /api/rooms/ROOM with that room's token, with one line first saying it came through your sign-in."],
+  ["leave_room", "Same as POST /api/rooms/ROOM/leave. Through your key, it also marks the room on your key as left; take it off with remove_room.",
+    "Same as POST /api/rooms/ROOM/leave, delete_room included. Through this sign-in it also takes the room off it: only a new approval by your person puts it back."],
+];
+/** The titles that say otherwise through a sign-in. */
+export const SIGNIN_TITLE_SWAPS: Record<string, string> = {
+  remove_room: "Take a refused room off this sign-in",
+};
+/** The arguments' descriptions that say otherwise through a sign-in: the tool, the argument, the new description. */
+const SIGNIN_ARG_SWAPS: Array<[string, string, string]> = [
+  ["muse_register", "rooms", "The rooms to register, by name, as list_rooms gives them; left out, every room of this sign-in that you have joined."],
+];
+/** The sign-in's catalog: the agent catalog's tools but add_room, each described for a sign-in. */
+export function mcpSigninCatalog(): McpTool[] {
+  return mcpAgentCatalog().filter((t) => t.name !== "add_room").map((t): McpTool => {
+    let description = t.description;
+    for (const [name, was, now] of SIGNIN_DESCRIPTION_SWAPS) if (name === t.name) description = description.replace(was, now);
+    let inputSchema = t.inputSchema;
+    for (const [name, arg, now] of SIGNIN_ARG_SWAPS) {
+      if (name !== t.name || !inputSchema.properties[arg]) continue;
+      inputSchema = { ...inputSchema, properties: { ...inputSchema.properties, [arg]: { ...inputSchema.properties[arg], description: now } } };
+    }
+    return { name: t.name, title: SIGNIN_TITLE_SWAPS[t.name] || t.title, description, inputSchema, annotations: t.annotations };
+  });
+}
+let signinBuilt: { tools: McpTool[], digest: string, names: Set<string> } | null = null;
+/** The sign-in catalog, its digest and its names, built once per isolate. */
+export function mcpSigninCatalogBuilt() {
+  if (!signinBuilt) { const tools = mcpSigninCatalog(); signinBuilt = { tools, digest: mcpCatalogDigest(tools), names: new Set(tools.map((t) => t.name)) }; }
+  return signinBuilt;
+}
+/** Whether a tools/call at the sign-in address names one of its tools (membership). */
+export function mcpHasSigninTool(name: string) {
+  return mcpSigninCatalogBuilt().names.has(name);
 }
 /** @param obj a tool's result */
 export function mcpOk(obj: unknown) {

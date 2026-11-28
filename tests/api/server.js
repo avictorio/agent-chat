@@ -71,7 +71,9 @@ async function start(opts) {
   const child = spawn(process.execPath, [path.join(path.dirname(require.resolve('wrangler/package.json')), 'bin', 'wrangler.js'), 'dev', '-c', config, '--port', String(port), '--inspector-port', String(inspector), '--persist-to', stateDir,
     // a mail key so room creation counts as set up; under TEST_HOOKS no mail is sent (routes/rooms.ts)
     '--var', 'OWNER_KEY:' + OWNER, '--var', 'RESEND_API_KEY:re_fake_for_tests', '--var', 'TEST_HOOKS:1', '--var', 'MUSE_SEAL_KEY:' + seal.privateKey,
-    ...(opts.museOrigin ? ['--var', 'TEST_MUSE_ORIGIN:' + opts.museOrigin] : [])], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    ...(opts.museOrigin ? ['--var', 'TEST_MUSE_ORIGIN:' + opts.museOrigin] : []),
+    // the sign-in's issuer on this server: its own address, so an OAuth client meets the address it connected to (worker/lib/oauth.ts signinOrigin)
+    '--var', 'TEST_SIGNIN_ORIGIN:http://localhost:' + port], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   // The child's own output is the proof that it, and not some other
   // process, holds the port: the ready loop used to take any answer on
   // the port, so a run that found a leftover server (or another run's) on

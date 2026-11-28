@@ -314,6 +314,8 @@ async function museKeyed(names = ["lima", "oslo"]) {
   return { b, w, tok, key, id: w.identities()[0], peek: () => hooksOf(w, key), ...g };
 }
 const result = (r) => r.json.result;
+/** the holder tag of the key's entry for a room, as its stored list holds it */
+const tagIn = async (k, room) => (await storedOf(k.w, k.key)).rooms.find((e) => e.room === room).tag;
 /** the links the key records in each room, by opening its sealed list as the Worker does */
 const recorded = (k) => k.peek();
 const hookIn = (w, room) => w.harness(room).all("SELECT kind, link, routing FROM mh WHERE name = 'Hank'").map((x) => ({ ...x }))[0] || null;
@@ -495,7 +497,7 @@ test("muse_register: a take-off while the set may still reach the room is try_ag
       const sec = Math.ceil((4500 + AGENT_WAKE_SKEW_MS + 1) / 1000);
       assert.deepEqual(off.json, { error: wakeStillSetting("lima", sec), code: "try_again", room: "lima" });
       assert.equal(off.headers.get("Retry-After"), String(sec));
-      assert.deepEqual(offAsked, ["museHookLook"], "a look at the room's clock, and nothing dropped");
+      assert.deepEqual(offAsked, ["museHolderLook"], "a look at the room's clock, and nothing dropped");
       const got = result(r).structuredContent;
       assert.deepEqual(got.results.map((x) => [x.room, x.ok, x.code]), [["lima", true, undefined], ["oslo", true, undefined]], "a room on the key never answers room_not_held");
       assert.equal(hookIn(k.w, "lima").link, k.link);
@@ -527,7 +529,7 @@ test("muse_register: a take-off while the set may still reach the room is try_ag
         assert.deepEqual(got[0], { room: "lima", ok: false, status: 503, code: "try_again", error: wakeAgain("lima", "late", true) });
         assert.deepEqual(links(await k.peek(), "lima"), [], "its own write took its recording off, and the tidy's look the link");
       } else {
-        assert.deepEqual(t.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", true) }, "past its deadline by the room's clock: the take-off settles it");
+        assert.deepEqual(t.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", "off") }, "past its deadline by the room's clock: the take-off settles it");
         assert.deepEqual(got[0], { room: "lima", ok: false, status: 404, code: "room_not_held", error: "lima is no longer on your key." });
       }
       assert.equal(hookIn(k.w, "lima"), null, between + ": the late set set nothing");
@@ -554,9 +556,9 @@ test("DELETE /api/agent turns off the wakes the key set up, after the cut, from 
     assert.deepEqual(d.json, { deleted: true, rooms: ["lima", "oslo", "rome"], muse_wakes_removed: ["lima", "oslo"], muse_wakes_left: [], note: dropNote([]) });
     const seq = k.w.asked.slice(mark).map((a) => a.name + "." + a.method);
     assert.equal(seq[0], k.id + ".agentCut", "the cut first: " + seq.join(" "));
-    assert.ok(seq.indexOf("lima.museDropLook") > 0 && seq.indexOf("oslo.museDropLook") > 0);
+    assert.ok(seq.indexOf("lima.museHolderDrop") > 0 && seq.indexOf("oslo.museHolderDrop") > 0);
     assert.equal(seq[seq.length - 1], k.id + ".agentDrop", "the record deleted last");
-    assert.ok(!seq.includes("rome.museDropLook"), "no wake of the key's in rome: not asked");
+    assert.ok(!seq.includes("rome.museHolderDrop"), "no wake of the key's in rome: not asked");
     assert.equal(hookIn(k.w, "lima"), null);
     assert.equal(hookIn(k.w, "oslo"), null);
     assert.equal(hookIn(k.w, "rome").link, own.link, "the agent's own hook stays");
@@ -582,9 +584,9 @@ test("DELETE /api/agent: a room added just before the cut is named; a room that 
     obj.agentCut = async (...a) => { await mcp(k.w, call("add_room", { room: "rome", token: tr }), auth(k.key)); delete obj.agentCut; return realCut(...a); };
     // lima throws once, oslo every time
     let limaTries = 0;
-    const lima = k.w.harness("lima").room, realLook = lima.museDropLook.bind(lima);
-    lima.museDropLook = (...a) => { if (++limaTries === 1) throw new Error("RPC receiver does not implement the method"); return realLook(...a); };
-    k.w.harness("oslo").room.museDropLook = () => { throw new Error("RPC receiver does not implement the method"); };
+    const lima = k.w.harness("lima").room, realLook = lima.museHolderDrop.bind(lima);
+    lima.museHolderDrop = (...a) => { if (++limaTries === 1) throw new Error("RPC receiver does not implement the method"); return realLook(...a); };
+    k.w.harness("oslo").room.museHolderDrop = () => { throw new Error("RPC receiver does not implement the method"); };
     const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
     assert.equal(d.status, 200);
     assert.deepEqual(d.json, { deleted: true, rooms: ["lima", "oslo", "rome"], muse_wakes_removed: ["lima"], muse_wakes_left: ["oslo"], note: dropNote(["oslo"]) }, "rome, added before the cut, is named");
@@ -598,7 +600,7 @@ test("DELETE /api/agent: a room added just before the cut is named; a room that 
     const again = await mcp(k.w, call("list_rooms", {}), auth(k.key));
     assert.equal(again.json.error.data.code, "agent_key_invalid", "the key is cut all the same");
     // oslo answers again: the second DELETE turns it off and deletes the record
-    delete k.w.harness("oslo").room.museDropLook;
+    delete k.w.harness("oslo").room.museHolderDrop;
     const d2 = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
     assert.equal(d2.status, 200);
     assert.deepEqual(d2.json, { deleted: true, rooms: ["oslo"], muse_wakes_removed: ["oslo"], muse_wakes_left: [], note: dropNote([]) });
@@ -647,17 +649,17 @@ test("a Worker that stops right after the cut, or between two rooms' drops: the 
       const before = await storedOf(k.w, k.key);
       // oslo's drop never answers: the Worker stops there, lima's drop done
       const oslo = k.w.harness("oslo").room;
-      oslo.museDropLook = () => new Promise(() => {});
+      oslo.museHolderDrop = () => new Promise(() => {});
       const first = read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
       let answered = false;
       first.then(() => { answered = true; }, () => { answered = true; });
-      await until(() => k.w.methods("oslo").includes("museDropLook") && k.w.methods("lima").includes("museDropLook"));
+      await until(() => k.w.methods("oslo").includes("museHolderDrop") && k.w.methods("lima").includes("museHolderDrop"));
       await sleepMs(20);
       assert.equal(answered, false);
       assert.equal(hookIn(k.w, "lima"), null, "lima's wake is off");
       const cut = await storedOf(k.w, k.key);
       assert.deepEqual([cut.kind, cut.rooms], ["cut", before.rooms], "the record as it was: nothing written yet");
-      delete oslo.museDropLook;
+      delete oslo.museHolderDrop;
       const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
       assert.deepEqual(d.json, { deleted: true, rooms: ["lima", "oslo"], muse_wakes_removed: ["oslo"], muse_wakes_left: [], note: dropNote([]) }, "lima's had gone already");
       assert.equal(hookIn(k.w, "oslo"), null);
@@ -674,7 +676,7 @@ test("a cut key is refused by every route and tool but its own DELETE exactly as
     for (const n of ["lima", "oslo"]) k.w.harness(n).room.access(k.tok[n], false);
     await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key));
     pastDeadlines(k.w, "lima", "oslo");
-    k.w.harness("oslo").room.museDropLook = () => { throw new Error("RPC receiver does not implement the method"); };
+    k.w.harness("oslo").room.museHolderDrop = () => { throw new Error("RPC receiver does not implement the method"); };
     const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
     assert.deepEqual(d.json.muse_wakes_left, ["oslo"]);
     assert.equal((await storedOf(k.w, k.key)).kind, "cut");
@@ -715,15 +717,15 @@ test("remove_room and POST /api/agent/rooms/remove turn the room's wake off firs
     // MCP: lima's wake goes, then lima
     const mark = k.w.asked.length;
     let r = await mcp(k.w, call("remove_room", { room: "lima" }), auth(k.key));
-    assert.deepEqual(result(r).structuredContent, { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", true) });
+    assert.deepEqual(result(r).structuredContent, { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", "off") });
     const seq = k.w.asked.slice(mark).map((a) => a.name + "." + a.method);
-    assert.ok(seq.indexOf("lima.museHookLook") < seq.indexOf("lima.museDropLook") && seq.indexOf("lima.museDropLook") < seq.lastIndexOf(k.id + ".agentSwap"), "the room's clock, the wake, then the list: " + seq.join(" "));
+    assert.ok(seq.indexOf("lima.museHolderLook") < seq.indexOf("lima.museHolderDrop") && seq.indexOf("lima.museHolderDrop") < seq.lastIndexOf(k.id + ".agentSwap"), "the room's clock, the wake, then the list: " + seq.join(" "));
     assert.equal(hookIn(k.w, "lima"), null);
     // REST, a room with no wake: byte for byte as before
     const rest = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "rome" }, headers: auth(k.key) })));
     assert.equal(rest.text, JSON.stringify({ room: "rome", removed: true, note: removedHeldNote("rome", false) }));
     // oslo cannot be reached: it stays on the key, its wake on, try_again (its link is answered: no clock asked first)
-    for (const m of ["museDropLook"]) {
+    for (const m of ["museHolderDrop"]) {
       k.w.harness("oslo").room[m] = () => { throw new Error("RPC receiver does not implement the method"); };
       const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "oslo" }, headers: auth(k.key) })));
       assert.equal(t.status, 503, m);
@@ -787,13 +789,13 @@ test("after a finished registration nothing is outstanding: a take-off and a DEL
     assert.equal(t.status, 200, t.text);
     assert.equal(t.json.muse_wake_removed, true);
     assert.ok(Date.now() - t0 < AGENT_WAKE_RETRY_MS, "no wait");
-    assert.deepEqual(k.w.methods("lima", mark), ["museHookLook", "museDropLook"], "a look, then the drop");
+    assert.deepEqual(k.w.methods("lima", mark), ["museHolderLook", "museHolderDrop"], "a look, then the drop");
     assert.equal(hookIn(k.w, "lima"), null);
     mark = k.w.asked.length; t0 = Date.now();
     const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
     assert.deepEqual(d.json, { deleted: true, rooms: ["oslo", "rome"], muse_wakes_removed: ["oslo", "rome"], muse_wakes_left: [], note: dropNote([]) });
     assert.ok(Date.now() - t0 < AGENT_WAKE_RETRY_MS, "no wait");
-    assert.deepEqual([k.w.methods("oslo", mark), k.w.methods("rome", mark)], [["museHookLook", "museDropLook"], ["museHookLook", "museDropLook"]]);
+    assert.deepEqual([k.w.methods("oslo", mark), k.w.methods("rome", mark)], [["museHolderLook", "museHolderDrop"], ["museHolderLook", "museHolderDrop"]]);
     assert.deepEqual([hookIn(k.w, "oslo"), hookIn(k.w, "rome")], [null, null]);
   } finally {
     k.b.restore();
@@ -844,7 +846,7 @@ test("with a recording outstanding and unexpired, a take-off answers try_again a
       const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
       assert.deepEqual([t.status, t.json.code], [503, "try_again"], t.text);
       if (sec !== null) assert.deepEqual(t.json, { error: wakeStillSetting("lima", sec), code: "try_again", room: "lima" });
-      assert.deepEqual(k.w.methods("lima", mark), ["museHookLook"], "a look, and nothing dropped");
+      assert.deepEqual(k.w.methods("lima", mark), ["museHolderLook"], "a look, and nothing dropped");
       assert.equal(hookIn(k.w, "lima").link, k.link, "the hook still on");
     }
     clockAt(k.w, "lima", d + SKEW + 1);
@@ -867,7 +869,7 @@ test("the disconnect waits for an outstanding recording at most AGENT_WAKE_SET_M
     const mark = k.w.asked.length;
     const r = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
     assert.deepEqual(r.json, { deleted: true, rooms: ["lima"], muse_wakes_removed: [], muse_wakes_left: ["lima"], note: dropNote(["lima"]) });
-    assert.deepEqual(k.w.methods("lima", mark), ["museHookLook", "museHookLook"], "a look, the wait, a look again; nothing dropped");
+    assert.deepEqual(k.w.methods("lima", mark), ["museHolderLook", "museHolderLook"], "a look, the wait, a look again; nothing dropped");
     assert.equal(hookIn(k.w, "lima").link, k.link);
     assert.deepEqual(await storedOf(k.w, k.key), { ...before, kind: "cut" });
     clockAt(k.w, "lima", d + SKEW + 1);
@@ -887,11 +889,11 @@ test("a settling write whose compare-and-set loses throws its observation away a
     await mcp(k.w, call("muse_register", { code: k.code, rooms: ["lima"] }), auth(k.key));
     k.w.harness("oslo").room.revoke(k.tok.oslo);
     // the first look at lima: meanwhile another call writes the list (oslo marked refused)
-    const lima = k.w.harness("lima").room, real = lima.museHookLook.bind(lima);
+    const lima = k.w.harness("lima").room, real = lima.museHolderLook.bind(lima);
     let looks = 0;
-    lima.museHookLook = async (...a) => { if (++looks === 1) await mcp(k.w, call("whoami", { room: "oslo" }), auth(k.key)); return real(...a); };
+    lima.museHolderLook = async (...a) => { if (++looks === 1) await mcp(k.w, call("whoami", { room: "oslo" }), auth(k.key)); return real(...a); };
     const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
-    delete lima.museHookLook;
+    delete lima.museHolderLook;
     assert.equal(t.json.muse_wake_removed, true, t.text);
     assert.equal(looks, 2, "looked again on the newer list");
     assert.equal(hookIn(k.w, "lima"), null);
@@ -908,7 +910,7 @@ test("a refused first registration of a link (too late, not joined) leaves nothi
       room.access(k.tok.lima, false);
       const real = room.museSetHookLook.bind(room);
       room.museSetHookLook = (...a) => (how === "not joined" ? { ok: false, status: 409, code: "not_joined", error: museNotJoined(true), now: room.museNow() } : (clockAt(k.w, "lima", a[4] + 1), real(...a)));
-      if (how === "tidy throws") room.museHookLook = () => { throw new Error("Network connection lost."); };
+      if (how === "tidy throws") room.museHolderLook = () => { throw new Error("Network connection lost."); };
       const r = await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key));
       delete room.museSetHookLook;
       delete room.museNow;
@@ -918,12 +920,12 @@ test("a refused first registration of a link (too late, not joined) leaves nothi
         assert.deepEqual(outstanding(await k.peek(), "lima"), [], how + ": nothing left");
         continue;
       }
-      delete room.museHookLook;
+      delete room.museHolderLook;
       assert.deepEqual(outstanding(await k.peek(), "lima"), [[k.link, 0]], "the link stays, nothing outstanding");
       const mark = k.w.asked.length;
       const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
       assert.equal(t.json.muse_wake_removed, true, t.text);
-      assert.deepEqual(k.w.methods("lima", mark), ["museHookLook"], "a look: no hook there, nothing to drop");
+      assert.deepEqual(k.w.methods("lima", mark), ["museHolderLook"], "a look: no hook there, nothing to drop");
     } finally {
       k.b.restore();
     }
@@ -941,7 +943,7 @@ test("a set whose answer is lost says so: after the room ran it the wake is on, 
       const r = await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key));
       delete room.museSetHookLook;
       assert.deepEqual(result(r).structuredContent.results, [{ room: "lima", ok: false, status: 503, code: "answer_lost", error: wakeLost("lima") }], when);
-      assert.equal(wakeLost("lima"), "lima did not answer the registration, so its Muse wake may be on there or not: this key keeps it on its record, so taking lima off the key or disconnecting the key turns it off either way. To be sure it is on, register lima again with a new code from the gadget, since this one was used.");
+      assert.equal(wakeLost("lima"), "lima did not answer the registration, so its Muse wake may be on there or not: this key keeps it on its record, so taking lima off the key or disconnecting the key lets go of it either way. To be sure it is on, register lima again with a new code from the gadget, since this one was used.");
       assert.equal(hookIn(k.w, "lima") && hookIn(k.w, "lima").link, when === "after the room ran it" ? k.link : null, when + ": the wake is " + (when === "after the room ran it" ? "on" : "off"));
       assert.deepEqual(outstanding(await k.peek(), "lima"), [[k.link, 1]], when + ": the key keeps it on its record");
       const list = result(await mcp(k.w, call("list_rooms", {}), auth(k.key))).structuredContent.rooms;
@@ -1008,15 +1010,15 @@ test("two DELETEs of one key at once both answer truly: one whose write finds th
     try {
       k.w.harness("lima").room.access(k.tok.lima, false);
       await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key));
-      const lima = k.w.harness("lima").room, real = lima.museHookLook.bind(lima);
+      const lima = k.w.harness("lima").room, real = lima.museHolderLook.bind(lima);
       let mine = 0, other = false, second = null;
-      lima.museHookLook = async (...a) => {
+      lima.museHolderLook = async (...a) => {
         if (other || mine >= 2) return real(...a);
         if (++mine === 1) { other = true; second = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) }))); other = false; }
         throw new Error("Network connection lost.");
       };
       const first = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
-      delete lima.museHookLook;
+      delete lima.museHolderLook;
       assert.deepEqual(second.json, { deleted: true, rooms: ["lima"], muse_wakes_removed: ["lima"], muse_wakes_left: [], note: dropNote([]) });
       assert.deepEqual(first.json, { deleted: true, rooms: ["lima"], muse_wakes_removed: [], muse_wakes_left: [], note: dropNote([]) }, "the record is gone: complete, and this call removed nothing");
       assert.equal(hookIn(k.w, "lima"), null);
@@ -1033,21 +1035,21 @@ test("two DELETEs of one key at once both answer truly: one whose write finds th
     try {
       for (const n of ["lima", "oslo"]) k.w.harness(n).room.access(k.tok[n], false);
       await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key));
-      k.w.harness("oslo").room.museDropLook = () => { throw new Error("Network connection lost."); };
-      const lima = k.w.harness("lima").room, real = lima.museHookLook.bind(lima);
+      k.w.harness("oslo").room.museHolderDrop = () => { throw new Error("Network connection lost."); };
+      const lima = k.w.harness("lima").room, real = lima.museHolderLook.bind(lima);
       let mine = 0, other = false, second = null;
-      lima.museHookLook = async (...a) => {
+      lima.museHolderLook = async (...a) => {
         if (other || mine >= 2) return real(...a);
         if (++mine === 1) { other = true; second = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) }))); other = false; }
         throw new Error("Network connection lost.");
       };
       const first = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
-      delete lima.museHookLook;
+      delete lima.museHolderLook;
       assert.deepEqual(second.json, { deleted: true, rooms: ["lima", "oslo"], muse_wakes_removed: ["lima"], muse_wakes_left: ["oslo"], note: dropNote(["oslo"]) });
       assert.deepEqual(first.json, { deleted: true, rooms: ["lima", "oslo"], muse_wakes_removed: [], muse_wakes_left: ["oslo"], note: dropNote(["oslo"]) }, "it read the record again: oslo is what is left");
       const left = await storedOf(k.w, k.key);
       assert.deepEqual(left.rooms.map((e) => e.room), ["oslo"], "the record keeps oslo, as both answers say");
-      delete k.w.harness("oslo").room.museDropLook;
+      delete k.w.harness("oslo").room.museHolderDrop;
       const third = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
       assert.deepEqual(third.json, { deleted: true, rooms: ["oslo"], muse_wakes_removed: ["oslo"], muse_wakes_left: [], note: dropNote([]) });
     } finally {
@@ -1075,7 +1077,7 @@ test("a second gadget whose set throws: its link stays outstanding; a take-off w
       const mark = k.w.asked.length;
       const early = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
       assert.deepEqual([early.status, early.json.code], [503, "try_again"]);
-      assert.ok(!k.w.methods("lima", mark).includes("museDropLook"), "nothing dropped");
+      assert.ok(!k.w.methods("lima", mark).includes("museHolderDrop"), "nothing dropped");
       if (end === "take-off") {
         clockAt(k.w, "lima", d2 + SKEW + 1);
         const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
@@ -1085,7 +1087,7 @@ test("a second gadget whose set throws: its link stays outstanding; a take-off w
         const m2 = k.w.asked.length;
         const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
         assert.deepEqual([d.json.muse_wakes_removed, d.json.muse_wakes_left, d.json.note], [["lima"], [], dropNote([])]);
-        assert.deepEqual(k.w.methods("lima", m2), ["museHookLook", "museHookLook", "museDropLook"], "a look, the wait, a look again, the drop");
+        assert.deepEqual(k.w.methods("lima", m2), ["museHolderLook", "museHolderLook", "museHolderDrop"], "a look, the wait, a look again, the drop");
       }
       assert.equal(hookIn(k.w, "lima"), null, "the wake the key set up is off, as the answer says");
       await k.w.harness("lima").settled();
@@ -1379,27 +1381,27 @@ test("an answer from a room that sends no clock, or a drop that does not say wha
       pastDeadlines(k.w, "lima");
       const before = await storedOf(k.w, k.key);
       const room = k.w.harness("lima").room;
-      without(room, "museHookLook", "now");
+      without(room, "museHolderLook", "now");
       const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
       assert.deepEqual([t.status, t.json], [503, { error: wakeNotSettled("lima"), code: "try_again", room: "lima" }], end);
       assert.deepEqual(await storedOf(k.w, k.key), before, "the list as it was");
       assert.equal(hookIn(k.w, "lima").link, k.link);
-      delete room.museHookLook;
-      without(room, "museDropLook", "now");
+      delete room.museHolderLook;
+      without(room, "museHolderDrop", "now");
       const t2 = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
       assert.deepEqual([t2.status, t2.json], [503, { error: wakeNotSettled("lima"), code: "try_again", room: "lima" }], end + ": a drop with no clock: not settled, though its hook went");
       assert.deepEqual(await storedOf(k.w, k.key), before);
       assert.equal(hookIn(k.w, "lima"), null, "the drop ran in the room all the same");
-      // the wake on again (set with the room's own token on the same link): the disconnect keeps it while the drop sends no clock
-      assert.equal(room.museSetHook(k.tok.lima, k.link, "main", "lima").ok, true);
+      // the wake on again, held by the key's tag on the same link: the disconnect keeps it while the drop sends no clock
+      assert.equal(room.museSetHookLook(k.tok.lima, k.link, "main", "lima", Date.now() + 3600000, await tagIn(k, "lima")).ok, true);
       const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
       assert.deepEqual([d.json.muse_wakes_removed, d.json.muse_wakes_left], [[], ["lima"]]);
       const linksOf = (st) => st.rooms.map((e) => [e.room, (e.hooks || []).map((h) => h.link)]);
       assert.deepEqual(linksOf(await storedOf(k.w, k.key)), linksOf(before), "the cut record keeps it (an expired recording pruned)");
       // a drop that says it removed the link but not what is on after it: that link settles
-      delete room.museDropLook;
-      assert.equal(room.museSetHook(k.tok.lima, k.link, "main", "lima").ok, true);
-      without(room, "museDropLook", "link");
+      delete room.museHolderDrop;
+      assert.equal(room.museSetHookLook(k.tok.lima, k.link, "main", "lima", Date.now() + 3600000, await tagIn(k, "lima")).ok, true);
+      without(room, "museHolderDrop", "link");
       const d2 = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
       assert.deepEqual([d2.json.muse_wakes_removed, d2.json.muse_wakes_left], [["lima"], []], end);
     } finally {
@@ -1416,19 +1418,19 @@ test("a room is in one of the disconnect's two lists: a hook taken off while ano
     // Y finished; then X, whose tidy's look throws, so Y (not on, nothing outstanding) stays recorded beside it
     const gy = await k.b.connect();
     assert.equal(result(await mcp(k.w, call("muse_register", { code: gy.code }), auth(k.key))).structuredContent.results[0].ok, true);
-    const realLook = room.museHookLook.bind(room);
-    room.museHookLook = () => { throw new Error("Network connection lost."); };
+    const realLook = room.museHolderLook.bind(room);
+    room.museHolderLook = () => { throw new Error("Network connection lost."); };
     assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
-    room.museHookLook = realLook;
+    room.museHolderLook = realLook;
     assert.deepEqual(outstanding(await k.peek(), "lima"), [[gy.link, 0], [k.link, 0]]);
     assert.equal(hookIn(k.w, "lima").link, k.link);
     // the drop answers without saying what is on after it: it settles the link it dropped only, so Y stays
-    const realDrop = room.museDropLook.bind(room);
-    room.museDropLook = (...a) => { const r = { ...realDrop(...a) }; delete r.link; return r; };
+    const realDrop = room.museHolderDrop.bind(room);
+    room.museHolderDrop = (...a) => { const r = { ...realDrop(...a) }; delete r.link; return r; };
     const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
     assert.deepEqual([d.json.muse_wakes_removed, d.json.muse_wakes_left], [[], ["lima"]], "the hook went, but a link stays: left only");
     assert.equal(hookIn(k.w, "lima"), null);
-    room.museDropLook = realDrop;
+    room.museHolderDrop = realDrop;
     const d2 = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
     assert.deepEqual([d2.json.muse_wakes_removed, d2.json.muse_wakes_left], [[], []], "settled on a look, no hook taken off this time");
   } finally {
@@ -1459,19 +1461,19 @@ test("the bound: an entry holds at most AGENT_WAKE_ITEMS_MAX links and outstandi
     let r = await mcp(k.w, call("muse_register", { code, rooms: ["lima"] }), auth(k.key));
     assert.equal(result(r).content[0].text, "No room on your key took its invite, so the code was not used.");
     assert.deepEqual(result(r).structuredContent.results, [{ room: "lima", ok: false, status: 503, code: "try_again", error: wakeAgain("lima", "full", false) }]);
-    assert.ok(k.w.asked.slice(mark).some((a) => a.name === "lima" && a.method === "museHookLook"), "a settling look first");
+    assert.ok(k.w.asked.slice(mark).some((a) => a.name === "lima" && a.method === "museHolderLook"), "a settling look first");
     assert.equal(k.b.paths.filter((p) => p === "/claim").length, claims, "the code was not claimed");
     // with oslo too: oslo is registered, lima skipped, the code used once
     r = await mcp(k.w, call("muse_register", { code }), auth(k.key));
     assert.deepEqual(result(r).structuredContent.results.map((x) => [x.room, x.ok, x.code, x.error]), [["lima", false, "try_again", wakeAgain("lima", "full", true)], ["oslo", true, undefined, undefined]]);
     assert.deepEqual((await k.peek()).lima, filled, "nothing taken off while it may still land");
     // the room's clock past them when it is looked at: the settling write takes them off, and the new one goes on
-    const realLook = lima.museHookLook.bind(lima);
-    lima.museHookLook = (...a) => { pastDeadlines(k.w, "lima"); try { return realLook(...a); } finally { delete lima.museNow; } };
+    const realLook = lima.museHolderLook.bind(lima);
+    lima.museHolderLook = (...a) => { pastDeadlines(k.w, "lima"); try { return realLook(...a); } finally { delete lima.museNow; } };
     const g2 = await k.b.connect();
     mark = k.w.asked.length;
     r = await mcp(k.w, call("muse_register", { code: g2.code, rooms: ["lima"] }), auth(k.key));
-    delete lima.museHookLook;
+    delete lima.museHolderLook;
     assert.equal(result(r).structuredContent.results[0].ok, true, r.text.slice(0, 300));
     assert.deepEqual(outstanding(await k.peek(), "lima"), [[g2.link, 0]]);
     assert.equal(hookIn(k.w, "lima").link, g2.link);
@@ -1506,7 +1508,7 @@ test("in an older room where two active invites' names fold alike, a gone seat k
       pastDeadlines(k.w, "lima");
       const rows = h.all("SELECT token, used, seen, revoked, left_ts FROM inv ORDER BY token").map((r) => ({ ...r }));
       const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
-      assert.deepEqual(t.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedRefusedNote("lima", true) });
+      assert.deepEqual(t.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedRefusedNote("lima", "off") });
       assert.ok(!/nothing else changes/.test(t.json.note), "the note does not say nothing else changes");
       assert.deepEqual(hooksAll(h), [], "the wake is off, as the answer says");
       assert.deepEqual(h.all("SELECT token, used, seen, revoked, left_ts FROM inv ORDER BY token").map((r) => ({ ...r })), rows, "nothing opened or marked seen");
@@ -1536,8 +1538,8 @@ test("in an older room where two active invites' names fold alike, a gone seat k
       pastDeadlines(k.w, "lima");
       const now = Date.now() + AGENT_WAKE_SET_MS + 1000;
       const gone = { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask whoever gave it to you for a new one.", now };
-      h.room.museHookLook = () => gone;
-      h.room.museDropLook = () => gone;
+      h.room.museHolderLook = () => gone;
+      h.room.museHolderDrop = () => gone;
       const t = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
       assert.deepEqual([t.status, t.json], [503, { error: wakeNotSettled("lima"), code: "try_again", room: "lima" }]);
       assert.deepEqual(links(await k.peek(), "lima"), [k.link], "still on the key, its link recorded");
@@ -1553,7 +1555,7 @@ test("in an older room where two active invites' names fold alike, a gone seat k
     const { k, h } = await sharedNameKey();
     try {
       const now = Date.now() + AGENT_WAKE_SET_MS + 1000;
-      h.room.museDropLook = () => ({ ok: false, status: 403, code, error: "gone", now });
+      h.room.museHolderDrop = () => ({ ok: false, status: 403, code, error: "gone", now });
       const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
       assert.deepEqual([d.json.muse_wakes_removed, d.json.muse_wakes_left], [[], []], code);
     } finally {
@@ -1658,7 +1660,7 @@ test("the disconnect, the take-off and muse_register register their work with wa
     mark = k.w.asked.length;
     await mcp(k.w, call("remove_room", { room: "oslo" }), auth(k.key));
     first = waitedBeforeWrite(k.w, mark);
-    assert.equal(k.w.asked[first.first].method, "museDropLook");
+    assert.equal(k.w.asked[first.first].method, "museHolderDrop");
     assert.ok(first.ok, "remove_room");
     mark = k.w.asked.length;
     await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
@@ -1733,12 +1735,14 @@ test("a disconnect's write on its last try that finds the record gone answers th
 });
 
 // ---- A key's entry with a holder tag (worker/lib/agentkey.ts AgentEntry.tag, pre) ----
-// A tag on a key's entry is only ever read: the Worker looks and drops by
-// it, passes on the tag of the list its recording write wrote, drops by it
-// when cut meanwhile, and keeps it on every write (tagsKept beside
-// keepsWakes). The tests write a tag into a key's stored list by hand
-// (editStored), as no route writes one.
-import { agentSealRing } from "../../worker/lib/agentkey.ts";
+// Every entry a key is made with, or given, carries a tag; an entry made
+// before tags has none until muse_register's recording write gives it one
+// (withTag: with pre when it already records a link). The Worker looks and
+// drops by it, passes on the tag of the list its recording write wrote,
+// drops by it when cut meanwhile, and keeps it on every write (tagsKept
+// beside keepsWakes). The tests make an entry as it was before tags, or
+// change a tag, by writing the key's stored list by hand (editStored).
+import { agentSealRing, withTag } from "../../worker/lib/agentkey.ts";
 import { tagsKept } from "../../worker/lib/agentkey.ts";
 const TAG = "tttttttttttttttttttttT";
 /** the key's stored list changed by f, sealed at the next version, as another call's write would leave it */
@@ -1767,27 +1771,37 @@ test("tagsKept: an entry recording a Muse wake keeps its tag, gains none without
   assert.doesNotThrow(() => tagsKept([e({ hooks: W })], [e({ hooks: W })]), "with no tag anywhere, nothing is refused");
 });
 
-test("an entry with a tag is looked at and dropped by its own hold (museHolderLook, museHolderDrop, with its token, legacy as its pre); its untagged set is held by pre", async () => {
+test("an entry made before tags, its link held as pre, gets a tag with pre (withTag) and is then looked at and dropped by its tag with the untagged holds (museHolderLook, museHolderDrop, its token, legacy); an entry made with its tag, by its tag alone", async () => {
   for (const pre of [false, true]) {
     const k = await museKeyed(["lima"]);
     try {
-      k.w.harness("lima").room.access(k.tok.lima, false);
-      assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
-      assert.deepEqual(holdersIn(k.w, "lima"), ["pre"], "set with no tag: held by pre");
-      // a tag on the entry, and its hold in the room, as a tagged set leaves them
-      await editStored(k.w, k.key, (rooms) => rooms.map((e) => ({ ...e, tag: TAG, ...(pre ? { pre: true } : {}) })));
-      k.w.harness("lima").db.prepare("INSERT INTO mhh (member, holder, at) VALUES ('hank', ?, 1)").run(TAG);
+      const h = k.w.harness("lima");
+      h.room.access(k.tok.lima, false);
+      if (pre) {
+        // as a registration made before tags left it: no tag on the entry, the link recorded, the set held as pre
+        await editStored(k.w, k.key, (rooms) => rooms.map((e) => { const x = { ...e, hooks: [{ link: k.link, recs: [] }] }; delete x.tag; return x; }));
+        assert.ok(h.room.museSetHookLook(k.tok.lima, k.link, "agent-chat", "lima", Date.now() + 3600000).ok);
+        assert.deepEqual(holdersIn(k.w, "lima"), ["pre"], "set with no tag: held by pre");
+        // the tag its next registration's recording write gives it
+        await editStored(k.w, k.key, (rooms) => withTag(rooms, "lima", k.tok.lima));
+        const e = (await storedOf(k.w, k.key)).rooms[0];
+        assert.deepEqual([typeof e.tag, e.tag.length, e.pre], ["string", 22, true], "a tag, with pre beside the link it records");
+      } else {
+        assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
+        assert.deepEqual(holdersIn(k.w, "lima"), [await tagIn(k, "lima")], "a set with the entry's own tag");
+      }
+      const tag = await tagIn(k, "lima");
       pastDeadlines(k.w, "lima");
       const mark = k.w.asked.length;
       const r = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
       assert.equal(r.status, 200, r.text);
+      assert.equal(r.json.muse_wake_removed, true, "pre " + pre);
       const asked = k.w.asked.slice(mark).filter((a) => a.name === "lima");
       assert.deepEqual(asked.map((a) => a.method), ["museHolderLook", "museHolderDrop"], "pre " + pre);
-      assert.deepEqual(asked[0].args, [TAG, k.tok.lima, pre]);
-      assert.deepEqual(asked[1].args, [TAG, k.link, k.tok.lima, pre]);
-      // the tag's hold went; with pre, the untagged one too, and with it the hook
-      assert.deepEqual(holdersIn(k.w, "lima"), pre ? [] : ["pre"]);
-      assert.equal(hookIn(k.w, "lima") === null, pre);
+      assert.deepEqual(asked[0].args, [tag, k.tok.lima, pre]);
+      assert.deepEqual(asked[1].args, [tag, k.link, k.tok.lima, pre]);
+      // its hold went (with pre, the untagged one it counts as its own), and with it the hook
+      assert.deepEqual([holdersIn(k.w, "lima"), hookIn(k.w, "lima")], [[], null]);
     } finally {
       k.b.restore();
     }
@@ -1869,15 +1883,252 @@ test("a tag and pre on an entry recording a Muse wake survive every write of the
   }
 });
 
-// No write of a key's list in this Worker changes a tag, so no behaviour
-// shows tagsKept missing from one: every write that keepsWakes checks
-// (rewrite, the disconnect's remainder; its deletion leaves no entry) also
-// goes through tagsKept, on the same two lists, read off the source.
+// No write of a list changes a tag (withTag only gives one to an entry that
+// has none), so no behaviour shows tagsKept missing from one: every write
+// that keepsWakes checks (rewrite, a key's and a sign-in's disconnect
+// remainder; their deletions leave no entry) also goes through tagsKept, on
+// the same two lists, read off the source.
 import { readFileSync } from "node:fs";
-test("every write of a key's list that keepsWakes checks goes through tagsKept too, on the same lists", () => {
-  const src = readFileSync(new URL("../../worker/routes/agent.ts", import.meta.url), "utf8");
-  const calls = [...src.matchAll(/^\s*keepsWakes\(([^,]+), ([^,]+), ([^,]+), [^\n]*\);\n\s*(.*)$/gm)];
-  const writes = calls.filter((m) => m[3] !== "[]");
-  assert.ok(writes.length >= 2, "found the checked writes: " + calls.length);
-  for (const m of writes) assert.equal(m[4], "tagsKept(" + m[2] + ", " + m[3] + ");", "after keepsWakes(" + m[1] + ", " + m[2] + ", " + m[3] + ", ...)");
+test("every write of a key's or a sign-in's list that keepsWakes checks goes through tagsKept too, on the same lists", () => {
+  for (const [file, least] of [["agent.ts", 2], ["oauth.ts", 1]]) {
+    const src = readFileSync(new URL("../../worker/routes/" + file, import.meta.url), "utf8");
+    const calls = [...src.matchAll(/^\s*keepsWakes\(([^,]+), ([^,]+), ([^,]+), [^\n]*\);\n\s*(.*)$/gm)];
+    const writes = calls.filter((m) => m[3] !== "[]");
+    assert.ok(writes.length >= least, file + ": found the checked writes: " + calls.length);
+    for (const m of writes) assert.equal(m[4], "tagsKept(" + m[2] + ", " + m[3] + ");", file + ": after keepsWakes(" + m[1] + ", " + m[2] + ", " + m[3] + ", ...)");
+  }
+});
+
+// ---- Holders between identities on one seat (section 14.8 of the sign-in) ----
+// Every entry is tagged, so each identity's take-off or disconnect lets go of
+// its own hold: the hook goes with its last holder, and an answer says "off"
+// only where the room says it went. A sign-in (routes/oauth.ts) holds a seat
+// beside a key as another key does. The sign-in's side here is the stand-in
+// apps' (signin-world.mjs).
+import { makeSigninWorld, PUBLIC_APP as SIGNIN_APP, signIn as signInApp, signin as atSignin, toolCall as signinCall, revoke as revokeSignin, disconnect as disconnectSignin, signins as signinObjects } from "./signin-world.mjs";
+import { signinDropNote } from "../../worker/agents/onboarding.ts";
+
+/** a key made for the agent Hank's seat in lima with its own token (from network ip) */
+async function keyFor(w, tok, ip) {
+  const r = await read(agentCreateRoute(w.rc("POST", "/api/agents", { json: { rooms: [{ room: "lima", token: tok }] }, headers: { "CF-Connecting-IP": ip } })));
+  assert.equal(r.status, 201, r.text);
+  return r.json.key;
+}
+const holdersAt = (w, room) => w.harness(room).all("SELECT holder FROM mhh ORDER BY holder").map((r) => r.holder);
+
+test("two keys on one seat: each registers the same link; the first's take-off lets go (no muse_wake_removed, the kept sentence) and the hook stays; the second's answers off and the hook goes; likewise by disconnect", async () => {
+  for (const end of ["take-off", "disconnect"]) {
+    const b = await bridgeWorld();
+    try {
+      const w = makeWorld({ env: b.env });
+      const tok = agentInvite(w.room("lima"), "Hank");
+      w.harness("lima").room.access(tok, false);
+      const k1 = await keyFor(w, tok, "10.3.0.1"), k2 = await keyFor(w, tok, "10.3.0.2");
+      // the same gadget twice (its Add rooms gives a new code, and the old one goes): the same Muse, the same link
+      const g = await b.connect();
+      assert.equal(result(await mcp(w, call("muse_register", { code: g.code }), auth(k1))).structuredContent.results[0].ok, true);
+      const g2 = await b.connect(g);
+      assert.equal(g2.link, g.link);
+      assert.equal(result(await mcp(w, call("muse_register", { code: g2.code }), auth(k2))).structuredContent.results[0].ok, true);
+      const t1 = (await storedOf(w, k1)).rooms[0].tag, t2 = (await storedOf(w, k2)).rooms[0].tag;
+      assert.deepEqual(holdersAt(w, "lima"), [t1, t2].sort(), "two holders");
+      if (end === "take-off") {
+        const a = await read(agentRemoveRoute(w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k1) })));
+        assert.deepEqual(a.json, { room: "lima", removed: true, note: removedHeldNote("lima", "kept") });
+        assert.equal(hookIn(w, "lima").link, g.link, "the hook stays: the other key holds it");
+        assert.deepEqual(holdersAt(w, "lima"), [t2]);
+        const z = await read(agentRemoveRoute(w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k2) })));
+        assert.deepEqual(z.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", "off") });
+      } else {
+        const a = await read(agentRoute(w.rc("DELETE", "/api/agent", { headers: auth(k1) })));
+        assert.deepEqual([a.json.muse_wakes_removed, a.json.muse_wakes_left, a.json.note], [[], [], dropNote([])], "lima omitted from muse_wakes_removed; the let-go note");
+        assert.equal(hookIn(w, "lima").link, g.link);
+        const z = await read(agentRoute(w.rc("DELETE", "/api/agent", { headers: auth(k2) })));
+        assert.deepEqual(z.json.muse_wakes_removed, ["lima"]);
+      }
+      assert.equal(hookIn(w, "lima"), null, "the last holder let go: the hook went");
+    } finally {
+      b.restore();
+    }
+  }
+});
+
+test("two keys on one seat, each with its own gadget: the hook is on the second's link, so the first's take-off finds it on none of its own links and answers off (muse_wake_removed), and the second's hook stays", async () => {
+  const b = await bridgeWorld();
+  try {
+    const w = makeWorld({ env: b.env });
+    const tok = agentInvite(w.room("lima"), "Hank");
+    w.harness("lima").room.access(tok, false);
+    const k1 = await keyFor(w, tok, "10.3.1.1"), k2 = await keyFor(w, tok, "10.3.1.2");
+    const g = await b.connect(), h = await b.connect();
+    assert.notEqual(h.link, g.link, "two gadgets, two links");
+    assert.equal(result(await mcp(w, call("muse_register", { code: g.code }), auth(k1))).structuredContent.results[0].ok, true);
+    assert.equal(result(await mcp(w, call("muse_register", { code: h.code }), auth(k2))).structuredContent.results[0].ok, true);
+    assert.equal(hookIn(w, "lima").link, h.link, "the newer registration's link");
+    const a = await read(agentRemoveRoute(w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k1) })));
+    assert.deepEqual(a.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", "off") });
+    assert.equal(hookIn(w, "lima").link, h.link, "the second key's hook stays");
+  } finally {
+    b.restore();
+  }
+});
+
+test("a key and a sign-in on one seat: the key's disconnect leaves the sign-in's wake and says it let go; the sign-in's revoke turns it off", async () => {
+  const b = await bridgeWorld();
+  try {
+    const w = makeSigninWorld([SIGNIN_APP], { env: b.env });
+    const pat = agentInvite(w.room("lima"), "Pat", "human");
+    // the person's key for Scout, the agent joins through it, and a wake
+    const { agentInviteCreateRoute } = await import("../../worker/routes/agent.ts");
+    const made = await read(agentInviteCreateRoute(w.rc("POST", "/api/agents/invite", { json: { name: "Scout", rooms: [{ room: "lima", inviter_token: pat }] }, headers: { "CF-Connecting-IP": "10.4.0.1" } })));
+    assert.equal(made.status, 201, made.text);
+    const key = made.json.key;
+    await mcp(w, call("whoami", { room: "lima" }), auth(key));
+    const g = await b.connect();
+    assert.equal(result(await mcp(w, call("muse_register", { code: g.code }), auth(key))).structuredContent.results[0].ok, true);
+    // the person approves a sign-in reusing Scout's seat (in use), which registers the same Muse
+    const s = await signInApp(w, SIGNIN_APP, { lima: pat }, { reuse: "any" });
+    assert.equal(s.token.status, 200, s.token.text);
+    assert.deepEqual(s.decide.json.rooms, [{ room: "lima", name: "Scout", opened: true, seat: "reused" }]);
+    const g2 = await b.connect(g);
+    assert.equal((await atSignin(w, s.access, signinCall("muse_register", { code: g2.code }))).json.result.structuredContent.results[0].ok, true);
+    assert.equal(holdersAt(w, "lima").length, 2);
+    const d = await read(agentRoute(w.rc("DELETE", "/api/agent", { headers: auth(key) })));
+    assert.deepEqual([d.json.muse_wakes_removed, d.json.note], [[], dropNote([])]);
+    assert.equal(w.harness("lima").one("SELECT link FROM mh WHERE name = 'Scout'").link, g.link, "the sign-in's wake stays");
+    assert.deepEqual((await revokeSignin(w, { token: s.refresh, client_id: SIGNIN_APP.client_id })).json, {});
+    await Promise.all(w.pending);
+    assert.equal(w.harness("lima").all("SELECT link FROM mh WHERE name = 'Scout'").length, 0, "the sign-in's revoke: its last holder let go");
+  } finally {
+    b.restore();
+  }
+});
+
+test("a re-approval that reuses the seats: both connections register the same Muse; revoking the first leaves the wake (no hooked false at the bridge), revoking the second turns it off; with only the first registered, its revoke turns it off", async () => {
+  for (const both of [true, false]) {
+    const b = await bridgeWorld();
+    try {
+      const w = makeSigninWorld([SIGNIN_APP], { env: b.env });
+      const pat = agentInvite(w.room("lima"), "Pat", "human");
+      w.harness("lima").room.access(pat, false);
+      const s1 = await signInApp(w, SIGNIN_APP, { lima: pat });
+      await atSignin(w, s1.access, signinCall("get_room_state", { room: "lima" }));
+      const g = await b.connect();
+      assert.equal((await atSignin(w, s1.access, signinCall("muse_register", { code: g.code }))).json.result.structuredContent.results[0].ok, true);
+      const s2 = await signInApp(w, SIGNIN_APP, { lima: pat }, { reuse: "any" });
+      assert.deepEqual(s2.decide.json.rooms[0].seat, "reused");
+      if (both) {
+        const g2 = await b.connect(g);
+        assert.equal((await atSignin(w, s2.access, signinCall("muse_register", { code: g2.code }))).json.result.structuredContent.results[0].ok, true);
+      }
+      const before = await b.rooms(g.link);
+      assert.deepEqual((await revokeSignin(w, { token: s1.refresh, client_id: SIGNIN_APP.client_id })).json, {});
+      await Promise.all(w.pending);
+      await w.harness("lima").settled();
+      const on = w.harness("lima").all("SELECT link FROM mh WHERE name = 'Scout'").length;
+      if (both) {
+        assert.equal(on, 1, "the wake stays: the new connection holds it");
+        assert.equal(await b.rooms(g.link), before, "the bridge heard no hooked: false");
+        assert.deepEqual((await revokeSignin(w, { token: s2.refresh, client_id: SIGNIN_APP.client_id })).json, {});
+        await Promise.all(w.pending);
+        assert.equal(w.harness("lima").all("SELECT link FROM mh WHERE name = 'Scout'").length, 0, "the second revoke: off");
+      } else assert.equal(on, 0, "only the first registered: its revoke turned the wake off");
+    } finally {
+      b.restore();
+    }
+  }
+});
+
+test("a self registration on a link a key also recorded stays through the key's disconnect (LEGACY_HOLDS is pre alone); an untagged entry's hold beside it, made before tags, goes", async () => {
+  const k = await museKeyed(["lima"]);
+  try {
+    k.w.harness("lima").room.access(k.tok.lima, false);
+    assert.equal(result(await mcp(k.w, call("muse_register", { code: k.code }), auth(k.key))).structuredContent.results[0].ok, true);
+    assert.ok(k.w.harness("lima").room.museSetHook(k.tok.lima, k.link, "main", "lima").ok);
+    const tag = await tagIn(k, "lima");
+    assert.deepEqual(holdersAt(k.w, "lima"), [tag, "self"].sort());
+    const d = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
+    assert.deepEqual([d.json.muse_wakes_removed, d.json.muse_wakes_left], [[], []]);
+    assert.deepEqual([hookIn(k.w, "lima").link, holdersAt(k.w, "lima")], [k.link, ["self"]], "the member's own registration stays");
+  } finally {
+    k.b.restore();
+  }
+});
+
+test("an entry made before tags (no tag, its link held as pre): its next registration's recording write gives it a tag with pre, and the write that settles its last link drops pre", async () => {
+  const k = await museKeyed(["lima"]);
+  try {
+    const h = k.w.harness("lima");
+    h.room.access(k.tok.lima, false);
+    await editStored(k.w, k.key, (rooms) => rooms.map((e) => { const x = { ...e, hooks: [{ link: k.link, recs: [] }] }; delete x.tag; return x; }));
+    assert.ok(h.room.museSetHookLook(k.tok.lima, k.link, "agent-chat", "lima", Date.now() + 3600000).ok);
+    // the member removes the hook; the next registration's set reaches the room after its deadline (refused)
+    assert.ok(h.room.museRemove(k.tok.lima).ok);
+    clockBy(k.w, "lima", AGENT_WAKE_SET_MS + AGENT_WAKE_SKEW_MS + 5000);
+    const set = h.room.museSetHookLook.bind(h.room);
+    let atSet = null;
+    h.room.museSetHookLook = async (...a) => { atSet = (await storedOf(k.w, k.key)).rooms[0]; return set(...a); };
+    const again = await k.b.connect({ n: 1 });
+    const r = result(await mcp(k.w, call("muse_register", { code: again.code }), auth(k.key)));
+    delete h.room.museSetHookLook;
+    assert.equal(r.structuredContent.results[0].code, "try_again", JSON.stringify(r));
+    assert.deepEqual([typeof atSet.tag, atSet.tag.length, atSet.pre, atSet.hooks.map((x) => x.link)], ["string", 22, true, [k.link]], "the recording write tagged it, with pre beside the link it recorded");
+    const after = (await storedOf(k.w, k.key)).rooms[0];
+    assert.deepEqual([after.tag, after.pre, after.hooks || []], [atSet.tag, undefined, []], "the tidy settled its last link, and pre went in that write");
+  } finally {
+    k.b.restore();
+  }
+});
+
+test("two registrations racing on one untagged entry: one tag, and both registrations' sets carry it", async () => {
+  const k = await museKeyed(["lima"]);
+  try {
+    const h = k.w.harness("lima");
+    h.room.access(k.tok.lima, false);
+    await editStored(k.w, k.key, (rooms) => rooms.map((e) => { const x = { ...e }; delete x.tag; return x; }));
+    const obj = k.w.harness(k.id).room, swap = obj.agentSwap.bind(obj);
+    // the first recording write waits until the second registration has read the same list and proposed its own tag
+    let first = null, seen = 0, stale = 0;
+    const counted = (r) => { if (!r.ok && r.code === "stale") stale++; return r; };
+    obj.agentSwap = async (...a) => {
+      if (++seen === 1) { await new Promise((r) => { first = r; }); return counted(swap(...a)); }
+      if (seen === 2 && first) { first(); await new Promise((r) => setTimeout(r, 5)); }
+      return counted(swap(...a));
+    };
+    // a second gadget, so both codes are good at once
+    const g2 = await k.b.connect();
+    const [a, b2] = await Promise.all([mcp(k.w, call("muse_register", { code: k.code }), auth(k.key)), mcp(k.w, call("muse_register", { code: g2.code }), auth(k.key))]);
+    delete obj.agentSwap;
+    for (const r of [a, b2]) assert.equal(result(r).structuredContent.results[0].ok, true, JSON.stringify(result(r)));
+    assert.equal(stale, 1, "the second recording write met the first's and wrote again");
+    const tag = (await storedOf(k.w, k.key)).rooms[0].tag;
+    const sets = k.w.asked.filter((x) => x.method === "museSetHookLook");
+    assert.equal(sets.length, 2);
+    assert.deepEqual(sets.map((x) => x.args[5]), [tag, tag], "both sets carry the one tag");
+    assert.deepEqual(holdersAt(k.w, "lima"), [tag], "the later set, on its own link, held by the one tag");
+  } finally {
+    k.b.restore();
+  }
+});
+
+test("a cut sign-in's wake-list entry is observed by its tag alone: museHolderLook(tag, null, false) and museHolderDrop(tag, link, null, false), never the untagged look", async () => {
+  const b = await bridgeWorld();
+  try {
+    const w = makeSigninWorld([SIGNIN_APP], { env: b.env });
+    const pat = agentInvite(w.room("lima"), "Pat", "human");
+    const s = await signInApp(w, SIGNIN_APP, { lima: pat });
+    await atSignin(w, s.access, signinCall("get_room_state", { room: "lima" }));
+    const g = await b.connect();
+    await atSignin(w, s.access, signinCall("muse_register", { code: g.code }));
+    const [id] = signinObjects(w);
+    const mark = w.asked.length;
+    assert.deepEqual((await disconnectSignin(w, { code: s.disconnectCode })).json, { disconnected: true, wakes_left: [], note: signinDropNote([]) });
+    const asked = w.asked.slice(mark).filter((x) => x.name === "lima");
+    const tag = asked[0].args[0];
+    assert.deepEqual(asked.map((x) => [x.method, x.args]), [["museHolderLook", [tag, null, false]], ["museHolderDrop", [tag, g.link, null, false]]]);
+    assert.equal(tag.length, 22);
+    assert.ok(id);
+  } finally {
+    b.restore();
+  }
 });

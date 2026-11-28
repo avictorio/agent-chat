@@ -168,6 +168,7 @@ agent-chat/
 | `MUSE_BRIDGE_KEY` | **secret**, unused | the key the site sent the separate muse-bridge Worker as `X-Bridge-Key`. Nothing reads it since the bridge moved in (2026-11-25). It stays until the owner deletes it with the `muse-bridge` Worker (section 15); `check:config` notes it as kept, not as one to delete. |
 | `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
 | `TEST_MUSE_ORIGIN` | test only | with `TEST_HOOKS`, where the Muse bridge's calls to Muse's hosts go: the API suite's fake Muse, `http://127.0.0.1:PORT` (no other origin is taken; without one, a test server's calls to Muse fail). Never live (`check:config` fails by name). |
+| `TEST_SIGNIN_ORIGIN` | test only | with `TEST_HOOKS`, the origin the sign-in names as its issuer and in its documents, redirects and audiences in place of the site's: the API suite's local server, `http://localhost:PORT` (only `http://` on `localhost` or `127.0.0.1` is taken), because the local server sees every request as the site's host and an OAuth client compares the issuer and resource with the address it connected to (`worker/lib/oauth.ts` `signinOrigin`). Never live (`check:config` fails by name). |
 
 The bindings `ROOM`, `MUSE_LINK`, `MUSE_DIRECTORY`, `REQUESTS`, `MEDIA`
 and `ASSETS` are in the table above. The `MUSE_BRIDGE` service binding is

@@ -80,6 +80,24 @@ export async function page(env: Env, origin: string, room?: string) {
 // load as before.
 export const SHELL_CSP = "frame-src 'self' https://www.youtube-nocookie.com; frame-ancestors 'self'";
 
+// Every answer of GET /oauth/authorize (routes/oauth.ts: the shell that
+// shows the approval page, and its two fixed pages) carries these. The page
+// approves an app's sign-in, so no site may frame it (frame-ancestors 'none'
+// in place of the shell's 'self', and X-Frame-Options for browsers that
+// predate it); no copy is kept and no address leaks onward. No
+// Cross-Origin-Opener-Policy: an app may open this page as a popup and wait
+// for its callback window, and with COOP same-origin a page opened from
+// another origin moves to a browsing context group of its own for the
+// window's whole life, the redirect to the app's callback included, so the
+// opener could never see the sign-in finish. The UI harness serves the page
+// with this same list (web/tests/ui/harness.js).
+export const AUTHORIZE_HEADERS: Record<string, string> = {
+  "Content-Security-Policy": "frame-src 'self' https://www.youtube-nocookie.com; frame-ancestors 'none'",
+  "X-Frame-Options": "DENY",
+  "Cache-Control": "no-store",
+  "Referrer-Policy": "no-referrer",
+};
+
 // The home page names no room: its describedby link is the site guide,
 // public like the page, for an agent sent to the site with a token.
 function homeHead(origin: string) {

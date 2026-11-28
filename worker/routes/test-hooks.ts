@@ -3,7 +3,7 @@
 // in the live config. Owner key required regardless.
 
 import { json, readBody, bodyText, bodyNumber, bodyObject } from "../lib/http.js";
-import { AGENT_QUOTA_ROOM, ROOM_RE } from "../limits.js";
+import { AGENT_QUOTA_ROOM, OAUTH_QUOTA_ROOM, ROOM_RE } from "../limits.js";
 import { sigv4Presign } from "../platform/r2-s3.js";
 import type { RouteContext } from "../index.js";
 
@@ -162,4 +162,19 @@ export async function hookAgentLimits(rc: RouteContext) {
   const tb = await readBody(request);
   const q = env.ROOM.get(env.ROOM.idFromName(AGENT_QUOTA_ROOM));
   return json(await q.setTestAgentLimits(tb && tb.clear === true ? null : tb));
+}
+
+// POST {app: {key, client_id, kind, name, host, redirect_uris, loopback,
+// jwks?, dpop_always?, watch?, page}} or {clear: true}: a stand-in app the
+// sign-in treats as known on this local server (room/test-hooks.ts
+// setTestOauthApp, on the OAUTH_QUOTA_ROOM object; lib/oauth.ts knownApp).
+// A poppy stand-in carries its key set inline, so the Worker fetches nothing.
+export async function hookOauthApp(rc: RouteContext) {
+  const { request, env, owner } = rc;
+  if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+  if (!owner) return json({ error: "The owner key is required" }, 403);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const tb = await readBody(request);
+  const q = env.ROOM.get(env.ROOM.idFromName(OAUTH_QUOTA_ROOM));
+  return json(await q.setTestOauthApp(tb && tb.clear === true ? null : tb ? tb.app : undefined));
 }

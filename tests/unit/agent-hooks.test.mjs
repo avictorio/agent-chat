@@ -81,7 +81,7 @@ test("a drop removes only a Muse hook on the same link: a webhook and another li
     const one = await b.connect(), two = await b.connect();
     // a hook the agent set itself, with the room's own token, on another link
     assert.equal(h.room.museSetHook("tok-Ada", two.link, "main", R).ok, true);
-    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: false, link: two.link, on: two.link }, "it says which link is on after it");
+    assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", one.link)), { ok: true, removed: false, link: null, on: two.link }, "it says which link is on after it, held by no untagged hold of the caller's (self is the member's own)");
     assert.deepEqual(hookOf(h, "Ada"), { kind: "muse", link: two.link, url: null, routing: "main", enabled: 1 }, "another link's hook stays");
     // a webhook stays too
     assert.equal(h.room.webhookSet("tok-Ada", "https://hooks.example.org/x", "secret", R).ok, true);
@@ -155,14 +155,14 @@ for (const how of ["revoked by the owner", "left"]) {
       const before = seat();
       // the hook the other invite set itself, on another link, is not the key's: it stays
       assert.equal(h.room.museSetHook("tok-scout-lower-0000000", two.link, "main", R).ok, true);
-      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: false, link: two.link, on: two.link });
+      assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: false, link: null, on: two.link });
       assert.deepEqual(hooksAll(h), [{ member: "scout", kind: "muse", link: two.link }]);
       // so does its webhook
       assert.equal(h.room.webhookSet("tok-scout-lower-0000000", "https://hooks.example.org/x", "s", R).ok, true);
       assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: false, link: null, on: null });
       assert.equal(hooksAll(h)[0].kind, "webhook");
-      // the key's link back on that name, as it was right after the revoke: the drop removes it
-      assert.equal(h.room.museSetHook("tok-scout-lower-0000000", one.link, "agent-chat", R).ok, true);
+      // the key's link back on that name, as an untagged set left it right after the revoke: the drop removes it
+      assert.equal(h.room.museSetHookLook("tok-scout-lower-0000000", one.link, "agent-chat", R, LATER).ok, true);
       assert.deepEqual(noNow(h.room.museDropLook("tok-scout-upper-0000000", one.link)), { ok: true, removed: true, link: null, on: null });
       assert.deepEqual(hooksAll(h), []);
       assert.deepEqual(seat(), before, "the gone seat's row as it was: nothing opened, used or seen");
@@ -347,7 +347,7 @@ test("holders: a hook changed in place keeps its holders (museUpdate, and the wa
   assert.deepEqual(rowsOf(h), [TAG_A], "still a Muse hook on its link, its holders kept");
 });
 
-test("holders: the untagged look and drop (museHookLook, museDropLook) answer every state an untagged set, the room's own registration and a webhook make as the pinned literals say, with on beside; a tag's hold is not theirs", () => {
+test("holders: the untagged look and drop (museHookLook, museDropLook) answer every state an untagged set, the room's own registration and a webhook make as the pinned literals say, with on beside; a hold of self or of a tag is not theirs", () => {
   /** [state, its writer] */
   const states = {
     "no hook": () => {},
@@ -356,16 +356,21 @@ test("holders: the untagged look and drop (museHookLook, museDropLook) answer ev
     "a Muse hook on L held by pre and self": (h) => { h.room.museSetHookLook("tok-Ada", "L", "agent-chat", R, LATER); h.room.museSetHook("tok-Ada", "L", "main", R); },
     "a webhook": (h) => h.room.webhookSet("tok-Ada", "https://hooks.example.org/x", "s", R),
   };
-  // the answers as literals: a Muse hook held by pre, self or both is the untagged look's and drop's alike; on, the link it is on
-  const muse = { look: { ok: true, link: "L", on: "L" }, dropL: { ok: true, removed: true, link: null, on: null }, dropM: { ok: true, removed: false, link: "L", on: "L" } };
+  // the answers as literals: LEGACY_HOLDS is pre alone, so a hook held by pre is the untagged look's and drop's, one
+  // held by self alone is not (its drop leaves it on), and one held by both loses pre to the drop and stays, self's;
+  // on, the link the hook is on; after the drop of L, the hook's link and its holders
+  const pre = { look: { ok: true, link: "L", on: "L" }, dropL: { ok: true, removed: true, link: null, on: null }, dropM: { ok: true, removed: false, link: "L", on: "L" }, after: [null, []] };
+  const self = { look: { ok: true, link: null, on: "L" }, dropL: { ok: true, removed: false, link: null, on: "L" }, dropM: { ok: true, removed: false, link: null, on: "L" }, after: ["L", ["self"]] };
+  const both = { look: { ok: true, link: "L", on: "L" }, dropL: { ok: true, removed: false, link: null, on: "L" }, dropM: { ok: true, removed: false, link: "L", on: "L" }, after: ["L", ["self"]] };
   const none = { look: { ok: true, link: null, on: null }, dropL: { ok: true, removed: false, link: null, on: null }, dropM: { ok: true, removed: false, link: null, on: null } };
+  const wants = { "no hook": none, "a Muse hook on L held by pre": pre, "a Muse hook on L held by self": self, "a Muse hook on L held by pre and self": both, "a webhook": none };
   for (const [what, make] of Object.entries(states)) {
-    const want = what.startsWith("a Muse hook") ? muse : none;
+    const want = wants[what];
     for (const [c, call] of [["look", (h) => h.room.museHookLook("tok-Ada")], ["dropL", (h) => h.room.museDropLook("tok-Ada", "L")], ["dropM", (h) => h.room.museDropLook("tok-Ada", "M")]]) {
       const { h } = holderRoom();
       make(h);
       assert.deepEqual(noNow(call(h)), want[c], what + ", " + c);
-      if (c === "dropL" && want === muse) assert.deepEqual([linkOf(h), rowsOf(h)], [null, []], what + ": the hook and its holders went");
+      if (c === "dropL" && want.after) assert.deepEqual([linkOf(h), rowsOf(h)], want.after, what + ": after the drop");
     }
   }
   // a tag's hold (a state only a tagged set makes): the untagged look sees none, and the drop leaves it
@@ -374,7 +379,7 @@ test("holders: the untagged look and drop (museHookLook, museDropLook) answer ev
   assert.deepEqual(noNow(h.room.museHookLook("tok-Ada")), { ok: true, link: null, on: "L" });
   assert.deepEqual(noNow(h.room.museDropLook("tok-Ada", "L")), { ok: true, removed: false, link: null, on: "L" });
   assert.deepEqual([linkOf(h), rowsOf(h)], ["L", [TAG_A]]);
-  assert.deepEqual(LEGACY_HOLDS, ["pre", "self"]);
+  assert.deepEqual(LEGACY_HOLDS, ["pre"]);
 });
 
 test("museHolderLook: by the tag's row, by the token's seat when the tag has none, with legacy; holder_mismatch, bad_holder, room_missing; on only when a member is found; writes nothing", () => {

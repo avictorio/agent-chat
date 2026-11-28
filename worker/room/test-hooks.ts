@@ -135,4 +135,26 @@ export const TestHookMethods = {
     }
     return { agent_limits: this.agentTestLimits() };
   },
+
+  // The API suite's stand-in apps for the sign-in, on the OAUTH_QUOTA_ROOM
+  // object only (table oat, made only under TEST_HOOKS): each a known app's
+  // entry as worker/lib/oauth.ts KNOWN_APPS holds one, keyed by its
+  // client_id, with its key set inline (jwks), so a test server fetches
+  // nothing outside. null clears them all.
+  oauthTestApps(): unknown[] {
+    if (!this.env || !this.env.TEST_HOOKS) return [];
+    if (!this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'oat'").toArray().length) return [];
+    return this.sql.exec<{ app: string }>("SELECT app FROM oat ORDER BY client").toArray().map((r) => JSON.parse(r.app) as unknown);
+  },
+
+  setTestOauthApp(app: unknown) {
+    if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
+    if (this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name IN ('m', 'ak')").toArray().length) return { error: "Not the sign-in's quota object" };
+    this.sql.exec("CREATE TABLE IF NOT EXISTS oat (client TEXT PRIMARY KEY, app TEXT NOT NULL)");
+    if (app === null) this.sql.exec("DELETE FROM oat");
+    else if (app && typeof app === "object" && typeof (app as { client_id?: unknown }).client_id === "string") {
+      this.sql.exec("INSERT OR REPLACE INTO oat (client, app) VALUES (?, ?)", (app as { client_id: string }).client_id, JSON.stringify(app));
+    } else return { error: "Send {app: {client_id, ...}} or {clear: true}" };
+    return { apps: this.oauthTestApps().length };
+  },
 } satisfies ThisType<Room>;

@@ -37,7 +37,7 @@ export type AgentCredential = { kind: "none" } | { kind: "invite" } | { kind: "k
 /** base64url text that is exactly the encoding of n bytes, decoded; null
  *  for anything else (a non-canonical last character included, so one key
  *  has one spelling). */
-function decodeExact(s: string, n: number): Uint8Array<ArrayBuffer> | null {
+export function decodeExact(s: string, n: number): Uint8Array<ArrayBuffer> | null {
   let b: Uint8Array<ArrayBuffer>;
   try { b = b64urlDecode(s); } catch { return null; /* not base64: no key */ }
   return b.length === n && b64urlEncode(b) === s ? b : null;
@@ -68,9 +68,17 @@ export function newAgentKey(): { key: string, id: string, secret: Uint8Array<Arr
 
 const enc = new TextEncoder();
 
-/** The secret's two derivations, each with its own label. */
+/** A slot's two derivations from its secret, each with its own label: the
+ *  salt names the identity and the slot, the info the slot's kind and the
+ *  use. An agent key's one slot is "key", of kind "key"; a sign-in's slots
+ *  have random names and the kinds code, access, refresh and disconnect, so
+ *  no two slots of any identity share a derivation. */
+function slotDerive(id: string, slot: string, kind: string, secret: Uint8Array<ArrayBuffer>, what: "verify" | "wrap") {
+  return hkdf(secret, enc.encode(id + "|" + slot), enc.encode("agent-chat " + kind + " " + what + " v1"), 32);
+}
+/** The key's two derivations: its slot's. */
 function derive(id: string, secret: Uint8Array<ArrayBuffer>, what: "verify" | "wrap") {
-  return hkdf(secret, enc.encode(id + "|key"), enc.encode("agent-chat key " + what + " v1"), 32);
+  return slotDerive(id, "key", "key", secret, what);
 }
 
 /** What the identity's object keeps of the key and compares: a one-way
@@ -97,9 +105,12 @@ async function open(raw: Uint8Array<ArrayBuffer>, sealed: string, aad: string): 
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b.subarray(0, 12), additionalData: enc.encode(aad) }, await aesKey(raw), b.subarray(12)));
 }
 
-/** The additional data of the key's slot and of the list at a version. */
-const slotAad = (id: string) => "slot|" + id + "|key|key";
+/** The additional data of a slot's wrapped keys, the key's slot's, and of
+ *  the list and the wake list at a version. */
+const slotAadOf = (id: string, slot: string, kind: string) => "slot|" + id + "|" + slot + "|" + kind;
+const slotAad = (id: string) => slotAadOf(id, "key", "key");
 const ringAad = (id: string, ver: number) => "ring|" + id + "|" + ver;
+const wakesAad = (id: string, ver: number) => "wakes|" + id + "|" + ver;
 
 /** A new data key, and it wrapped under the key's secret (what the slot stores). */
 export async function agentDataKey(id: string, secret: Uint8Array<ArrayBuffer>): Promise<{ dk: Uint8Array<ArrayBuffer>, wrapped: string }> {
@@ -189,4 +200,148 @@ export async function agentUnseal(id: string, secret: Uint8Array<ArrayBuffer>, w
     warn("agent.unseal", null);
     return null;
   }
+}
+
+// ---- A sign-in's slots (worker/routes/oauth.ts, room/agent.ts signin*) ----
+// A sign-in is an identity of this kind whose slots are its tokens: a code,
+// access tokens, refresh tokens and the disconnect-only code, each a slot
+// with a random name, its own verifier and its own wrapped copies of the
+// data key (dk, which opens the room list) and of the wake key (wk, which
+// opens the wake list). The disconnect slot holds wk only.
+
+/** A slot's verifier: the one-way derivation the identity's object keeps. */
+export async function slotVerifier(id: string, slot: string, kind: string, secret: Uint8Array<ArrayBuffer>): Promise<string> {
+  return hexBytes(await slotDerive(id, slot, kind, secret, "verify"));
+}
+
+/** A 32-byte key (dk or wk) wrapped under a slot's wrap key, as its row stores it. */
+export async function slotWrap(id: string, slot: string, kind: string, secret: Uint8Array<ArrayBuffer>, key: Uint8Array<ArrayBuffer>): Promise<string> {
+  return seal(await slotDerive(id, slot, kind, secret, "wrap"), key, slotAadOf(id, slot, kind));
+}
+
+/** slotWrap's inverse; null when it does not open (a wrong slot, kind or
+ *  secret, or storage changed). Logs nothing: the caller says what failed. */
+export async function slotUnwrap(id: string, slot: string, kind: string, secret: Uint8Array<ArrayBuffer>, wrapped: string | null | undefined): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!wrapped) return null;
+  try {
+    const k = await open(await slotDerive(id, slot, kind, secret, "wrap"), wrapped, slotAadOf(id, slot, kind));
+    return k.length === 32 ? k : null;
+  } catch {
+    return null; /* not this slot's wrapping: the caller refuses */
+  }
+}
+
+/** The key that seals a spent refresh token's replacement pair ("next"):
+ *  derived from that token's own secret, so only its holder opens it. */
+function nextKey(id: string, slot: string, secret: Uint8Array<ArrayBuffer>) {
+  return hkdf(secret, enc.encode(id + "|" + slot), enc.encode("agent-chat refresh next v1"), 32);
+}
+const nextAad = (id: string, slot: string) => "next|" + id + "|" + slot;
+
+/** A refresh's answer, sealed for the grace (next): the pair and when its access token was issued. */
+export type NextPair = { access_token: string, refresh_token: string, issued: number };
+export async function sealNext(id: string, slot: string, secret: Uint8Array<ArrayBuffer>, pair: NextPair): Promise<string> {
+  return seal(await nextKey(id, slot, secret), enc.encode(JSON.stringify(pair)), nextAad(id, slot));
+}
+/** sealNext's inverse; null when it does not open. */
+export async function openNext(id: string, slot: string, secret: Uint8Array<ArrayBuffer>, sealed: string | null | undefined): Promise<NextPair | null> {
+  if (!sealed) return null;
+  try {
+    const v: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await open(await nextKey(id, slot, secret), sealed, nextAad(id, slot))));
+    if (!v || typeof v !== "object") return null;
+    const p = v as Record<string, unknown>;
+    return typeof p.access_token === "string" && typeof p.refresh_token === "string" && typeof p.issued === "number" ? { access_token: p.access_token, refresh_token: p.refresh_token, issued: p.issued } : null;
+  } catch {
+    return null; /* not this token's pair: the caller refuses */
+  }
+}
+
+/** A new 32-byte key (a data key or a wake key). */
+export function newKeyBytes(): Uint8Array<ArrayBuffer> {
+  return crypto.getRandomValues(new Uint8Array(32));
+}
+
+/** The room list sealed under dk with dk itself handed in (a sign-in's
+ *  lists are made from keys the Worker already holds). */
+export async function agentOpenRing(dk: Uint8Array<ArrayBuffer>, id: string, ver: number, ring: string): Promise<AgentEntry[] | null> {
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(await open(dk, ring, ringAad(id, ver)));
+    const v: unknown = JSON.parse(text.trim());
+    if (!v || typeof v !== "object" || (v as { v?: unknown }).v !== 1 || !Array.isArray((v as { rooms?: unknown }).rooms)) throw new Error("not a list");
+    return (v as { rooms: AgentEntry[] }).rooms;
+  } catch {
+    warn("agent.unseal", null);
+    return null;
+  }
+}
+
+// ---- The wake list: the key's record, readable without the room list ----
+
+/** The wake list's projection of a room list: every entry that records a
+ *  Muse wake, with its holder tag in place of the room's token (token: tag,
+ *  and tag beside it, so observe tells a wake-list entry from a room-list
+ *  one) and no name and never pre: a sign-in's entries are made with their
+ *  tags. An entry with no tag has nothing a wake-list entry could be
+ *  observed by, and none exists on a sign-in. */
+export function wakesOf(rooms: AgentEntry[]): AgentEntry[] {
+  return rooms.filter((e) => e.hooks && e.hooks.length && e.tag !== undefined).map((e) => ({ room: e.room, token: e.tag as string, tag: e.tag as string, name: "", added: e.added, state: e.state, hooks: e.hooks }));
+}
+
+/** The wake list sealed under wk for the version the row will hold:
+ *  {v: 1, rooms} as JSON, padded as the room list is. */
+export async function agentSealWakes(wk: Uint8Array<ArrayBuffer>, id: string, ver: number, wakes: AgentEntry[]): Promise<string> {
+  const json = enc.encode(JSON.stringify({ v: 1, rooms: wakes }));
+  const padded = new Uint8Array(Math.max(1, Math.ceil(json.length / AGENT_RING_PAD)) * AGENT_RING_PAD).fill(0x20);
+  padded.set(json);
+  return seal(wk, padded, wakesAad(id, ver));
+}
+
+/** agentSealWakes' inverse; null when it does not open (logged, as agentUnseal logs). */
+export async function agentUnsealWakes(wk: Uint8Array<ArrayBuffer>, id: string, ver: number, sealed: string | null): Promise<AgentEntry[] | null> {
+  try {
+    if (!sealed) throw new Error("no wake list");
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(await open(wk, sealed, wakesAad(id, ver)));
+    const v: unknown = JSON.parse(text.trim());
+    if (!v || typeof v !== "object" || (v as { v?: unknown }).v !== 1 || !Array.isArray((v as { rooms?: unknown }).rooms)) throw new Error("not a list");
+    return (v as { rooms: AgentEntry[] }).rooms;
+  } catch {
+    warn("agent.unseal", null);
+    return null;
+  }
+}
+
+// ---- Holder tags (room/muse.ts, mhh) on a key's or a sign-in's entries ----
+
+/** A new holder tag: 16 random bytes, base64url (22 characters). */
+export function newHolderTag(): string {
+  return b64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+}
+
+/** The list with the entry of that room and token tagged: an entry with no
+ *  tag gets a new one, with pre when it already records a link (those links
+ *  were set without a tag, so the room holds them as "pre"); an entry with a
+ *  tag keeps it. muse_register's recording write calls it, the only write
+ *  that tags an entry made before tags were: two registrations racing on one
+ *  untagged entry each propose a tag, the compare-and-set lets one write,
+ *  and the other reads the list again and keeps the tag it finds. */
+export function withTag(rooms: AgentEntry[], room: string, token: string): AgentEntry[] {
+  return rooms.map((e) => {
+    if (e.room !== room || e.token !== token || e.tag !== undefined) return e;
+    return e.hooks && e.hooks.length ? { ...e, tag: newHolderTag(), pre: true as const } : { ...e, tag: newHolderTag() };
+  });
+}
+
+/** The list with pre dropped from every entry that records no link: pre
+ *  says some of the entry's links may be held as "pre", and a link leaves
+ *  only on an observation that counted pre and once every recording of it
+ *  has expired, so once the last link has left, no set sent without a tag
+ *  can still land for this entry (tagsKept refuses dropping it earlier). */
+export function clearPre(rooms: AgentEntry[]): AgentEntry[] {
+  if (!rooms.some((e) => e.pre === true && !(e.hooks && e.hooks.length))) return rooms;
+  return rooms.map((e) => {
+    if (e.pre !== true || (e.hooks && e.hooks.length)) return e;
+    const out: AgentEntry = { ...e };
+    delete out.pre;
+    return out;
+  });
 }

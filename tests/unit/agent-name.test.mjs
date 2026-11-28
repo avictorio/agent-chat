@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AGENT_NAME_MAX, agentNameProblem, cleanAgentName } from "../../web/app/src/features/home/agentName.ts";
 import { MAX_NAME, cleanName, memberNameProblem, nameFold } from "../../worker/lib/text.ts";
-import { claudeCodeLine, dropNote, mcpJsonEntry, personKeyHandoff, personKeyNote, unusedNote } from "../../worker/agents/onboarding.ts";
+import { claudeCodeLine, dropNote, mcpJsonEntry, personKeyHandoff, personKeyNote, removedHeldNote, removedRefusedNote, signinRemovedNote, unusedNote } from "../../worker/agents/onboarding.ts";
 import { HOSTILE_NAMES } from "./start-views.mjs";
 
 const REFEREE = "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member.";
@@ -44,9 +44,17 @@ test("the texts a person's key comes with ask for no User-Agent and put no token
   assert.ok(personKeyHandoff("https://x", ["a"]).includes("KEY below stands for that key, which your person holds: it goes into your MCP client's settings or its secure credential field, never into a chat."));
   // Muse's hand-off: a custom connector and its API Key box, never the chat
   assert.ok(personKeyHandoff("https://x", ["a"]).includes("custom connector") && personKeyHandoff("https://x", ["a"]).includes("\"API Key\" box it shows, never into the chat"));
-  // the disconnect's note says the wakes are off only when none is left
-  assert.ok(dropNote([]).includes("the Muse wakes it set up are off"));
-  for (const left of [["lima"], null]) assert.ok(!dropNote(left).includes("the Muse wakes it set up are off"), JSON.stringify(left));
+  // a disconnect lets go of the key's hold, and says so; no note says a wake is off, since another holder may keep it on
+  assert.ok(dropNote([]).includes("it has let go of every Muse wake it set up: a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on"));
+  for (const left of [[], ["lima"], null]) assert.ok(!/wakes? (it|this key) set up (are|is) off|turn(s|ed|ing)? (them |it )?off/.test(dropNote(left)), JSON.stringify(left));
   // and it claims a seat only where a room still takes the invite
   for (const left of [[], ["lima"], null]) assert.ok(dropNote(left).includes("you are still a member of each of these rooms that still takes your invite") && !dropNote(left).includes("you are still a member of these rooms"), JSON.stringify(left));
+});
+
+test("a take-off that leaves a wake on for another holder, of a room held or refused, through a key or a sign-in, names every holder that may keep it and never says it is off", () => {
+  for (const s of [removedHeldNote("lima", "kept"), removedRefusedNote("lima", "kept"), signinRemovedNote("lima", "kept")]) {
+    assert.ok(s.endsWith(" stays on while another key or connection holding the same seat, or a registration with the room's own token, holds it.") || s.endsWith("; the wake stays on while another key or connection holding the same seat, or a registration with the room's own token, holds it."), s);
+    assert.ok(!/ is off/.test(s), s);
+  }
+  for (const s of [removedHeldNote("lima", "off"), removedRefusedNote("lima", "off"), signinRemovedNote("lima", "off")]) assert.ok(/is off\.$/.test(s), s);
 });

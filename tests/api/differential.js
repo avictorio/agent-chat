@@ -25,8 +25,9 @@
 // answers that carry one (MOVING_RETRY); a note names each part left out
 // wherever the two copies differ there; the app shell's
 // Content-Security-Policy may differ only by CSP_ADDED on the answers
-// CSP_CHANGED names, and a path this checkout adds (NEW_PATHS) must have
-// been the other's unknown-path 404.
+// CSP_CHANGED names, a path this checkout adds (NEW_PATHS) must have been
+// the other's unknown-path 404, and a preflight this checkout answers with
+// its own CORS (PREFLIGHT_CHANGED) the other's generic one.
 // Everything else must be identical.
 //
 //   node tests/api/differential.js /path/to/earlier-checkout
@@ -56,8 +57,29 @@ const EXPECTED_DOC_EDITS = [];
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as
- *  above. */
-const EXPECTED_SENTENCE_EDITS = [];
+ *  above. Against 8ea9a6b: the key's answers say what a sign-in changes for
+ *  it, and that taking a room off or disconnecting lets go of a Muse wake
+ *  another holder may keep on (worker/agents/onboarding.ts, mcp.ts). */
+const EXPECTED_SENTENCE_EDITS = [
+  // AGENT_KEY_MISSING (onboarding.ts)
+  ["No agent key came with this request. Send it as Authorization: Bearer KEY; an agent key starts with a dot. Make one with POST /api/agents from your own agent invites, or ask your person to make one on the site's home page, under Agent keys (AGENT KEYS at /api). Claude and Claude Code can sign in instead, at /api/mcp/signin (SIGNING IN at /api).",
+    "No agent key came with this request. Send it as Authorization: Bearer KEY; an agent key starts with a dot. Make one with POST /api/agents from your own agent invites, or ask your person to make one on the site's home page, under Agent keys (AGENT KEYS at /api)."],
+  // agentInstructions, no key (onboarding.ts)
+  ["tokens only? Each room's own address, {{origin}}/api/rooms/ROOM/mcp, takes them. Claude and Claude Code can sign in instead at {{origin}}/api/mcp/signin.",
+    "tokens only? Each room's own address, {{origin}}/api/rooms/ROOM/mcp, takes them."],
+  // the agent catalog's version and digest (mcp.ts MCP_AGENT_CATALOG_VERSION), in serverInfo and the catalog field
+  ['"title":"Agent Chat: your rooms","version":"1.2.0"', '"title":"Agent Chat: your rooms","version":"1.1.0"'],
+  ['"catalog":{"version":"1.2.0","digest":"ea5df3eb88244e57"}', '"catalog":{"version":"1.1.0","digest":"45576f66f7ad29f2"}'],
+  // remove_room's description (mcp.ts)
+  ["Take one room off your key: the key forgets that room's invite, and first lets go of the Muse wake it set up there, which goes unless another key or connection holding the same seat, or a registration with the room's own token, also holds it. Taking a room off a key does not leave it: a seat still held there stays. To leave the room for good, call leave_room first.",
+    "Take one room off your key: the key forgets that room's invite. Your seat stays (you are still a member); to leave the room for good, call leave_room first."],
+  // muse_register's description (mcp.ts)
+  ["Taking a room off your key, or disconnecting the key, lets go of the wakes it set up; a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on.",
+    "Taking a room off your key, or disconnecting the key, turns the wakes it set up off."],
+  // dropNote, every wake let go (onboarding.ts)
+  ["This key works nowhere now, and it has let go of every Muse wake it set up: a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on. ",
+    "This key works nowhere now, and the Muse wakes it set up are off. "],
+];
 /** The answers whose retry time is the seconds left in a counter's window,
  *  which moves with the run (the two servers are asked a while apart): that
  *  number masked in both copies, the Retry-After header and the body's
@@ -73,8 +95,22 @@ const VOLATILE_HEADERS = new Set(['date', 'content-length', 'connection', 'keep-
 const CSP_CHANGED = new Set();
 const CSP_ADDED = "; frame-ancestors 'self'";
 /** Paths this checkout adds, which the other answered as an unknown path:
- *  sent to both, the other's answer checked to be that 404, not compared. */
-const NEW_PATHS = new Set();
+ *  sent to both, the other's answer checked to be that 404, not compared.
+ *  Against 8ea9a6b: the sign-in's documents, its authorize page, its
+ *  endpoints and its MCP address (worker/routes/oauth.ts, agent.ts). */
+const NEW_PATHS = new Set([
+  'GET /.well-known/oauth-protected-resource', 'GET /.well-known/oauth-protected-resource/api/mcp/signin', 'GET /.well-known/oauth-protected-resource/api/mcp',
+  'GET /.well-known/oauth-authorization-server', 'GET /oauth/authorize', 'POST /api/mcp/signin', 'POST /api/mcp/signin/',
+  'POST /api/oauth/decide', 'POST /api/oauth/token', 'POST /api/oauth/revoke', 'POST /api/oauth/disconnect',
+]);
+/** The preflights this checkout answers with their own CORS, which the
+ *  other answered as every path's: sent to both, the other's answer checked
+ *  to be the generic preflight (PREFLIGHT_GENERIC's), not compared. Against
+ *  8ea9a6b: the sign-in's MCP address and its endpoints. */
+const PREFLIGHT_CHANGED = new Set(['OPTIONS /api/mcp/signin', 'OPTIONS /api/oauth/token', 'OPTIONS /api/oauth/revoke', 'OPTIONS /api/oauth/decide', 'OPTIONS /api/oauth/disconnect']);
+/** A preflight every path answers alike, compared, and the earlier
+ *  checkout's answer PREFLIGHT_CHANGED is held to. */
+const PREFLIGHT_GENERIC = 'OPTIONS /api/mcp';
 
 /** One run of the fixed list against a server: each request's label and
  *  answer, and the set-up calls that did not do what the list assumes. */
@@ -293,6 +329,14 @@ async function scenario(srv, muse, suf) {
   must('agent: the second key disconnected', (await send('agent DELETE /api/agent, the second key', 'DELETE', '/api/agent', { headers: { Authorization: 'Bearer ' + tokens.KEY2 } })).status === 200);
   await send('agent: delete invites 2', 'DELETE', R2 + '/invites', { owner: true });
   await send('agent: delete room 2', 'DELETE', R2 + '?confirm=' + room2, { owner: true });
+  // preflights: the key's address and a room's (compared), and the paths that answer with their own CORS (PREFLIGHT_CHANGED)
+  const pre = { Origin: 'https://example.org', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization, content-type' };
+  await send('OPTIONS /api/mcp', 'OPTIONS', '/api/mcp', { headers: pre });
+  await send('OPTIONS a room\'s /mcp', 'OPTIONS', R + '/mcp', { headers: pre });
+  for (const p of ['/api/mcp/signin', '/api/oauth/token', '/api/oauth/revoke', '/api/oauth/decide', '/api/oauth/disconnect']) await send('OPTIONS ' + p, 'OPTIONS', p, { headers: pre });
+  // the sign-in's paths (NEW_PATHS), and a well-known path it does not serve (compared)
+  for (const [m, p] of [...NEW_PATHS].map((l) => l.split(' '))) await send(m + ' ' + p, m, p, m === 'POST' ? { body: '' } : {});
+  await send('GET /.well-known/openid-configuration', 'GET', '/.well-known/openid-configuration');
   // the site's own pages
   await send('/api/changes', 'GET', '/api/changes');
   await send('/llms.txt', 'GET', '/llms.txt');
@@ -354,7 +398,14 @@ function masked(text, tokens) {
       if (NEW_PATHS.has(y.label)) {
         // a path the other checkout did not serve: it answered the unknown path's 404
         compared++;
-        if (x.status !== 404) { diffs++; console.log('FAIL ' + x.label + ': the earlier checkout answered ' + x.status + ', not the unknown path\'s 404'); }
+        if (x.status !== 404 || x.text !== 'Not found') { diffs++; console.log('FAIL ' + x.label + ': the earlier checkout answered ' + x.status + ' ' + JSON.stringify(x.text.slice(0, 60)) + ', not the unknown path\'s 404'); }
+        continue;
+      }
+      if (PREFLIGHT_CHANGED.has(y.label)) {
+        // a preflight this checkout answers with its own CORS: the other answered every path's
+        compared++;
+        const g = ra.out.find((o) => o.label === PREFLIGHT_GENERIC);
+        if (!g || x.status !== g.status || x.text !== g.text || JSON.stringify(x.headers) !== JSON.stringify(g.headers)) { diffs++; console.log('FAIL ' + x.label + ': the earlier checkout did not answer the generic preflight: ' + x.status + ' ' + JSON.stringify(x.headers)); }
         continue;
       }
       // a section runs to the next line that starts at the margin (its body is indented)

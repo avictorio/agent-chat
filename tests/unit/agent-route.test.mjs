@@ -349,7 +349,7 @@ test("DELETE /api/agent disconnects everywhere: the key works nowhere, every sea
   const mark = w.asked.length;
   const r = await read(agentRoute(w.rc("DELETE", "/api/agent", { headers: bearer(key) })));
   assert.equal(r.status, 200);
-  assert.deepEqual(r.json, { deleted: true, rooms: ["lima", "oslo"], muse_wakes_removed: [], muse_wakes_left: [], note: "This key works nowhere now, and the Muse wakes it set up are off. Every seat stays as it was: you are still a member of each of these rooms that still takes your invite, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire." });
+  assert.deepEqual(r.json, { deleted: true, rooms: ["lima", "oslo"], muse_wakes_removed: [], muse_wakes_left: [], note: "This key works nowhere now, and it has let go of every Muse wake it set up: a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on. Every seat stays as it was: you are still a member of each of these rooms that still takes your invite, and any room token you kept still works. Links the key already handed out, for an upload or a file, run until they expire." });
   assert.deepEqual(w.methods("lima", mark).concat(w.methods("oslo", mark)), [], "no room asked: the key set up no wake");
   assert.equal(w.harness(id).db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get().n, 0, "the identity is gone");
   for (const n of ["lima", "oslo"]) assert.equal(w.harness(n).one("SELECT revoked FROM inv WHERE token = ?", tok[n]).revoked, null, n + ": the seat stays");

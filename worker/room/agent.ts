@@ -25,7 +25,8 @@
 // an open only reads. No alarm runs here (Room.alarm returns on an object
 // with no room).
 
-import type { AkRow, AksRow, AqRow, Room } from "./Room.js";
+import type { AkRow, AksRow, AqRow, OkRow, Room, SigninAkRow } from "./Room.js";
+import { OAUTH_ACCESS_LIVE_MAX, OAUTH_ACCESS_TTL_S, OAUTH_ACCESS_WRITE_GRACE_S, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_KEYSET_REFETCH_S, OAUTH_REFRESH_GRACE_S } from "../limits.js";
 
 /** Whether the object's storage holds that table. */
 function hasTable(sql: SqlStorage, name: string): boolean {
@@ -237,5 +238,271 @@ export const AgentMethods = {
   agentRelease(keys: string[]): void {
     if (hasTable(this.sql, "m") || hasTable(this.sql, "ak") || !hasTable(this.sql, "aq")) return;
     for (const k of keys) this.sql.exec("UPDATE aq SET n = MAX(0, n - 1) WHERE k = ?", String(k));
+  },
+} satisfies ThisType<Room>;
+
+// ---- A sign-in's identity (routes/oauth.ts) ----
+// A sign-in is an identity as a key is: its room list sealed the same way
+// and swapped on its version, behind slots the object compares verifiers
+// for and never opens. What differs is its slots: random names, the kinds
+// code, access, refresh and disconnect, times (expires, used), what each is
+// bound to (bind, in clear) and a spent refresh token's replacement pair
+// (next, sealed); and a second sealed list beside the room list, the wake
+// list (ak.wakes, under the wake key: the key's Muse wake record with holder
+// tags in place of room tokens), which every slot can open, so that its
+// disconnect-only code can let go of its wakes without opening a room's
+// token. ak.client names the app, in clear (never a person), and tells a
+// sign-in's object from a key's (whose client is NULL); ak.cut is when it
+// was cut. Every key method refuses a sign-in's object as it refuses an
+// unknown key (no slot is named "key"), and every method here refuses a
+// key's object (its client is NULL) and a room's. Expired rows go only at a
+// write (signinRedeem, signinRefresh, signinSwap, signinAccessDrop): an
+// open only reads. Times are this object's clock, in ms.
+
+/** A slot the Worker prepared: its name, its verifier, the key it wraps
+ *  and what it is bound to (JSON). The object sets its times. */
+export type SigninSlot = { slot: string, verifier: string, wrapped: string | null, bind: string };
+
+/** Whether the object holds a sign-in (and no room). */
+function isSignin(sql: SqlStorage): boolean {
+  if (hasTable(sql, "m") || !hasTable(sql, "ak")) return false;
+  const a = sql.exec<Pick<AkRow, "client">>("SELECT client FROM ak WHERE k = 1").toArray()[0];
+  return !!a && a.client !== null;
+}
+
+/** The sign-in's row and a slot of it whose verifier matches; null for any
+ *  other object or slot. Reads only. */
+function signinSlot(sql: SqlStorage, slot: string, verifier: string): { a: SigninAkRow, s: AksRow } | null {
+  if (!isSignin(sql)) return null;
+  const s = sql.exec<AksRow>("SELECT * FROM aks WHERE slot = ?", String(slot)).toArray()[0];
+  if (!s || !sameText(s.verifier, String(verifier))) return null;
+  const a = sql.exec<SigninAkRow>("SELECT k, created, ver, client, ring, wakes, cut FROM ak WHERE k = 1").toArray()[0];
+  return a ? { a, s } : null;
+}
+
+/** A slot's bind, parsed (a row changed by hand reads as none). */
+function bindOf(s: AksRow): Record<string, unknown> {
+  try { const v: unknown = JSON.parse(s.bind || "{}"); return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {}; } catch { return {}; /* a bind that does not parse binds nothing: the Worker refuses what it lacks */ }
+}
+
+/** Rows past their time, dropped at a write: a code past its minute (a
+ *  redeemed one's row is kept until then to recognise a reuse), an access
+ *  slot once it expired more than OAUTH_ACCESS_WRITE_GRACE_S ago (a request
+ *  that opened it live may still write), a spent refresh token's pair once
+ *  its grace is over (its row stays, to recognise a late reuse). */
+function dropExpired(sql: SqlStorage, now: number): void {
+  sql.exec("DELETE FROM aks WHERE kind = 'code' AND expires < ?", now);
+  sql.exec("DELETE FROM aks WHERE kind = 'access' AND expires < ?", now - OAUTH_ACCESS_WRITE_GRACE_S * 1000);
+  sql.exec("UPDATE aks SET next = NULL WHERE kind = 'refresh' AND used IS NOT NULL AND used < ? AND next IS NOT NULL", now - OAUTH_REFRESH_GRACE_S * 1000);
+}
+
+/** A new access slot and refresh slot (a code redeemed, a refresh), and
+ *  the oldest access slots beyond OAUTH_ACCESS_LIVE_MAX gone. */
+function insertPair(sql: SqlStorage, prepared: { access: SigninSlot, refresh: SigninSlot }, now: number): void {
+  const a = prepared.access, r = prepared.refresh;
+  sql.exec("INSERT INTO aks (slot, kind, verifier, wrapped, created, expires, bind) VALUES (?, 'access', ?, ?, ?, ?, ?)", String(a.slot), String(a.verifier), a.wrapped === null ? null : String(a.wrapped), now, now + OAUTH_ACCESS_TTL_S * 1000, String(a.bind));
+  sql.exec("INSERT INTO aks (slot, kind, verifier, wrapped, created, bind) VALUES (?, 'refresh', ?, ?, ?, ?)", String(r.slot), String(r.verifier), r.wrapped === null ? null : String(r.wrapped), now, String(r.bind));
+  sql.exec("DELETE FROM aks WHERE kind = 'access' AND slot NOT IN (SELECT slot FROM aks WHERE kind = 'access' ORDER BY created DESC, slot LIMIT ?)", OAUTH_ACCESS_LIVE_MAX);
+}
+
+export const SigninMethods = {
+  /** Makes the sign-in: its two tables, the room list and the wake list at
+   *  version 1 (both empty), the code slot (live OAUTH_CODE_TTL_S) and the
+   *  disconnect slot (none with OAUTH_DISCONNECT_CODE off). Only on an object
+   *  that holds neither a room nor an identity, as agentMake. */
+  signinMake(client: string, ring: string, wakes: string, code: SigninSlot, disconnect: SigninSlot | null): { ok: true, created: number } | { ok: false, code: "not_identity" | "exists" } {
+    if (hasTable(this.sql, "m")) return { ok: false, code: "not_identity" };
+    if (hasTable(this.sql, "ak")) return { ok: false, code: "exists" };
+    const created = Date.now();
+    this.sql.exec("CREATE TABLE IF NOT EXISTS ak (k INTEGER PRIMARY KEY CHECK (k = 1), created INTEGER NOT NULL, ver INTEGER NOT NULL, client TEXT, ring TEXT NOT NULL, wakes TEXT, cut INTEGER)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS aks (slot TEXT PRIMARY KEY, kind TEXT NOT NULL, verifier TEXT NOT NULL, wrapped TEXT, created INTEGER NOT NULL, expires INTEGER, used INTEGER, bind TEXT, next TEXT)");
+    this.sql.exec("INSERT INTO ak (k, created, ver, client, ring, wakes, cut) VALUES (1, ?, 1, ?, ?, ?, NULL)", created, String(client), String(ring), String(wakes));
+    this.sql.exec("INSERT INTO aks (slot, kind, verifier, wrapped, created, expires, bind) VALUES (?, 'code', ?, ?, ?, ?, ?)", String(code.slot), String(code.verifier), code.wrapped === null ? null : String(code.wrapped), created, created + OAUTH_CODE_TTL_S * 1000, String(code.bind));
+    if (disconnect) this.sql.exec("INSERT INTO aks (slot, kind, verifier, wrapped, created, bind) VALUES (?, 'disconnect', ?, ?, ?, ?)", String(disconnect.slot), String(disconnect.verifier), disconnect.wrapped === null ? null : String(disconnect.wrapped), created, String(disconnect.bind));
+    return { ok: true, created };
+  },
+
+  /** Opens the sign-in for one of its credentials: the verifier compared in
+   *  constant time, the kind one of kinds, and the slot live (a code within
+   *  its minute and not redeemed, an access slot not expired, a refresh token
+   *  not spent). spent also returns a redeemed code or a spent refresh token,
+   *  marked spent, to recognise a reuse; grace also returns an access slot
+   *  that expired at most OAUTH_ACCESS_WRITE_GRACE_S ago (a request that
+   *  opened it live: routes/oauth.ts signinCred). A matching slot of a cut
+   *  sign-in answers cut, with the app, so an endpoint that ends a sign-in
+   *  can finish its disconnect. idle: the newest refresh slot (else the code)
+   *  was made more than OAUTH_IDLE_DAYS ago. Writes nothing. */
+  signinOpen(slot: string, verifier: string, kinds: string[], opts?: { spent?: boolean, grace?: boolean }):
+    { ok: true, kind: string, wrapped: string | null, wk: string | null, ver: number, ring: string, wakes: string, bind: Record<string, unknown>, idle: boolean, spent: boolean, created: number, client: string, slotCreated: number } | { ok: false, cut?: true, client?: string } {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f || !(Array.isArray(kinds) ? kinds : []).map(String).includes(f.s.kind)) return { ok: false };
+    if (f.a.cut !== null) return { ok: false, cut: true, client: String(f.a.client) };
+    const now = Date.now(), s = f.s, o = opts || {};
+    let spent = false;
+    if (s.kind === "code") {
+      if (s.used !== null) { if (!o.spent) return { ok: false }; spent = true; }
+      else if (Number(s.expires) <= now) return { ok: false };
+    } else if (s.kind === "refresh") {
+      if (s.used !== null) { if (!o.spent) return { ok: false }; spent = true; }
+    } else if (s.kind === "access") {
+      if (Number(s.expires) + (o.grace ? OAUTH_ACCESS_WRITE_GRACE_S * 1000 : 0) <= now) return { ok: false };
+    } else return { ok: false };
+    const bind = bindOf(s);
+    const newest = this.sql.exec<Pick<AksRow, "created">>("SELECT created FROM aks WHERE kind = 'refresh' ORDER BY created DESC LIMIT 1").toArray()[0]
+      || this.sql.exec<Pick<AksRow, "created">>("SELECT created FROM aks WHERE kind = 'code' ORDER BY created DESC LIMIT 1").toArray()[0];
+    const since = newest ? newest.created : f.a.created;
+    return {
+      ok: true, kind: s.kind, wrapped: s.wrapped, wk: typeof bind.wk === "string" ? bind.wk : null, ver: f.a.ver, ring: f.a.ring, wakes: f.a.wakes, bind,
+      idle: now - since > OAUTH_IDLE_DAYS * 86400 * 1000, spent, created: f.a.created, client: String(f.a.client), slotCreated: s.created,
+    };
+  },
+
+  /** Puts new sealed lists, the room list and its wake list together, in
+   *  place of the version the caller read (stale when it moved on). Taken
+   *  from the code slot while it is live and not redeemed (the approval's
+   *  own writes: no access or refresh slot exists before redemption), an
+   *  access slot live or expired at most OAUTH_ACCESS_WRITE_GRACE_S ago (a
+   *  request that opened it live), or a refresh slot not spent. Anything
+   *  else, a revoked access slot (no row) and every slot of a cut sign-in,
+   *  is refused, which the routes read as the sign-in gone. */
+  signinSwap(slot: string, verifier: string, ver: number, ring: string, wakes: string): { ok: true } | { ok: false, code?: "stale" } {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f || f.a.cut !== null) return { ok: false };
+    const now = Date.now(), s = f.s;
+    const takes = s.kind === "code" ? s.used === null && Number(s.expires) > now
+      : s.kind === "access" ? Number(s.expires) + OAUTH_ACCESS_WRITE_GRACE_S * 1000 > now
+        : s.kind === "refresh" ? s.used === null : false;
+    if (!takes) return { ok: false };
+    if (f.a.ver !== Number(ver)) return { ok: false, code: "stale" };
+    dropExpired(this.sql, now);
+    this.sql.exec("UPDATE ak SET ver = ver + 1, ring = ?, wakes = ? WHERE ver = ?", String(ring), String(wakes), Number(ver));
+    return { ok: true };
+  },
+
+  /** A code redeemed, in one step: still live and not redeemed, it is
+   *  marked used, its wrapped data key deleted (its row stays until its
+   *  minute is over, to recognise a reuse), and the prepared access and
+   *  refresh slots go in. A code already redeemed answers reuse and changes
+   *  nothing here: the Worker disconnects the sign-in. */
+  signinRedeem(slot: string, verifier: string, prepared: { access: SigninSlot, refresh: SigninSlot }): { ok: true, ver: number } | { ok: false, reuse?: true } {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f || f.a.cut !== null || f.s.kind !== "code") return { ok: false };
+    const now = Date.now();
+    if (f.s.used !== null) return { ok: false, reuse: true };
+    if (Number(f.s.expires) <= now) return { ok: false };
+    this.sql.exec("UPDATE aks SET used = ?, wrapped = NULL WHERE slot = ?", now, String(slot));
+    insertPair(this.sql, prepared, now);
+    dropExpired(this.sql, now);
+    return { ok: true, ver: f.a.ver };
+  },
+
+  /** A refresh, in one step: a refresh token not spent gets the prepared
+   *  pair stored, is marked spent, loses its wrapped data key and keeps the
+   *  pair sealed for its holder (next) beside the DPoP key the new refresh
+   *  token is bound to (next_jkt), for OAUTH_REFRESH_GRACE_S; one spent less
+   *  than that ago answers that pair (fresh false), so calls refreshing at
+   *  once all end with one pair; one spent longer ago is a reuse. */
+  signinRefresh(slot: string, verifier: string, prepared: { access: SigninSlot, refresh: SigninSlot } | null, nextSealed: string | null, nextJkt: string | null):
+    { ok: true, fresh: true } | { ok: true, fresh: false, next: string, next_jkt: string | null } | { ok: false, reuse?: true } {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f || f.a.cut !== null || f.s.kind !== "refresh") return { ok: false };
+    const now = Date.now(), s = f.s;
+    if (s.used === null) {
+      if (!prepared || !nextSealed) return { ok: false };
+      const bind = bindOf(s);
+      if (nextJkt) bind.next_jkt = String(nextJkt); else delete bind.next_jkt;
+      this.sql.exec("UPDATE aks SET used = ?, wrapped = NULL, next = ?, bind = ? WHERE slot = ?", now, String(nextSealed), JSON.stringify(bind), String(slot));
+      insertPair(this.sql, prepared, now);
+      dropExpired(this.sql, now);
+      return { ok: true, fresh: true };
+    }
+    if (now - s.used < OAUTH_REFRESH_GRACE_S * 1000 && s.next) {
+      const bind = bindOf(s);
+      return { ok: true, fresh: false, next: s.next, next_jkt: typeof bind.next_jkt === "string" ? bind.next_jkt : null };
+    }
+    return { ok: false, reuse: true };
+  },
+
+  /** One access slot deleted (a revoke of that access token). */
+  signinAccessDrop(slot: string, verifier: string): { ok: boolean } {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f || f.s.kind !== "access") return { ok: false };
+    this.sql.exec("DELETE FROM aks WHERE slot = ?", String(slot));
+    dropExpired(this.sql, Date.now());
+    return { ok: true };
+  },
+
+  /** The disconnect's first step, from any slot whose verifier matches
+   *  (live, spent or redeemed, the disconnect slot included): the sign-in
+   *  marked cut, and its wake list as it stood then, with the wake key as
+   *  this slot wraps it. From then on every open, swap, redeem and refresh is
+   *  refused. A sign-in cut already answers the same to any of its slots, so
+   *  any of its credentials finishes what an earlier disconnect left. */
+  signinCut(slot: string, verifier: string): { ok: true, ver: number, wakes: string, wkWrapped: string | null } | { ok: false } {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f) return { ok: false };
+    this.sql.exec("UPDATE ak SET cut = ? WHERE k = 1 AND cut IS NULL", Date.now());
+    const wk = f.s.kind === "disconnect" ? f.s.wrapped : (() => { const b = bindOf(f.s); return typeof b.wk === "string" ? b.wk : null; })();
+    return { ok: true, ver: f.a.ver, wakes: f.a.wakes, wkWrapped: wk };
+  },
+
+  /** A cut sign-in's wake list rewritten by its disconnect to hold only
+   *  what did not settle (the room list is not written): refused on a
+   *  sign-in that is not cut, stale when the list moved. */
+  signinRemain(slot: string, verifier: string, ver: number, wakes: string): { ok: true } | { ok: false, code?: "stale" } {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f || f.a.cut === null) return { ok: false };
+    if (f.a.ver !== Number(ver)) return { ok: false, code: "stale" };
+    this.sql.exec("UPDATE ak SET ver = ver + 1, wakes = ? WHERE ver = ?", String(wakes), Number(ver));
+    return { ok: true };
+  },
+
+  /** The sign-in deleted, all of it. With ver, as agentDrop(ver): once
+   *  every wake on the list read at that version settled (stale when the
+   *  list moved since). Without it, in two cases only: from the code slot
+   *  while it is not redeemed, live or expired (the approval's own failure:
+   *  no access token has existed, so nothing can have been recorded on it),
+   *  and on a cut sign-in from any of its slots (its wake list does not
+   *  open). The slots go in the same step as the check, then the rest. */
+  async signinDrop(slot: string, verifier: string, ver?: number): Promise<{ ok: true } | { ok: false, code?: "stale" }> {
+    const f = signinSlot(this.sql, slot, verifier);
+    if (!f) return { ok: false };
+    if (ver !== undefined && ver !== null) {
+      if (f.a.ver !== Number(ver)) return { ok: false, code: "stale" };
+    } else if (!((f.s.kind === "code" && f.s.used === null) || f.a.cut !== null)) return { ok: false };
+    this.sql.exec("DELETE FROM aks");
+    await this.ctx.storage.deleteAll();
+    return { ok: true };
+  },
+
+  // ---- One known app's store, on its OAUTH_CLIENT_PREFIX object ----
+  /** In one step: rows past their exp go; the release hashes go; whether
+   *  each peek hash is there (nothing written for it); each jtis hash
+   *  checked and put in (fresh false when it was there); and, with
+   *  wantRefetch, the key set's refetch granted when the last attempt is
+   *  older than OAUTH_KEYSET_REFETCH_S, which records now. false on an
+   *  object that holds a room, an identity or the agent counters. */
+  clientNote(o: { jtis?: Array<{ h: string, exp: number }>, release?: string[], peek?: string[], wantRefetch?: boolean }): { fresh: boolean[], seen: boolean[], refetch: boolean } | false {
+    if (hasTable(this.sql, "m") || hasTable(this.sql, "ak") || hasTable(this.sql, "aq")) return false;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS oj (h TEXT PRIMARY KEY, exp INTEGER NOT NULL)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS ok (k INTEGER PRIMARY KEY CHECK (k = 1), tried INTEGER)");
+    const now = Date.now();
+    this.sql.exec("DELETE FROM oj WHERE exp < ?", now);
+    for (const h of o && Array.isArray(o.release) ? o.release : []) this.sql.exec("DELETE FROM oj WHERE h = ?", String(h));
+    const seen = (o && Array.isArray(o.peek) ? o.peek : []).map((h) => this.sql.exec("SELECT 1 FROM oj WHERE h = ?", String(h)).toArray().length > 0);
+    const fresh = (o && Array.isArray(o.jtis) ? o.jtis : []).map((j) => {
+      const there = this.sql.exec("SELECT 1 FROM oj WHERE h = ?", String(j.h)).toArray().length > 0;
+      if (!there) this.sql.exec("INSERT INTO oj (h, exp) VALUES (?, ?)", String(j.h), Number(j.exp));
+      return !there;
+    });
+    let refetch = false;
+    if (o && o.wantRefetch) {
+      const r = this.sql.exec<Pick<OkRow, "tried">>("SELECT tried FROM ok WHERE k = 1").toArray()[0];
+      if (!r || r.tried === null || now - r.tried >= OAUTH_KEYSET_REFETCH_S * 1000) {
+        refetch = true;
+        this.sql.exec("INSERT INTO ok (k, tried) VALUES (1, ?) ON CONFLICT(k) DO UPDATE SET tried = excluded.tried", now);
+      }
+    }
+    return { fresh, seen, refetch };
   },
 } satisfies ThisType<Room>;

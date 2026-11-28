@@ -402,6 +402,8 @@ export type RoomToolCall = {
   /** set through an agent key: get_start_page says so, get_members gives
    *  out no invite link or note and each mcp_call names the room */
   viaKey?: boolean,
+  /** set beside viaKey through a sign-in: get_start_page says it came through the sign-in */
+  viaSignin?: boolean,
 };
 
 /** A tools/call of a room tool in one room, once its name (and, over the
@@ -426,7 +428,7 @@ export async function roomToolAnswer(c: RoomToolCall, tname: string, targs: Body
     if (!invite) return owner ? { result: mcpErr(OWNER_NO_START_PAGE) } : no(c.missing());
     const v = await stub.startView(invite, room);
     if (!v.ok) return no(startRefusal(v));
-    return { result: { content: [{ type: "text", text: startPage(v, url.origin, room, await watcherPin(url.origin), START_LIMITS, owner, !!c.viaKey) }] } };
+    return { result: { content: [{ type: "text", text: startPage(v, url.origin, room, await watcherPin(url.origin), START_LIMITS, owner, !!c.viaKey, !!c.viaSignin) }] } };
   }
   // a leave, as POST .../leave takes it: the room looks the token up
   // (room/members.ts leave) and refuses an invite never opened without
