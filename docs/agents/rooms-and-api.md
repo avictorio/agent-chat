@@ -1053,8 +1053,10 @@ docs.txt section that owns its routes, caps and formats.
     the background, a difference only logged (`compareDocument`, never
     under `TEST_HOOKS`, so a test server asks no outside host). Under
     `TEST_HOOKS` the API suite registers stand-in apps on `__oauth-quota`
-    (`/api/test-hooks/oauth-app`), each with its key set inline or on the
-    test's own server.
+    (`/api/test-hooks/oauth-app`), each with its key set inline or at a
+    loopback `jwks_uri` on 127.0.0.1 served by the suite itself: the one
+    case where the Worker connects to a loopback address for a key set (a
+    pinned app's `jwks_uri` never is one).
   - **The identity** is an `__agent-<id>` object, guarded as a key's,
     whose list of rooms is sealed the same way and written through the
     same compare-and-set (`rewrite`, with `keepsWakes` and `tagsKept`) by a
@@ -1117,28 +1119,52 @@ docs.txt section that owns its routes, caps and formats.
     (ES256 or PS384) and no `crit`; its claims as it presents them (`iss`,
     `sub`, `aud`, the times, `exp - iat`, the `jti`'s length), before any
     key or signature, so a copy of an old assertion, or one signed for
-    another site, costs no key, fetch or signature; then the
-    failed-authentication counter is read; then its key and its signature;
-    and its `jti` is kept until the assertion's `exp` plus
-    `OAUTH_SKEW_S`, so it is accepted once. The counter is one per network
-    and app (`OAUTH_AUTH_FAILS_PER_IP` per `OAUTH_AUTH_FAILS_WINDOW_S` on
-    `__oauth-quota`): a place is taken only when a signature check ran for
-    a known app's assertion and none matched, and full it refuses that
-    app's assertion from that network before its key and signature (429
-    `slow_down` with `Retry-After`). Nothing else is counted or refused by
-    it: an unknown client, a public app's failure, no assertion, a
-    malformed one and failing claims never read it; a `kid` no key could
-    be tried for, and a replayed `jti` after a signature that matched,
-    read it and take no place. So a stranger's failures hold back only
-    their own network, and one app's bad assertions only that app there;
-    every Claude user's connector shares a few addresses. A key set whose
-    time is up is fetched again by the isolate itself, at most once per
-    `OAUTH_KEYSET_REFETCH_S` per app (the Cache API first), asking no
-    site-wide gate; the gate (`OAUTH_KEYSET_REFETCH_S`, on the app's
-    object), which anyone holding the app's `client_id` can spend, is
-    asked only for a `kid` the kept set lacks. The last set serves only
-    after a fetch that failed, never past its time plus
-    `OAUTH_KEYSET_TTL_MAX_S`. Then the proof's verdict: a family is bound
+    another site, costs no key, fetch or signature; then its key; then
+    its signature; and its `jti` is kept until the assertion's `exp` plus
+    `OAUTH_SKEW_S`, so it is accepted once. The failed-authentication
+    counter is one per network and app (`OAUTH_AUTH_FAILS_PER_IP` per
+    `OAUTH_AUTH_FAILS_WINDOW_S` on `__oauth-quota`). It is read once, just
+    before the assertion's first costly step (a key-set fetch the request
+    would start, or its first signature check), and full it refuses that
+    app's assertion from that network with no fetch and no signature
+    check (429 `slow_down` with `Retry-After`). Never reading it: an
+    unknown client, a public app's failure, no assertion, a malformed
+    one, failing claims, and a `kid` no key matches when no fetch may
+    start. Reading it once (so refused while it is full) and taking no
+    place: a replayed `jti` after a signature that matched, and a request
+    whose fetch found no key for its `kid`. Taking a place: only a
+    signature check that ran and matched no key. So a stranger's failures
+    hold back only their own network, and one app's bad assertions only
+    that app there; every Claude user's connector shares a few addresses.
+    The key set (`keysFor`, `worker/lib/oauth.ts`) is kept per isolate
+    and `jwks_uri`, with nothing shared that a caller could hold and no
+    object called: the set (its keys, when it was fetched, until when it
+    is live), the fetch in flight, and the last try (when it started,
+    and whether the app's host failed it); and the data centre's Cache
+    API copy, which carries `X-Fetched-At` and `X-Kept-Until`. The key
+    is looked for in this isolate's live set, then in the data centre's
+    copy (adopted when live and fetched later than this isolate's); else
+    a fetch in flight is waited for, each waiter on a timer of its own
+    (`OAUTH_FETCH_TIMEOUT_MS` and a second; a fetch older than that is
+    forgotten); else a fetch starts only when the last try started more
+    than `OAUTH_KEYSET_REFETCH_S` ago, failed or not, and the data
+    centre's copy, if any, was fetched more than that ago (a fresher copy
+    that lacks the `kid` means there is no such key). Before it starts
+    the counter is read; then, in one synchronous step, the try and the
+    fetch in flight are recorded, and the fetch is handed to the
+    request's `waitUntil`, so a requester that hangs up cannot cut it
+    off. A burst of requests on an isolate holding no set makes one
+    fetch, shared as parsed data (never a `Response`). A failure of the
+    app's host (a status, a redirect, the size cap, the timeout, a body
+    that does not parse) marks the try failed; nothing else does: a fetch
+    cut off counts toward the window and never as a failure. The last set
+    serves only after a try the host failed, never past its time plus
+    `OAUTH_KEYSET_TTL_MAX_S`. So an app's new key is taken at most
+    `OAUTH_KEYSET_REFETCH_S` after it is published, and a removed key is
+    gone at its set's time, or at a data centre's copy's time, or sooner.
+    The guides' "at most once per interval" is kept per isolate and per
+    data centre, not for the whole site (the comment at
+    `OAUTH_KEYSET_REFETCH_S` says why). Then the proof's verdict: a family is bound
     to the proof's key when its code exchange carries one (a public family
     also by its first refresh with one) and then needs it. No `grant_type` is 400 `invalid_request`, another than
     the two `unsupported_grant_type`. The code grant checks, in order, the
@@ -1767,8 +1793,8 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
 | (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`. `DELETE /api/agent` first marks the slot's `kind` `cut` (from then on the key opens nothing but that DELETE); once the key has let go of every Muse wake its list records it deletes the identity whole (`deleteAll`), and until then the cut record holds only the entries of the rooms whose wakes did not settle (their tokens and links, sealed), and stays until a DELETE with the same key settles them (the web app's Agent keys view offers that DELETE again, in the page, and when Open refuses the key); nothing else removes a cut record. A person's creation that fails deletes its identity too; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
 | (objects `__agent-<id>`, one per sign-in) | the same tables, with `ak.client` (the app's `client_id`), `ak.wakes` (the Muse wake record, sealed under the sign-in's wake key) and `ak.cut`, and one `aks` row per credential (`code`, `access`, `refresh`, `disconnect`, with `expires`, `used`, `bind` and `next`: Sign-in). Made only by an approval; deleted by its own failure, or by an ending once every wake settled, or at once when its wake list does not open. |
-| (object `__oauth-quota`, `OAUTH_QUOTA_ROOM`) | table `aq`, with the agent quota's methods: the failed-authentication counters of the token and revocation endpoints, one per network and app (`net:<hash>:<app key>`) per `OAUTH_AUTH_FAILS_WINDOW_S`, a place taken only when a signature check ran for a known app's assertion and none matched, and asked only after that assertion's claims pass and before its key and signature; under `TEST_HOOKS` only, table `oat`: the API suite's stand-in apps (`/api/test-hooks/oauth-app`). |
-| (objects `__oauth-client-<32 hex>`, `OAUTH_CLIENT_PREFIX`, one per known app: the hash of its `client_id`) | table `oj`: the hashes the app has sent (an assertion's `jti`, `a:`, until its `exp` plus `OAUTH_SKEW_S`; a DPoP proof's, `d:`; an approved request, `r:`, for `OAUTH_REQUEST_KEEP_S`), each until its `exp`; table `ok`: the time of the last key-set fetch, the site-wide refetch gate (`clientNote`). |
+| (object `__oauth-quota`, `OAUTH_QUOTA_ROOM`) | table `aq`, with the agent quota's methods: the failed-authentication counters of the token and revocation endpoints, one per network and app (`net:<hash>:<app key>`) per `OAUTH_AUTH_FAILS_WINDOW_S`, a place taken only when a signature check ran for a known app's assertion and none matched, and read only just before that assertion's first costly step, a key-set fetch it would start or its first signature check; under `TEST_HOOKS` only, table `oat`: the API suite's stand-in apps (`/api/test-hooks/oauth-app`). |
+| (objects `__oauth-client-<32 hex>`, `OAUTH_CLIENT_PREFIX`, one per known app: the hash of its `client_id`) | table `oj`: the hashes the app has sent (an assertion's `jti`, `a:`, until its `exp` plus `OAUTH_SKEW_S`; a DPoP proof's, `d:`; an approved request, `r:`, for `OAUTH_REQUEST_KEEP_S`), each until its `exp` (`clientNote`); nothing for key sets, which each isolate keeps itself with the data centre's Cache API copy (Sign-in). |
 | (object `__agent-quota`, `AGENT_QUOTA_ROOM`) | table `aq`: new agent keys' counters, one row per cap key (`net:<hash>:<hour>`, `all:<day>`, `room:<hash>:<day>`) with its window and count; rows of past windows go when the next creation comes in (`agentReserve`); a check only reads them (`agentPeek`). |
 
 ### KV keys (`REQUESTS` namespace)

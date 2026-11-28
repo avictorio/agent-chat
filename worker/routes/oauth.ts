@@ -565,18 +565,21 @@ async function clientOf(env: Env, form: URLSearchParams): Promise<KnownApp | nul
  *  nor client_secret; a poppy app a signed client assertion (lib/oauth.ts
  *  checkAssertion), whose jti is recorded in the app's store with the DPoP
  *  proof's, in one call. Every failure is 401 invalid_client. The costly
- *  part, a signature check (and a key-set fetch for one), is limited, and
- *  only what costs fills the limit: an assertion whose signature was checked
- *  and matched no key takes a place in this app's counter on this network
- *  (failCaps). The counter is read once an assertion's claims have passed,
- *  before its key is resolved, and full it refuses the app's assertion from
- *  that network (429 slow_down). A public app's failure, no assertion, a
- *  malformed one or claims that fail never ask the counter; a kid no key
- *  could be tried for, and a replayed jti after a signature that matched,
- *  read it and take no place. dpopJti: the proof's jti to record (null:
- *  none). */
+ *  part, a key-set fetch or a signature check, is limited, and only what
+ *  costs fills the limit: an assertion whose signature was checked and
+ *  matched no key takes a place in this app's counter on this network
+ *  (failCaps). The counter is read once, just before the first costly step
+ *  of the assertion (a key-set fetch this request would start, or its first
+ *  signature check), and full it refuses the app's assertion from that
+ *  network (429 slow_down). A public app's failure, no assertion, a
+ *  malformed one, claims that fail, and a kid no key matches when no fetch
+ *  may start never ask the counter; a replayed jti after a signature that
+ *  matched, and a request whose fetch found no key for its kid, read it
+ *  (and are refused while it is full) and take no place. A key-set fetch is
+ *  handed to waitUntil (the request's), so a requester that hangs up cannot
+ *  cut it off. dpopJti: the proof's jti to record (null: none). */
 type Authed = { ok: true, app: KnownApp, alg: string | null, hasKid: boolean, dpopFresh: boolean } | { ok: false, response: Response };
-async function authenticate(env: Env, request: Request, form: URLSearchParams, origin: string, app: KnownApp, dpopJti: string | null, grant: string | null): Promise<Authed> {
+async function authenticate(env: Env, request: Request, form: URLSearchParams, origin: string, app: KnownApp, dpopJti: string | null, grant: string | null, waitUntil: (p: Promise<unknown>) => void): Promise<Authed> {
   const refuse = (): Authed => ({ ok: false, response: invalidClient(request) });
   const assertion = form.get("client_assertion");
   const nowS = Math.floor(Date.now() / 1000);
@@ -602,7 +605,7 @@ async function authenticate(env: Env, request: Request, form: URLSearchParams, o
   const c = await checkAssertion(app, assertion, origin, nowS, {
     // this app's counter on this network, full, refuses before the work it limits
     mayVerify: async () => { const w = await quotas(env).agentPeek(caps); wait = typeof w === "number" ? w : 0; return wait <= 0; },
-    refetchGrant: async () => { const n = await store.clientNote({ wantRefetch: true }); return !!n && n.refetch; },
+    waitUntil,
   });
   if (!c.ok) {
     if (c.stopped) return { ok: false, response: oauthError("slow_down", 429, "Too many failed attempts for this app from this network; try again later.", { "Retry-After": String(wait) }) };
@@ -647,8 +650,9 @@ async function preparePair(id: string, dk: Uint8Array<ArrayBuffer>, wk: Uint8Arr
 // app (401 invalid_client, before any proof is looked at); a DPoP header
 // checked when sent; the client's authentication by kind (401
 // invalid_client; a signed assertion's claims are judged as presented, then
-// this app's counter of failed signature checks on this network is read,
-// full: 429 slow_down, then its key and its signature: authenticate); the
+// its key and its signature, with this app's counter of failed signature
+// checks on this network read just before the first costly step, a key-set
+// fetch or a signature check, full: 429 slow_down: authenticate); the
 // proof's verdict (400 invalid_dpop_proof; one required by an app whose
 // document says dpop_bound_access_tokens); then the grant:
 // authorization_code or refresh_token (400 invalid_request when none is
@@ -670,7 +674,7 @@ export async function tokenRoute(rc: RouteContext): Promise<Response> {
   const nowS = Math.floor(Date.now() / 1000);
   const dpop = await checkDpop(request, signinOrigin(env) + "/api/oauth/token", nowS);
   const grant = form.get("grant_type");
-  const auth = await authenticate(env, request, form, signinOrigin(env), named, dpop.kind === "ok" ? dpop.jti : null, grant);
+  const auth = await authenticate(env, request, form, signinOrigin(env), named, dpop.kind === "ok" ? dpop.jti : null, grant, (p) => rc.ctx.waitUntil(p));
   if (!auth.ok) return auth.response;
   const app = auth.app;
   if (dpop.kind === "bad" || (dpop.kind === "ok" && !auth.dpopFresh)) return oauthError("invalid_dpop_proof");
@@ -810,7 +814,7 @@ export async function revokeRoute(rc: RouteContext): Promise<Response> {
   const form = f.form;
   const named = await clientOf(env, form);
   if (!named) return invalidClient(request);
-  const auth = await authenticate(env, request, form, signinOrigin(env), named, null, null);
+  const auth = await authenticate(env, request, form, signinOrigin(env), named, null, null, (p) => rc.ctx.waitUntil(p));
   if (!auth.ok) return auth.response;
   const t = parseSigninToken(form.get("token") || "");
   if (t && t.kind === "refresh") {

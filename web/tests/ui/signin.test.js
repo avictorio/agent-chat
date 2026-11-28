@@ -80,7 +80,8 @@ const DECIDE = (appKey) => async (body) => {
  * stays on the page as it was when it left (a navigation still pending
  * would leave the page drawing nothing to take a picture of); o.stored: a
  * RegExp of the storage keys the scenario may add or remove (only
- * chat-signin:<id> is ever added); o.init: a script each page runs first.
+ * chat-signin:<id> is ever added); o.init: a script each page runs first;
+ * o.fakeClock: the page's timers on Playwright's clock (laterStill).
  * An api answer is {status, body} (JSON), {status, html} or 'network'.
  * S.calls lists every request to the site (method, path, body), S.backs
  * every callback reached.
@@ -90,7 +91,9 @@ async function scenario(name, o, fn) {
   const b = await chromium.launch({});
   const ctx = await b.newContext({ serviceWorkers: 'block', viewport: { width: o.w || 1280, height: o.h || 900 }, colorScheme: o.scheme || 'light', hasTouch: !!o.touch, isMobile: !!o.touch, timezoneId: 'UTC', locale: 'en-US', permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await ctx.newPage();
-  await installClock(page);
+  // fakeClock: the page's own timers on Playwright's clock (time flows), so a scenario can move it on (laterStill)
+  if (o.fakeClock) await page.clock.install({ time: NOW });
+  else await installClock(page);
   trackNetwork(page);
   const errs = [];
   const watch = (pg) => {
@@ -242,6 +245,12 @@ const tick = (page, room) => page.click('#signinRooms li[data-room="' + room + '
 const connect = (page) => page.click('#signinConnect', { noWaitAfter: true });
 const deny = (page) => page.click('#signinDeny', { noWaitAfter: true });
 const decides = (S) => S.calls.filter((c) => c.p === '/api/oauth/decide');
+/** the page's clock moved on an hour, so every timer it set has run, and a moment for a navigation to reach the stand-in: whether no callback was reached even then */
+const laterStill = async (page, S) => {
+  await page.clock.fastForward('01:00:00');
+  await new Promise((r) => setTimeout(r, 300));
+  return !S.backs.length;
+};
 // the page's own sentences
 const NEVER = 'Agent Chat never sends you a link to approve a connection: approve only one you started yourself, in your own app, a moment before.';
 const LOST = "The site's answer didn't arrive, so this page can't tell whether the connection was made. If it was, the app never received it and nothing can use it. Choose Connect to try again: if the page then says this link was already used, start again from the app. Approving again with the same name uses the same seats.";
@@ -389,7 +398,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
   }, '#signinErr');
   // the browser cannot keep the connection's record: the app is not sent the connection, the page disconnects it, and says so
   const unkept = { decide: DECIDE('claude'), disconnect: async () => ({ body: { disconnected: true, wakes_left: [], note: W.signinDropNote([]) } }) };
-  await state('unkept', { app: 'claude', api: unkept, init: REFUSE_RECORD, stayBack: true }, async (page, S) => {
+  await state('unkept', { app: 'claude', api: unkept, init: REFUSE_RECORD, stayBack: true, fakeClock: true }, async (page, S) => {
     await tick(page, 'family-trip');
     await connect(page);
     await page.waitForSelector('#signinUnkept', { timeout: 5000 });
@@ -397,6 +406,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
     must(await until(() => S.calls.some((c) => c.p === '/api/oauth/disconnect')), 'the page disconnects it');
     must(!S.backs.length, 'the app is not sent the connection: ' + JSON.stringify(S.backs));
     must(!(await page.$('#signinConnect')) && !(await page.$('#signinRooms')) && !(await page.$eval('#signinDeny', (b) => b.disabled)), "only Don't connect");
+    must(await laterStill(page, S), 'nor later: an hour on, the app has still not been sent the connection');
   }, '#signinUnkept');
   // a room whose look failed beside an agent's invite: the form, whose rows say why; Try again then finds the person's own invite
   await state('agent-failed', { app: 'claude', rooms: { 'work-notes': 'tok_work000000000000000000', 'flip-room': 'tok_flip00000000000000000' }, api: { decide: DECIDE('claude') } }, async (page) => {
@@ -529,7 +539,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
   });
   // a connection whose record this browser refuses to keep is never handed to the app: the page disconnects it once, with
   // its code, says so, and Don't connect tells the app it did not connect
-  await scenario('signin-unkept-requests', { app: 'claude', api: unkept, init: REFUSE_RECORD }, async (page, S) => {
+  await scenario('signin-unkept-requests', { app: 'claude', api: unkept, init: REFUSE_RECORD, fakeClock: true }, async (page, S) => {
     await tick(page, 'family-trip');
     await connect(page);
     await page.waitForSelector('#signinUnkept', { timeout: 5000 });
@@ -540,20 +550,22 @@ const USED = "This sign-in link has already been used. If you just approved it a
     const sent = S.calls.filter((c) => c.p === '/api/oauth/disconnect').map((c) => c.body);
     must(JSON.stringify(sent) === JSON.stringify([{ code: DCODE }]), 'one disconnect, with the code: ' + JSON.stringify(sent));
     must(!S.backs.length, 'the callback is not reached: ' + JSON.stringify(S.backs));
+    must(await laterStill(page, S), 'nor later: an hour on, still not reached');
     await deny(page);
     await page.waitForSelector('#back', { timeout: 10000 });
     must(S.backs.length === 1 && S.backs[0] === back('claude', { error: 'access_denied', state: 'st-1' }), "Don't connect tells the app: " + JSON.stringify(S.backs));
     must(decides(S).length === 3 && decides(S)[2].body.approve === false, 'the decline');
   });
   // the same when the record is written but does not read back
-  await scenario('signin-unkept-lost-write', { app: 'claude', api: unkept, init: LOSE_RECORD, stayBack: true }, async (page, S) => {
+  await scenario('signin-unkept-lost-write', { app: 'claude', api: unkept, init: LOSE_RECORD, stayBack: true, fakeClock: true }, async (page, S) => {
     await tick(page, 'family-trip');
     await connect(page);
     await page.waitForSelector('#signinUnkept', { timeout: 5000 });
     must(await until(() => S.calls.some((c) => c.p === '/api/oauth/disconnect')) && !S.backs.length, 'disconnected, and not handed to the app');
+    must(await laterStill(page, S), 'nor later: an hour on, still not handed to the app');
   });
   // and when that disconnect itself fails: the same sentence, and nothing else changes
-  await scenario('signin-unkept-disconnect-fails', { app: 'claude', api: { decide: DECIDE('claude'), disconnect: async () => 'network' }, init: REFUSE_RECORD, stayBack: true, allowConsole: /net::ERR_FAILED/ }, async (page, S) => {
+  await scenario('signin-unkept-disconnect-fails', { app: 'claude', api: { decide: DECIDE('claude'), disconnect: async () => 'network' }, init: REFUSE_RECORD, stayBack: true, fakeClock: true, allowConsole: /net::ERR_FAILED/ }, async (page, S) => {
     await tick(page, 'family-trip');
     await connect(page);
     await page.waitForSelector('#signinUnkept', { timeout: 5000 });
@@ -561,6 +573,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
     await settle(page);
     must((await text(page, '#signinUnkept')) === UNKEPT && !(await page.$('#signinErr')) && !(await page.$('#signinDeclineErr')) && !S.backs.length, 'the same sentence alone');
     must(!(await page.$eval('#signinDeny', (b) => b.disabled)), "Don't connect stays");
+    must(await laterStill(page, S), 'nor later: an hour on, still not handed to the app');
   });
   // an answer the page will not follow, to the decline: it stays, says so, and Don't connect can be chosen again
   await scenario('signin-stopped-decline', { app: 'claude', api: { decide: async (body) => (body.approve === false ? { body: { redirect: 'javascript:window.__ran=1' } } : DECIDE('claude')(body)) } }, async (page, S) => {

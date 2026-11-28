@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
 import { agentSealRing, agentSealWakes, agentUnsealWakes, agentOpenRing, newKeyBytes, wakesOf, newHolderTag } from "../../worker/lib/agentkey.ts";
-import { OAUTH_ACCESS_LIVE_MAX, OAUTH_ACCESS_TTL_S, OAUTH_ACCESS_WRITE_GRACE_S, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_KEYSET_REFETCH_S, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
+import { OAUTH_ACCESS_LIVE_MAX, OAUTH_ACCESS_TTL_S, OAUTH_ACCESS_WRITE_GRACE_S, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
 
 const CLIENT = "https://standin.example/oauth/public.json";
 const v = (name) => "v-" + name;
@@ -224,17 +224,14 @@ test("signinSwap through the routes writes the room list and wakesOf of it at on
   assert.equal(await agentUnsealWakes(wk, id, 1, a.wakes), null, "sealed to its version");
 });
 
-test("clientNote: rows past their window go; release; peek writes nothing; a jti once; the refetch gate once per OAUTH_KEYSET_REFETCH_S; refused on a room, an identity or the agent counters", () => {
+test("clientNote: rows past their window go; release; peek writes nothing; a jti once; nothing of the app's key set kept; refused on a room, an identity or the agent counters", () => {
   const h = makeRoom({ bare: true });
   const now = Date.now();
-  assert.deepEqual(h.room.clientNote({ jtis: [{ h: "a:1", exp: now + 60000 }, { h: "a:2", exp: now - 1 }] }), { fresh: [true, true], seen: [], refetch: false });
-  assert.deepEqual(h.room.clientNote({ jtis: [{ h: "a:1", exp: now + 60000 }], peek: ["a:2", "r:x"] }), { fresh: [false], seen: [false, false], refetch: false }, "a:2 past its window went");
-  assert.deepEqual(h.room.clientNote({ peek: ["a:1"] }), { fresh: [], seen: [true], refetch: false });
-  assert.deepEqual(h.room.clientNote({ release: ["a:1"], peek: ["a:1"] }), { fresh: [], seen: [false], refetch: false });
-  assert.equal(h.room.clientNote({ wantRefetch: true }).refetch, true);
-  assert.equal(h.room.clientNote({ wantRefetch: true }).refetch, false, "within the window");
-  h.db.prepare("UPDATE ok SET tried = tried - ?").run(OAUTH_KEYSET_REFETCH_S * 1000);
-  assert.equal(h.room.clientNote({ wantRefetch: true }).refetch, true, "after it");
+  assert.deepEqual(h.room.clientNote({ jtis: [{ h: "a:1", exp: now + 60000 }, { h: "a:2", exp: now - 1 }] }), { fresh: [true, true], seen: [] });
+  assert.deepEqual(h.room.clientNote({ jtis: [{ h: "a:1", exp: now + 60000 }], peek: ["a:2", "r:x"] }), { fresh: [false], seen: [false, false] }, "a:2 past its window went");
+  assert.deepEqual(h.room.clientNote({ peek: ["a:1"] }), { fresh: [], seen: [true] });
+  assert.deepEqual(h.room.clientNote({ release: ["a:1"], peek: ["a:1"] }), { fresh: [], seen: [false] });
+  assert.deepEqual(h.all("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").map((x) => x.name), ["oj"], "one table: the hashes it has seen");
   assert.equal(makeRoom().room.clientNote({}), false);
   const key = makeRoom({ bare: true });
   key.room.agentMake("v", "w", "r");

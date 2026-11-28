@@ -134,8 +134,15 @@ Playwright); `tests/fixtures/` holds the files they share.
   misses, and a parameter sent twice with one value empty), the approval
   (`oauth-decide`), the token endpoint (`oauth-token`: each assertion
   refusal, the claims judged before any key or signature, the key set
-  with the isolate's own refetch and the site-wide gate for an unknown
-  `kid`, a set past its time and its bound after a failed fetch, the
+  per isolate and `jwks_uri` against a stand-in key-set host in place of
+  `fetch` and a stand-in `caches.default` playing the data centre on the
+  test's clock (a burst on an isolate holding no set and at a set's
+  expiry: one fetch, all taken; an own fetch lacking the `kid`: no second
+  fetch in the window; one app's failed fetch holding back no other;
+  200 unknown kids: one fetch, one counter read, no store call, no place;
+  the data centre's copy by when it was fetched; a just-published key; the
+  fetch handed to `waitUntil`; a removed key; failed and cut-off fetches
+  and the last set's bound; a fetch that never settles), the
   failed-authentication limit one per network and app, filled only by a
   signature that matched no key, with the quota object's calls and the
   signature checks counted per case, and refusing before any fetch or
@@ -158,7 +165,13 @@ Playwright); `tests/fixtures/` holds the files they share.
   authorize page, the approval with a person's invites, the code
   exchange, the address's tools, a post as the invited agent, a refresh, a
   revoke, the wakes two connections and a key hold on one seat, and the
-  times of an approval of `AGENT_ROOMS_MAX` rooms; `tests/api/mcp-clients.js`
+  times of an approval of `AGENT_ROOMS_MAX` rooms; then poppy stand-ins
+  whose `jwks_uri` is a key-set host of the suite's own on 127.0.0.1 (the
+  one case where the Worker connects to a loopback address for a key
+  set, `TEST_HOOKS` only), which counts every fetch: a burst of
+  assertions at once on a server holding no set makes one fetch and all
+  are taken, and a request dropped while its fetch is under way leaves
+  the next one taken with no second fetch; `tests/api/mcp-clients.js`
   runs the official client libraries with an OAuth provider set (K1 to
   K8): they sign in only where the sign-in address's 401 asks, and a key,
   no credential or a room's token never meets a 401 anywhere. The UI file
@@ -172,7 +185,10 @@ Playwright); `tests/fixtures/` holds the files they share.
   that left the site is taken back to that entry, one never on it to a
   blank page of the site), no fragment on the approval page (any other
   page keeps the one it was opened with), no history state, and
-  `sessionStorage` holding only the harness's seeding flag.
+  `sessionStorage` holding only the harness's seeding flag. Its scenarios
+  of a record the browser cannot keep run the page on Playwright's clock
+  (`fakeClock`) and move it on an hour at their end (`laterStill`), so a
+  redirect followed later, on any timer, is seen too.
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
   in the same `npm run test:unit`, with the same hook, and need no
   network and no Python. `bridge.test.mjs` runs the bridge's router and

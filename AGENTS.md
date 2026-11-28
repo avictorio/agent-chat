@@ -166,7 +166,7 @@ agent-chat/
 | `MUSE_SEAL_KEY` | **secret** | the Muse bridge's X25519 private key, base64 of its raw 32 bytes. It was made inside Cloudflare when the bridge moved in (2026-11-25) and exists nowhere else: the owner held no copy of the muse-bridge Worker's `BRIDGE_SEAL_KEY`, so that one was not carried over. Every Muse gadget seals its access token to its public key (`GET /api/muse/seal-key`). Don't rotate it casually: after a change, an update sealed to the old key is refused (`seal_invalid`) and the gadget fetches the key again and retries, so updates recover within `MUSE_SEAL_KEY_CACHE_S` plus the gadget's retry backoff; links and stored tokens are kept, and a connect running at that moment fails once (`docs/agents/muse-bridge.md`, Ground rules). Unset, `/api/muse/seal-key`, `/connect` and `/update` answer 503 `not_configured` and the rest of Muse delivery works. Required by `check:config`. |
 | `MUSE_DELIVER_PAUSED` | **secret** (optional) | `"1"` pauses every Muse wake for maintenance: the bridge answers 503 `paused` with Retry-After and rooms keep the wakes queued. Any other value, or no secret, resumes (it holds `"0"` since the bridge moved in); no push either way (`docs/agents/muse-bridge.md`, Pausing deliveries). |
 | `MUSE_BRIDGE_KEY` | **secret**, unused | the key the site sent the separate muse-bridge Worker as `X-Bridge-Key`. Nothing reads it since the bridge moved in (2026-11-25). It stays until the owner deletes it with the `muse-bridge` Worker (section 15); `check:config` notes it as kept, not as one to delete. |
-| `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes (`docs/agents/testing.md` lists them; `/api/test-hooks/oauth-app` registers the sign-in's stand-in apps on `__oauth-quota`, the only apps besides the pinned ones a test server takes); set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
+| `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes (`docs/agents/testing.md` lists them; `/api/test-hooks/oauth-app` registers the sign-in's stand-in apps on `__oauth-quota`, the only apps besides the pinned ones a test server takes, each with its key set inline or at a loopback `jwks_uri` on 127.0.0.1, the one case where the Worker connects to a loopback address for a key set; a pinned app's `jwks_uri` never is one); set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
 | `TEST_MUSE_ORIGIN` | test only | with `TEST_HOOKS`, where the Muse bridge's calls to Muse's hosts go: the API suite's fake Muse, `http://127.0.0.1:PORT` (no other origin is taken; without one, a test server's calls to Muse fail). Never live (`check:config` fails by name). |
 | `TEST_SIGNIN_ORIGIN` | test only | with `TEST_HOOKS`, the origin the sign-in names as its issuer and in its documents, redirects and audiences in place of the site's: the API suite's local server, `http://localhost:PORT` (only `http://` on `localhost` or `127.0.0.1` is taken), because the local server sees every request as the site's host and an OAuth client compares the issuer and resource with the address it connected to (`worker/lib/oauth.ts` `signinOrigin`). Never live (`check:config` fails by name). |
 
@@ -205,14 +205,15 @@ with a slot per credential (`docs/agents/rooms-and-api.md`, Sign-in).
 The sign-in adds two kinds there: `__oauth-quota` holds the
 failed-authentication counters of the token and revocation endpoints, one
 per network and app, a place taken only when a signature check ran for a
-known app's assertion and none matched, and asked only after that
-assertion's claims pass and before its key and signature (and, under
-`TEST_HOOKS` only, the stand-in apps of `/api/test-hooks/oauth-app`), and one
-`__oauth-client-<32 hex>` per known app (the hash of its `client_id`)
-holds the hashes it has seen (an assertion's or a DPoP proof's `jti`,
-as long as that could still be accepted; an approved request, for
-`OAUTH_REQUEST_KEEP_S`, so it is approved once) and the time of its last
-key-set fetch. Never select their tables. Every
+known app's assertion and none matched, and read only just before that
+assertion's first costly step, a key-set fetch it would start or its first
+signature check (and, under `TEST_HOOKS` only, the stand-in apps of
+`/api/test-hooks/oauth-app`); and one `__oauth-client-<32 hex>` (the hash
+of the `client_id`) per known app: hashes of seen assertion `jti`s, DPoP
+proof `jti`s and approved authorization requests, each until its time;
+nothing for key sets (each isolate keeps an app's key set itself, with the
+data centre's Cache API copy: `docs/agents/rooms-and-api.md`, Sign-in).
+Never select their tables. Every
 table and KV key: `docs/agents/rooms-and-api.md`, Storage. The Muse
 bridge keeps its own data in its own objects (`MuseLink`: each linked
 Muse's access token, VM and rooms; `Directory`: VMs and one-time link

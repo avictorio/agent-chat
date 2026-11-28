@@ -175,8 +175,6 @@ export type AksRow = { slot: string, kind: string, verifier: string, wrapped: st
  *  assertion's jti (a:), a DPoP proof's (d:), an approved authorization
  *  request (r:), each until exp (ms). */
 export type OjRow = { h: string, exp: number };
-/** ok: the time of the app's last key-set fetch attempt (ms). */
-export type OkRow = { k: number, tried: number | null };
 /** aq: one creation counter of agent keys (AGENT_QUOTA_ROOM): its key (a
  *  network's or a room's hash, or the site's, and the window), the window,
  *  the count. */

@@ -36,6 +36,7 @@ async function jws(pair, header, payload) {
   return input + '.' + b64(new Uint8Array(await crypto.subtle.sign(algo, pair.privateKey, enc.encode(input))));
 }
 const nowS = () => Math.floor(Date.now() / 1000);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let n = 0;
 const jti = () => 'jti-' + Date.now() + '-' + (++n) + '-' + Math.random().toString(36).slice(2);
 
@@ -210,6 +211,65 @@ async function signinApi(ctx) {
       check('signin: a revoke letting go of ' + set + ' wakes, under 5 s (' + revoke + ' ms)', rv.status === 200 && set === LIM.AGENT_ROOMS_MAX && revoke < 5000, rv.status + ' ' + set);
       console.log('signin: an approval of ' + LIM.AGENT_ROOMS_MAX + ' rooms ' + approve + ' ms, a refresh ' + refresh + ' ms, a revoke of ' + set + ' wakes ' + revoke + ' ms (wall time, from the client)');
       await req('POST', '/api/test-hooks/agent-limits', { owner: true, json: { clear: true } });
+    }
+    // ---- an assertion app's key set at a loopback address (TEST_HOOKS only): a key-set host of this suite's own
+    // on 127.0.0.1, which counts every fetch and can answer slowly ----
+    {
+      const http = require('http');
+      const kes = await keyPair('ES256', 'keys-1');
+      const hits = {}, ends = {};
+      let delay = 0;
+      const keyHost = http.createServer((rq, rs) => {
+        const p = rq.url;
+        hits[p] = (hits[p] || 0) + 1;
+        // how each answer ended: written to the end, or the Worker's side gone first
+        rs.on('close', () => { (ends[p] = ends[p] || []).push(rs.writableFinished ? 'finished' : 'closed early'); });
+        setTimeout(() => {
+          if (rs.destroyed) return;
+          rs.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=600' });
+          rs.end(JSON.stringify({ keys: [kes.jwk] }));
+        }, delay);
+      });
+      await new Promise((r) => keyHost.listen(0, '127.0.0.1', r));
+      const port = keyHost.address().port;
+      const keysApp = (name) => ({ key: 'apitest-keys-' + name, client_id: 'https://agent.example/apitest/' + SUF + '/keys-' + name, kind: 'poppy', name: 'Stand-in keys', host: 'agent.example', redirect_uris: ['https://agent.example/callback'], loopback: false, page: 'agent', jwks_uri: 'http://127.0.0.1:' + port + '/' + SUF + '/' + name + '.json' });
+      const pathOf = (app) => new URL(app.jwks_uri).pathname;
+      // a refresh of no token: an assertion taken is invalid_grant, one refused invalid_client
+      const tryKey = async (app, signal) => {
+        const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: '.ar1.x', ...(await auth(app, kes)) });
+        const r = await fetch(ORIGIN + '/api/oauth/token', { method: 'POST', body: body.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'CF-Connecting-IP': ip() }, signal });
+        const text = await r.text();
+        return { status: r.status, text };
+      };
+      const taken = (r) => r.status === 400 && /"invalid_grant"/.test(r.text);
+      try {
+        const burst = keysApp('burst'), dropped = keysApp('dropped');
+        for (const app of [burst, dropped]) {
+          const r = await req('POST', '/api/test-hooks/oauth-app', { owner: true, json: { app } });
+          check('signin: a stand-in with a loopback key-set address is known on this local server', r.status === 200, r.text.slice(0, 120));
+        }
+        // a burst of assertions at once, on a server holding no set: one fetch, and every one taken
+        delay = 400;
+        const rs = await Promise.all(Array.from({ length: 12 }, () => tryKey(burst)));
+        const fetched = hits[pathOf(burst)] || 0;
+        check('signin, key sets: a burst of 12 assertions on a server holding no set: one fetch, all taken', fetched === 1 && rs.every(taken), fetched + ' fetches; answers ' + rs.map((x) => x.status).join(','));
+        console.log('signin, key sets: the burst: ' + fetched + ' fetch(es) at the key-set host, ' + rs.filter(taken).length + ' of ' + rs.length + ' taken');
+        // a request dropped while the fetch it started is under way, then the next one: taken, with no second fetch
+        delay = 1500;
+        const ctl = new AbortController();
+        const gone = tryKey(dropped, ctl.signal).then(() => 'answered', (e) => 'dropped (' + (e && e.name) + ')');
+        await sleep(300);
+        ctl.abort();
+        const firstEnd = await gone;
+        await sleep(2000);
+        delay = 0;
+        const next = await tryKey(dropped);
+        const n2 = hits[pathOf(dropped)] || 0;
+        check('signin, key sets: a request dropped mid-fetch, then the next one: taken without a second fetch', taken(next) && n2 === 1, n2 + ' fetches; ' + next.status + ' ' + next.text.slice(0, 80));
+        console.log('signin, key sets: the dropped request: the client ' + firstEnd + '; ' + n2 + ' fetch(es) at the key-set host, its answer ' + JSON.stringify(ends[pathOf(dropped)] || []) + '; the next request ' + (taken(next) ? 'taken' : 'refused'));
+      } finally {
+        await new Promise((r) => keyHost.close(r));
+      }
     }
   } finally {
     await req('POST', '/api/test-hooks/oauth-app', { owner: true, json: { clear: true } });

@@ -346,16 +346,22 @@ export const SIGNIN_SCOPE_TEXT = "Join the rooms you choose on Agent Chat's sign
 export const OAUTH_ASSERTION_MAX_S = 300;
 export const OAUTH_SKEW_S = 30;
 export const OAUTH_DPOP_WINDOW_S = 60;
-// A known app's key set: at most OAUTH_KEYSET_MAX_BYTES, fetched within
-// OAUTH_FETCH_TIMEOUT_MS, cached between OAUTH_KEYSET_TTL_MIN_S and
-// OAUTH_KEYSET_TTL_MAX_S. An isolate holding no set whose time lasts fetches
-// it again itself, at most once per OAUTH_KEYSET_REFETCH_S per app; an
-// assertion whose kid the kept set lacks asks for a fetch at most once per
-// OAUTH_KEYSET_REFETCH_S site-wide (failures included), a gate anyone with
-// the app's client_id can spend, so it never holds back a set whose time is
-// up. The last set serves only after a fetch that failed, and never past its
-// time plus OAUTH_KEYSET_TTL_MAX_S. An assertion with no kid tries at most
-// OAUTH_KEYS_TRIED_MAX keys.
+// A known app's key set (lib/oauth.ts keysFor): at most
+// OAUTH_KEYSET_MAX_BYTES, fetched within OAUTH_FETCH_TIMEOUT_MS, kept
+// between OAUTH_KEYSET_TTL_MIN_S and OAUTH_KEYSET_TTL_MAX_S. Each isolate
+// fetches a jwks_uri at most once per OAUTH_KEYSET_REFETCH_S (one fetch in
+// flight, shared by the requests that wait for it; a failed or cut-off try
+// counts toward the window), and none while its data centre's Cache API copy
+// is fresher than that. The guides say "Refetch each jwks_uri at most once
+// per interval, such as 30 seconds, and count failed fetches too. Otherwise a
+// stream of bad assertions can flood the personal agent's server." This
+// keeps it per isolate and per data centre, deliberately, and not for the
+// whole site: a site-wide bound needs a gate that a caller with no key can
+// hold, which would keep an app's new key out and its removed key in. A
+// fetch needs at least one request in that data centre in that window, so
+// the site is never an amplifier. The last set serves only after a try the
+// app's host failed, and never past its time plus OAUTH_KEYSET_TTL_MAX_S. An
+// assertion with no kid tries at most OAUTH_KEYS_TRIED_MAX keys.
 export const OAUTH_KEYSET_MAX_BYTES = 65536;
 export const OAUTH_FETCH_TIMEOUT_MS = 5000;
 export const OAUTH_KEYSET_TTL_MIN_S = 60;
@@ -365,14 +371,19 @@ export const OAUTH_KEYS_TRIED_MAX = 10;
 // Failed signature checks of one app's client assertions from one network
 // per OAUTH_AUTH_FAILS_WINDOW_S (the counters on OAUTH_QUOTA_ROOM, with the
 // agent quota's methods, keyed by the network and the app): an assertion
-// whose signature was checked and matched no key takes a place; once full,
-// that app's next assertion from that network is refused 429 before any
-// fetch or signature check. Only that work costs anything, and it is limited
-// by network as an unverified request is: nothing else takes a place or asks
-// the counter (a request naming no known app, a public app's failure, no
-// assertion, a malformed one, claims that fail, a jti seen already, a kid no
-// key could be tried for), so a stranger's failures hold back nobody but
-// their own network (every Claude user's connector shares a few addresses).
+// whose signature was checked and matched no key takes a place, and nothing
+// else does. The counter is read once, just before an assertion's first
+// costly step (a key-set fetch the request would start, or its first
+// signature check), and full it refuses that app's assertion from that
+// network 429 with no fetch and no signature check. Never asking it: a
+// request naming no known app, a public app's failure, no assertion, a
+// malformed one, claims that fail, and a kid no key matches when no fetch
+// may start. Reading it once, refused while it is full, and taking no
+// place: a replayed jti after a signature that matched, and a request whose
+// fetch found no key for its kid. Only the costly work is limited, by
+// network as an unverified request is, so a stranger's failures hold back
+// nobody but their own network (every Claude user's connector shares a few
+// addresses).
 // A token, revoke or disconnect body is at most OAUTH_FORM_MAX.
 export const OAUTH_AUTH_FAILS_PER_IP = 20;
 export const OAUTH_AUTH_FAILS_WINDOW_S = 600;

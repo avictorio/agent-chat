@@ -25,8 +25,8 @@
 // an open only reads. No alarm runs here (Room.alarm returns on an object
 // with no room).
 
-import type { AkRow, AksRow, AqRow, OkRow, Room, SigninAkRow } from "./Room.js";
-import { OAUTH_ACCESS_LIVE_MAX, OAUTH_ACCESS_TTL_S, OAUTH_ACCESS_WRITE_GRACE_S, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_KEYSET_REFETCH_S, OAUTH_REFRESH_GRACE_S } from "../limits.js";
+import type { AkRow, AksRow, AqRow, Room, SigninAkRow } from "./Room.js";
+import { OAUTH_ACCESS_LIVE_MAX, OAUTH_ACCESS_TTL_S, OAUTH_ACCESS_WRITE_GRACE_S, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_REFRESH_GRACE_S } from "../limits.js";
 
 /** Whether the object's storage holds that table. */
 function hasTable(sql: SqlStorage, name: string): boolean {
@@ -484,14 +484,13 @@ export const SigninMethods = {
   // ---- One known app's store, on its OAUTH_CLIENT_PREFIX object ----
   /** In one step: rows past their exp go; the release hashes go; whether
    *  each peek hash is there (nothing written for it); each jtis hash
-   *  checked and put in (fresh false when it was there); and, with
-   *  wantRefetch, the key set's refetch granted when the last attempt is
-   *  older than OAUTH_KEYSET_REFETCH_S, which records now. false on an
-   *  object that holds a room, an identity or the agent counters. */
-  clientNote(o: { jtis?: Array<{ h: string, exp: number }>, release?: string[], peek?: string[], wantRefetch?: boolean }): { fresh: boolean[], seen: boolean[], refetch: boolean } | false {
+   *  checked and put in (fresh false when it was there). Nothing of the
+   *  app's key set: an isolate keeps that itself (lib/oauth.ts keysFor).
+   *  false on an object that holds a room, an identity or the agent
+   *  counters. */
+  clientNote(o: { jtis?: Array<{ h: string, exp: number }>, release?: string[], peek?: string[] }): { fresh: boolean[], seen: boolean[] } | false {
     if (hasTable(this.sql, "m") || hasTable(this.sql, "ak") || hasTable(this.sql, "aq")) return false;
     this.sql.exec("CREATE TABLE IF NOT EXISTS oj (h TEXT PRIMARY KEY, exp INTEGER NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS ok (k INTEGER PRIMARY KEY CHECK (k = 1), tried INTEGER)");
     const now = Date.now();
     this.sql.exec("DELETE FROM oj WHERE exp < ?", now);
     for (const h of o && Array.isArray(o.release) ? o.release : []) this.sql.exec("DELETE FROM oj WHERE h = ?", String(h));
@@ -501,14 +500,6 @@ export const SigninMethods = {
       if (!there) this.sql.exec("INSERT INTO oj (h, exp) VALUES (?, ?)", String(j.h), Number(j.exp));
       return !there;
     });
-    let refetch = false;
-    if (o && o.wantRefetch) {
-      const r = this.sql.exec<Pick<OkRow, "tried">>("SELECT tried FROM ok WHERE k = 1").toArray()[0];
-      if (!r || r.tried === null || now - r.tried >= OAUTH_KEYSET_REFETCH_S * 1000) {
-        refetch = true;
-        this.sql.exec("INSERT INTO ok (k, tried) VALUES (1, ?) ON CONFLICT(k) DO UPDATE SET tried = excluded.tried", now);
-      }
-    }
-    return { fresh, seen, refetch };
+    return { fresh, seen };
   },
 } satisfies ThisType<Room>;
