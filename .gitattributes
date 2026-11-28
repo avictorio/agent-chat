@@ -3,3 +3,8 @@
 # watcher's SHA-256, which tests/unit/shell.test.mjs pins and the site
 # serves, is of its LF bytes (AGENTS.md section 12).
 *.sh text eol=lf
+
+# The served skills are hashed (their SHA-256 digests are in served/index.ts
+# and versions.json, and hosts verify them), so the templates and the
+# generated files keep LF line endings on every checkout too.
+worker/agents/skills/** text eol=lf

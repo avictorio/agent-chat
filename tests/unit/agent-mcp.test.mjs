@@ -18,6 +18,8 @@ import { MCP_AGENT_CATALOG_VERSION, MCP_CATALOG_VERSION, MCP_MODERN_VERSIONS, ag
 import { API_VERSION } from "../../worker/agents/notices.ts";
 import { MCP_TOOLS_TTL_MS, SMALL_BODY_MAX } from "../../worker/limits.ts";
 import { agentCredential, agentUnseal, newAgentKey } from "../../worker/lib/agentkey.ts";
+import { resourceRead, resourceTemplatesList, resourcesList, skillGet, skillsList } from "../../worker/agents/skills.ts";
+import { SERVED_SKILLS } from "../../worker/agents/skills/served/index.ts";
 
 const V = "io.modelcontextprotocol/protocolVersion", C = "io.modelcontextprotocol/clientCapabilities";
 const NEW = MCP_MODERN_VERSIONS[0];
@@ -73,12 +75,38 @@ test("server/discover answers every credential, as the room's address does, with
     const r = await mcp(k.w, req("server/discover"), { ...headers, ...heads("server/discover") });
     assert.equal(r.status, 200, variant);
     assert.deepEqual(r.json.result, {
-      resultType: "complete", supportedVersions: MCP_MODERN_VERSIONS, capabilities: { tools: {} }, instructions: agentInstructions(ORIGIN, variant),
+      resultType: "complete", supportedVersions: MCP_MODERN_VERSIONS, capabilities: { tools: {}, resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } }, instructions: agentInstructions(ORIGIN, variant),
       catalog: { version: MCP_AGENT_CATALOG_VERSION, digest: mcpAgentCatalogBuilt().digest },
       changes: { api_version: API_VERSION, catalog_version: MCP_CATALOG_VERSION, url: ORIGIN + "/api/changes" }, ttlMs: 0, cacheScope: "private",
       _meta: { "io.modelcontextprotocol/serverInfo": agentServerInfo(ORIGIN) },
     }, variant);
   }
+});
+
+test("the skills' methods take tools/list's verdict at the key's address, ask only the key's own object, and answer the room address's bytes", async () => {
+  const k = await keyed();
+  const file = SERVED_SKILLS[2].files[1].uri;
+  const calls = [["skills/list", {}, undefined, skillsList()], ["skills/get", { uri: SERVED_SKILLS[0].uri }, undefined, skillGet(SERVED_SKILLS[0].uri)], ["resources/list", {}, undefined, resourcesList()], ["resources/templates/list", {}, undefined, resourceTemplatesList()], ["resources/read", { uri: file }, file, resourceRead(file)]];
+  for (const [method, params, name, body] of calls) {
+    for (const [variant, headers] of await CREDS(k)) {
+      const r = await mcp(k.w, req(method, params), { ...headers, ...heads(method, name) });
+      assert.equal(r.status, 200, method + " " + variant);
+      if (variant === "ok") {
+        const { resultType, _meta, ...rest } = r.json.result;
+        assert.equal(resultType, "complete");
+        assert.deepEqual(_meta, { "io.modelcontextprotocol/serverInfo": agentServerInfo(ORIGIN) });
+        assert.equal(JSON.stringify(rest), JSON.stringify(body), method + ": the same bytes as at a room's address");
+      } else {
+        const [code, message] = REFUSED[variant];
+        assert.deepEqual(r.json.error, { code: -32001, message, data: { code } }, method + " " + variant);
+      }
+      assert.ok(r.asked.length <= 1 && r.asked.every((a) => a.endsWith(".agentOpen")), method + " " + variant + ": only the key's own look, no room: " + r.asked);
+    }
+    // over the initialize kind: as before
+    const old = await mcp(k.w, { jsonrpc: "2.0", id: 1, method, params }, auth(k.key));
+    assert.deepEqual(old.json.error, { code: -32601, message: "Method not found: " + method }, method + " over initialize");
+  }
+  for (const n of ["lima", "oslo"]) assert.equal(k.w.harness(n).one("SELECT used FROM inv WHERE name = 'Hank'").used, null, n + " unopened");
 });
 
 test("tools/list: the catalog for a key, -32001 at HTTP 200 with the code and sentence otherwise, in both kinds", async () => {

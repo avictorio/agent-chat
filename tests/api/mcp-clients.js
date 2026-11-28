@@ -6,8 +6,10 @@
 // 2026-07-28, and speaks only that revision when pinned to it. What the
 // suite's own JSON-RPC calls cannot show is here: that a real client
 // connects, negotiates a revision, lists and calls the tools, and is told a
-// wrong token's reason; and which headers it sends, the ones CORS must
-// allow a browser client.
+// wrong token's reason; that its SkillsClient lists, gets, reads and verifies
+// the skills at each MCP address over 2026-07-28, and sees none over
+// initialize; and which headers it sends, the ones CORS must allow a browser
+// client.
 // The libraries live in tests/mcp-clients (its own package, so the deploy
 // build installs none of them): npm ci --prefix tests/mcp-clients.
 // Called from api.test.js; its room is its own.
@@ -27,9 +29,9 @@ function recorder() {
   const fetchFn = async (input, init) => {
     const res = await fetch(input, init);
     const h = new Headers((init && init.headers) || {});
-    let rpc = null, tool = null;
-    try { const b = typeof init.body === 'string' ? JSON.parse(init.body) : null; rpc = b ? b.method : null; tool = b && b.params ? b.params.name : null; } catch {}
-    calls.push({ http: (init && init.method) || 'GET', status: res.status, rpc, tool, version: h.get('mcp-protocol-version'), method: h.get('mcp-method'), name: h.get('mcp-name') });
+    let rpc = null, tool = null, uri = null;
+    try { const b = typeof init.body === 'string' ? JSON.parse(init.body) : null; rpc = b ? b.method : null; tool = b && b.params ? b.params.name : null; uri = b && b.params ? b.params.uri : null; } catch {}
+    calls.push({ http: (init && init.method) || 'GET', status: res.status, rpc, tool, uri, version: h.get('mcp-protocol-version'), method: h.get('mcp-method'), name: h.get('mcp-name') });
     return res;
   };
   return { calls, fetchFn };
@@ -46,6 +48,7 @@ async function mcpClients(ctx) {
   const load = createRequire(path.join(DIR, 'package.json'));
   const v1 = { Client: load('@modelcontextprotocol/sdk/client/index.js').Client, Transport: load('@modelcontextprotocol/sdk/client/streamableHttp.js').StreamableHTTPClientTransport, latest: load('@modelcontextprotocol/sdk/types.js').LATEST_PROTOCOL_VERSION };
   const v2 = load('@modelcontextprotocol/client');
+  const { SkillsClient } = load('@modelcontextprotocol/client/ext/skills');
 
   const room = 'apitest-mcpc-' + SUF, R = '/api/rooms/' + room;
   let r = await req('POST', R, { owner: true });
@@ -219,6 +222,51 @@ async function mcpClients(ctx) {
     }
   }
 
+  // The skills over revision 2026-07-28, with the client's own SkillsClient
+  // (@modelcontextprotocol/client/ext/skills, which checks every entry and
+  // verifies each file's size, digest and SKILL.md frontmatter): pinned and in
+  // auto mode, each with a fresh agent invite that listing, getting and
+  // reading every file leave unused, Mcp-Name sent on every resources/read
+  // and on no skills/get; over initialize (v1, v2 by default) no skill is
+  // declared; a wrong token connects and is refused the listing.
+  let roomSkills = null;
+  for (const [what, mode, name] of [['pinned to ' + MODERN, { pin: MODERN }, 'McpSkillsPin'], ['auto', 'auto', 'McpSkillsAuto']]) {
+    const T = await invite(name);
+    const rec = recorder();
+    const client = new v2.Client({ name: 'apitest-v2-skills', version: '0.0.0' }, { versionNegotiation: { mode } });
+    const transport = new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer ' + T } }, fetch: rec.fetchFn });
+    const got = await withClient(client, transport, () => readSkills(new SkillsClient(client)));
+    const o = got.out || {};
+    if (!roomSkills && o.listing) roomSkills = o.listing;
+    check('mcp v2 client (skills, ' + what + '): connects, the extension supported, no directoryRead', got.ok && o.supported === true && o.directoryRead === false, said(got));
+    check('mcp v2 client (skills, ' + what + '): lists the five skills in order, none invalid, an hour\'s ttlMs, private', JSON.stringify((o.listing || []).map((x) => x.frontmatter.name)) === JSON.stringify(SKILL_NAMES) && o.invalid === 0 && o.ttlMs === 3600000 && o.cacheScope === 'private', JSON.stringify({ names: (o.listing || []).map((x) => x.frontmatter.name), invalid: o.invalid, ttlMs: o.ttlMs, cacheScope: o.cacheScope }));
+    check('mcp v2 client (skills, ' + what + '): get of each equals its listed entry', Array.isArray(o.gets) && o.gets.length === 5 && o.gets.every(Boolean), JSON.stringify(o.gets));
+    check('mcp v2 client (skills, ' + what + '): every listed file read and verified, each SKILL.md\'s frontmatter equal to its entry\'s', o.read === 22 && o.verified === 22 && o.frontmatter === 5, JSON.stringify({ read: o.read, verified: o.verified, frontmatter: o.frontmatter }));
+    const reads = rec.calls.filter((c) => c.rpc === 'resources/read'), gets = rec.calls.filter((c) => c.rpc === 'skills/get');
+    check('mcp v2 client (skills, ' + what + '): Mcp-Name on every resources/read (its uri), on no skills/get', reads.length === 22 && reads.every((c) => !!c.uri && c.name === c.uri) && gets.length === 5 && gets.every((c) => c.name === null), JSON.stringify(rec.calls.filter((c) => c.rpc !== 'resources/read').slice(0, 8)).slice(0, 300));
+    check('mcp v2 client (skills, ' + what + '): the invite is still unused', ((await row(name)) || {}).used === null, JSON.stringify(await row(name)));
+  }
+  {
+    const T = await invite('McpSkillsOld');
+    const a = new v1.Client({ name: 'apitest-v1-skills', version: '0.0.0' });
+    const ga = await withClient(a, new v1.Transport(url, { requestInit: { headers: { 'X-Invite-Token': T } } }), async () => a.getServerCapabilities());
+    const b = new v2.Client({ name: 'apitest-v2-skills-default', version: '0.0.0' });
+    const gb = await withClient(b, new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer ' + T } } }), async () => {
+      const sc = new SkillsClient(b);
+      return { caps: b.getServerCapabilities(), supported: sc.supported, listed: (await sc.list()).skills.length };
+    });
+    check('mcp v1 client (skills): over initialize the capabilities are tools only, no resources, no extensions', ga.ok && JSON.stringify(ga.out) === '{"tools":{}}', said(ga));
+    check('mcp v2 client by default (skills): over initialize no resources, no extensions, the SkillsClient not supported and listing nothing', gb.ok && JSON.stringify(gb.out.caps) === '{"tools":{}}' && gb.out.supported === false && gb.out.listed === 0, said(gb));
+    const c = new v2.Client({ name: 'apitest-v2-skills-bad', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } });
+    const gc = await withClient(c, new v2.StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: 'Bearer not-one-of-this-rooms-invites' } } }), async () => {
+      const sc = new SkillsClient(c);
+      const out = { supported: sc.supported };
+      try { await sc.list(); out.listed = true; } catch (e) { out.code = e.code; out.data = e.data; }
+      return out;
+    });
+    check('mcp v2 client (skills, pinned, a wrong token): connects, supported, and the listing is refused -32001 invite_invalid', gc.ok && gc.out.supported === true && gc.out.listed !== true && gc.out.code === -32001 && !!gc.out.data && gc.out.data.code === 'invite_invalid', said(gc));
+  }
+
   // The agent key's address, POST /api/mcp, with each library: a key from
   // two rooms' agent invites (this room's and one of its own), sent as
   // Authorization: Bearer. v1 and v2 by default open with initialize, v2
@@ -254,6 +302,10 @@ async function mcpClients(ctx) {
       const v2def = await run(new v2.Client({ name: 'apitest-v2-key', version: '0.0.0' }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }));
       const v2auto = await run(new v2.Client({ name: 'apitest-v2-key-auto', version: '0.0.0' }, { versionNegotiation: { mode: 'auto' } }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }));
       const v2pin = await run(new v2.Client({ name: 'apitest-v2-key-pin', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } }), new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }));
+      // the key's skills: the room address's listing, JSON-equal, every file read and verified
+      const ks = new v2.Client({ name: 'apitest-v2-key-skills', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } });
+      const gks = await withClient(ks, new v2.StreamableHTTPClientTransport(agentUrl, { requestInit: { headers } }), () => readSkills(new SkillsClient(ks)));
+      check('mcp clients, agent key (skills): the same listing as a room\'s address, every file read and verified', gks.ok && !!roomSkills && JSON.stringify(gks.out.listing) === JSON.stringify(roomSkills) && gks.out.verified === 22 && gks.out.gets.every(Boolean), said(gks));
       for (const [what, got, era] of [['v1', v1run, 'legacy'], ['v2 default', v2def, 'legacy'], ['v2 auto', v2auto, 'modern'], ['v2 pinned to ' + MODERN, v2pin, 'modern']]) {
         const o = got.out || {};
         check('mcp clients, agent key (' + what + '): connects to /api/mcp and is told it is the agent server', got.ok && o.era === era && !!o.server && o.server.name === 'agent-chat-agent' && /^All your Agent Chat rooms as tools, through your agent key\./.test(o.instructions || ''), said(got));
@@ -299,14 +351,35 @@ async function mcpClients(ctx) {
   // address, the sign-in address or a room's own. The approval in the
   // browser is scripted: the authorize page fetched, the person's decide
   // posted, the redirect handed back to the client.
-  await signinCases({ req, check, BASE, SUF, v1, v2, url, room, R });
+  await signinCases({ req, check, BASE, SUF, v1, v2, url, room, R, SkillsClient, roomSkills });
 
   await req('DELETE', R + '/invites', { owner: true });
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+/** The skills in the order skills/list gives them (worker/agents/skills/build.ts SKILL_ORDER). */
+const SKILL_NAMES = ['taking-part', 'staying-present', 'playing-games', 'room-board', 'sharing-files'];
+/** Through a SkillsClient: whether the server supports the extension, its listing, and, for each
+ *  skill, whether get equals the listed entry, and every file read (verified, SKILL.md's frontmatter
+ *  checked by the client: it throws on any difference). */
+async function readSkills(sc) {
+  const out = { supported: sc.supported, directoryRead: sc.directoryRead, gets: [], read: 0, verified: 0, frontmatter: 0 };
+  const listing = await sc.list();
+  Object.assign(out, { listing: listing.skills, invalid: listing.invalid.length, ttlMs: listing.ttlMs, cacheScope: listing.cacheScope });
+  for (const s of listing.skills) {
+    out.gets.push(JSON.stringify((await sc.get(s.uri)).skill) === JSON.stringify(s));
+    for (const r of s.resources) {
+      const f = await sc.read(s, r.uri);
+      out.read++;
+      if (f.verified) out.verified++;
+      if (r.uri === s.uri && f.frontmatter && f.frontmatter.name === s.frontmatter.name) out.frontmatter++;
+    }
+  }
+  return out;
+}
+
 async function signinCases(ctx) {
-  const { req, check, BASE, SUF, v1, v2, url, room, R } = ctx;
+  const { req, check, BASE, SUF, v1, v2, url, room, R, SkillsClient, roomSkills } = ctx;
   // the sign-in's issuer on this local server: its own address (worker/lib/oauth.ts signinOrigin)
   const ORIGIN = String(((await req('GET', '/.well-known/oauth-authorization-server')).json || {}).issuer || '');
   check('mcp clients, sign-in: the issuer is this local server\'s own address', ORIGIN === BASE, ORIGIN + ' ' + BASE);
@@ -400,6 +473,14 @@ async function signinCases(ctx) {
         if (a.back) {
           try { await g.transport.finishAuth(lib === 'v1' ? a.back.searchParams.get('code') : a.back.searchParams); } catch (e) { check('mcp ' + lib + ', K3: the code exchange', false, String(e && e.message)); }
           const g2 = await run(signinUrl, {}, signed, async (client) => ({ server: client.getServerVersion(), ...(await listOrCode(client)) }));
+          // signed in, the skills: the room address's listing, JSON-equal, every file read and verified
+          if (lib === 'v2') {
+            const sk = new v2.Client({ name: 'apitest-v2-oauth-skills', version: '0.0.0' }, { versionNegotiation: { mode: { pin: MODERN } } });
+            let gs;
+            try { await sk.connect(new v2.StreamableHTTPClientTransport(signinUrl, { authProvider: signed })); gs = { ok: true, out: await readSkills(new SkillsClient(sk)) }; } catch (e) { gs = { ok: false, error: e }; }
+            try { await sk.close(); } catch {}
+            check('mcp v2, K3 (skills): signed in at /api/mcp/signin, the same listing as a room\'s address, every file read and verified', gs.ok && !!roomSkills && JSON.stringify(gs.out.listing) === JSON.stringify(roomSkills) && gs.out.verified === 22 && gs.out.gets.every(Boolean), gs.ok ? JSON.stringify(gs.out.listing).slice(0, 200) : String(gs.error && gs.error.message));
+          }
           check('mcp ' + lib + ', K3: signed in: the sign-in server, its tools listed, no add_room', !g2.error && g2.out.server && g2.out.server.name === 'agent-chat-signin' && Array.isArray(g2.out.tools) && g2.out.tools.includes('list_rooms') && !g2.out.tools.includes('add_room') && g2.calls.every((c) => c.status !== 401), js(g2.out).slice(0, 200) + ' ' + String(g2.error && g2.error.message));
           // K4: the same provider, its tokens for the sign-in address, at /api/mcp beside a key header. v2 sends
           // the provider's token in place of the key, which the key's address refuses in band; v1 keeps the

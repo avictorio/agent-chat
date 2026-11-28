@@ -555,18 +555,18 @@ docs.txt section that owns its routes, caps and formats.
     against the body (400, -32020), the revision itself (400, -32022 with
     `data.supported`), the two required `_meta` keys (400, -32602, saying
     how to recover), the headers that must be there (400, -32020:
-    `MCP-Protocol-Version`, `Mcp-Method`, and on `tools/call` `Mcp-Name`,
-    decoded first when it is `=?base64?...?=`) and the method (404,
-    -32601: only `server/discover`, `tools/list` and `tools/call` are
+    `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` for the methods
+    of `MCP_NAME_SOURCE`, decoded first when it is `=?base64?...?=`) and
+    the method (404, -32601: only the methods of `MCP_MODERN_METHODS` are
     answered, and `ping` is not in that revision). The revision comes
     early because the protocol requires -32022 for one a server does not
     speak, a server cannot know what an unknown revision requires in
     `_meta`, and the official v2 client recovers only from -32022. Every
     result carries `resultType: "complete"` and
     `_meta["io.modelcontextprotocol/serverInfo"]`; `server/discover` and
-    `tools/list` carry `ttlMs` (0, and `MCP_TOOLS_TTL_MS`) and
-    `cacheScope` "private": the list is the same for everyone, but it is
-    answered only for a token. Notifications get a bare 202, with CORS, in
+    `tools/list` carry `ttlMs` (0, and `MCP_TOOLS_TTL_MS`), and the
+    skills' methods `MCP_SKILLS_TTL_MS`, and `cacheScope` "private": the
+    list is the same for everyone, but it is answered only for a token. Notifications get a bare 202, with CORS, in
     both kinds. A batch belongs to the `initialize` kind; one in which
     any element carries the claim in `_meta` (an `initialize` included)
     is refused whole (400, -32600).
@@ -666,6 +666,66 @@ docs.txt section that owns its routes, caps and formats.
     over MCP" section (errors and limits) say how to connect. No User-Agent is asked for: the edge rule (`AGENTS.md`
     section 7) lets any client through on the agent paths, and
     `tests/unit/docs.test.mjs` keeps every served text from asking.
+  - **Skills.** Over the per-request kind every MCP address (a room's, the
+    agent key's and the sign-in's) also serves the skills of `SKILL_ORDER`
+    (`worker/agents/skills.ts`; docs.txt SKILLS (OVER MCP)): `skills/list`,
+    `skills/get`, `resources/list`, `resources/templates/list` (empty) and
+    `resources/read`, the last five of `MCP_MODERN_METHODS`.
+    `server/discover` declares them (`mcpDiscoverCapabilities`: `resources`
+    and the extension `io.modelcontextprotocol/skills`, with no
+    `directoryRead`, so `resources/directory/read` is 404 -32601);
+    `initialize` keeps `capabilities: {tools: {}}`, and over the
+    `initialize` kind the five are answered as before (the credential's
+    -32001, else -32601). Each runs in `perRequest` after `mcpCheck`: its own
+    parameter check (a cursor, or a `uri` that is no non-empty string:
+    -32602 at HTTP 200), then `s.verdict()`, the verdict `tools/list` takes
+    (the one look the address made before the body: `lookupInvite` at a
+    room's address, which only reads; the key's or the sign-in's own open
+    elsewhere), then a result body of `worker/agents/skills.ts`, made of
+    `SERVED_SKILLS` alone. A URI no skill serves is -32602 after the
+    verdict, so a caller without a credential learns nothing of the skills;
+    lookups are exact matches in two `Map`s, never a property or a path.
+    `resources/read` needs `Mcp-Name` equal to its `uri` (`MCP_NAME_SOURCE`).
+    No `access()` and no other room method is asked, so listing or reading a
+    skill joins nothing, and nothing of the room, the credential or the
+    member is in an answer: the same bytes at every address and for every
+    caller (`tests/unit/mcp-modern.test.mjs`, `agent-mcp`, `signin-mcp`,
+    `skills-served`).
+    The files are generated: `npm run skills` (`scripts/skills.mjs`, with
+    `worker/agents/skills/build.ts`) builds them from the templates
+    (`skills/templates/NAME/SKILL.md`), the facts (`skills/facts.ts`) and the
+    game reference (`GAME_REFERENCES`: each game's games.txt section, and
+    docs.txt's GAMES - CHOOSING, included as served), and writes
+    `skills/served/` (the files, and `index.ts`, the one module the Worker
+    imports for them) and `skills/versions.json`; the deploy bundles the
+    committed files and runs none of it. A skill's `metadata.version` moves
+    with any change to its files: the generator refuses otherwise, and
+    `versions.json` keeps each version's manifest digest (the SHA-256 of its
+    `resources` as JSON) and only grows. A fact is verbatim (its text a
+    served sentence, found once in each source it names; one that begins
+    mid-sentence names its section of /api, `docs#HEADING`; one that stops
+    before its sentence ends leaves no limit word in the rest) or a
+    paraphrase (anchors: served sentences of five words or more, or a whole
+    source, that hold each of its terms and each of its `LIMIT_WORDS`; its
+    own text in none of its sources). `tests/unit/skills-build.test.mjs`
+    rebuilds and compares, holds every fact to the texts as served, and
+    checks the names (every snake_case word a tool, argument or enum value
+    of the three catalogs, or in `FIELD_WORDS`; arguments and actions only
+    through `{{arg}}` and `{{action}}`), the form and the bounds (`SKILL_*`
+    in `worker/limits.ts`), the games, the room-text sentence in every
+    skill, and the import graph. What no test can tell: whether a new anchor
+    says what the fact says; and a change to a clause of a served sentence
+    that no anchor holds passes every test, so an anchor holds the fact's
+    whole claim. When an anchor moves and the fact still holds, only the
+    anchor changes (no byte served), and `tests/api/differential.js` (run
+    against the live commit for any change under `worker/agents/skills/`,
+    `AGENTS.md` section 7) lists the fact and fails until it is in
+    `ANCHOR_ONLY_FACTS` with its new anchors, an entry that records that a
+    person read them against the fact and checks nothing more. The same
+    check fails a fact verbatim there and a paraphrase here with the same
+    text, and holds `versions.json` across the two checkouts: every version
+    recorded there kept here with its digest, changed files under a version
+    not recorded there, and no version moved with only its version line.
 
 - **Agent keys.** API: docs.txt AGENT KEYS. One credential that holds an
   agent's invites to several rooms, and one MCP address for all of them,
@@ -756,7 +816,8 @@ docs.txt section that owns its routes, caps and formats.
     that open), since a client can hold a body back as long as the
     platform lets it, and what the key may do is decided when the body is
     in. No batches, for anyone. A refused key is -32001 at HTTP 200 with
-    `agent_key_missing`, `not_agent_key` or `agent_key_invalid`.
+    `agent_key_missing`, `not_agent_key` or `agent_key_invalid`. Its skills
+    are the room address's (MCP, Skills), for a current key.
   - **Which calls join.** A room tool's call on a room on the key first
     makes the look the room's own address makes once per request
     (`lookupInvite`), then runs the same `roomToolAnswer` with the key's
@@ -1267,7 +1328,8 @@ docs.txt section that owns its routes, caps and formats.
     catalog (`mcpSigninCatalog`: the key's tools but `add_room`, with the
     descriptions and titles a connection needs swapped in,
     `MCP_SIGNIN_CATALOG_VERSION`) and instructions (`signinInstructions`);
-    every `tools/call` opens the sign-in again once its body is in. A
+    every `tools/call` opens the sign-in again once its body is in. Its
+    skills are the room address's (MCP, Skills), signed in. A
     connection holds exactly the rooms approved: `leave_room` also takes
     the room off it, and `remove_room` takes off only a refused room.
     Every answer carries `CORS_SIGNIN`.

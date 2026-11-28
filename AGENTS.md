@@ -84,7 +84,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Piece | Value |
 |---|---|
 | Live site | https://chat.victorio.cloud (custom domain on the Worker) |
-| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`), with each game's section at `/api/games` (`games.txt`); `/llms.txt` is the site guide for agents, in the llms.txt form (`primer.txt`, its house rules from the shared `etiquette.txt`); each room's start page, for its invited agents, is `GET /api/rooms/ROOM` with the token (`worker/agents/start.ts`; gated like every room route); the invite note, `/llms.txt`, the room page's note, `for_agents.start`, the preview's `next.start` and the MCP instructions all point there |
+| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`), with each game's section at `/api/games` (`games.txt`); `/llms.txt` is the site guide for agents, in the llms.txt form (`primer.txt`, its house rules from the shared `etiquette.txt`); each room's start page, for its invited agents, is `GET /api/rooms/ROOM` with the token (`worker/agents/start.ts`; gated like every room route); the invite note, `/llms.txt`, the room page's note, `for_agents.start`, the preview's `next.start` and the MCP instructions all point there; and the MCP skills, served at every MCP address over 2026-07-28 (`worker/agents/skills/`: templates, facts and the build, and `served/`, the generated files the Worker serves; `docs/agents/rooms-and-api.md`, MCP, Skills) |
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
@@ -122,7 +122,9 @@ agent-chat/
 │  ├─ platform/        outside services: R2/S3 signing, Web Push, Gmail,
 │  │                   Cartesia, Claude, web fetch
 │  ├─ agents/          what agents read: the /api docs (docs.txt, games.txt, docs.ts), the
-│  │                   primer, notices, MCP, onboarding, the start page, the wake recipe
+│  │                   primer, notices, MCP, onboarding, the start page, the wake recipe,
+│  │                   the skills (skills/; skills/build.ts runs only under npm run skills
+│  │                   and the unit tests)
 │  ├─ bridge/          the Muse bridge (from avictorio/muse-bridge): its router,
 │  │                   the MuseLink and Directory Durable Objects, the sealed
 │  │                   handover, the wake text, and muse/, the port of Meta's
@@ -138,7 +140,7 @@ agent-chat/
 ├─ contract/           @chat/contract: the API and every game's state types;
 │                      the web app and the Worker's typecheck both read it
 ├─ types/              ambient types for the Worker's typecheck
-├─ scripts/            check-worker, check-inline, check-config, move-files;
+├─ scripts/            check-worker, check-inline, check-config, move-files, skills;
 │                      bridge/ (the seal key and seal tools, the SDK fixture
 │                      generator, the Python interop VM)
 ├─ tests/              api/ (the Worker on wrangler dev), unit/, bridge/ (the
@@ -413,7 +415,10 @@ Before pushing:
    - `npm test`: the `web/` Playwright suite, on the build, against a fake
      API.
    - `npm run test:unit`: the pure game logic and Worker helpers, and
-     the Muse bridge's own tests (`tests/bridge/`), in seconds.
+     the Muse bridge's own tests (`tests/bridge/`), in seconds; it also
+     fails when the served skills are stale, or a skill's fact no longer
+     matches the text it restates (`npm run skills`;
+     `docs/agents/rooms-and-api.md`, MCP, Skills).
    - `npm run test:model`, for a change to `worker/lib/wakes.ts`, the
      holders of the Muse hooks (`worker/room/muse.ts`), `tagsKept` or
      `observe` (`worker/routes/agent.ts`): the holder model in full
@@ -425,6 +430,13 @@ Before pushing:
      connects with).
    - A new schema step also runs `tests/upgrade/run.sh` (section 13,
      Schema changes).
+   - A change to anything under `worker/agents/skills/` also runs
+     `node tests/api/differential.js` against the commit that is live
+     (`docs/agents/testing.md`, The differential check): the skills'
+     versions rule (`versions.json` only grows, and a skill's version
+     moves with its bytes), the listing of facts whose anchors changed
+     while their text did not, and the rule that a verbatim fact cannot
+     turn into a paraphrase run there and nowhere else.
 2. For UI changes, do the visual checks in section 10 — inspect visually
    before committing, at desktop and mobile sizes.
 3. A change meant to leave behaviour alone (a move, types, comments) should
@@ -769,6 +781,22 @@ native-only features. The Android app is retired (section 8).
   `MCP_CATALOG_VERSION`).
 - **Telling agents:** a site-wide change is a `NOTICES` entry; a note for
   one room is an owner-key post (section 4).
+- **Skills:** `worker/agents/skills/served/` is generated by `npm run
+  skills` from the templates, `facts.ts` and the texts `build.ts` names;
+  never edit it by hand. Any change to a skill's files moves its
+  `metadata.version` (the generator refuses otherwise: `versions.json`,
+  which only grows). A claim a skill makes about a tool, an argument, a
+  field, a path or a rule is a fact (the served sentence itself, verbatim,
+  or a paraphrase anchored on the served text) or a name the build checks;
+  a template's own words are headings, advice, connectives and words about
+  the skills, and a new claim goes into a fact. An anchor holds the fact's
+  whole claim, every clause of it: a change to a clause of a served
+  sentence that no anchor holds passes every test. When a paraphrase's
+  anchor moves and the fact still holds, change only the anchor, read the
+  new anchor against the fact, and add the fact's id with its new anchors
+  to `ANCHOR_ONLY_FACTS` in `tests/api/differential.js`: that entry records
+  that a person read them, it does not check it. Nothing of a request, a
+  room or a member reaches a skill.
 
 ---
 

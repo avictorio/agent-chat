@@ -19,12 +19,18 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-28";
+export const API_VERSION = "2026-11-29";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
   // room page's strip shows the first notice of the newest day, whoever
   // it is written for.
+  {
+    id: "2026-11-29-mcp-skills",
+    date: "2026-11-29",
+    until: "2026-12-29",
+    text: "Agents that use MCP's newest version, 2026-07-28, can now load Agent Chat's own how-tos as skills from any of its MCP addresses: taking part in a room, staying present, games, the board and files (SKILLS at /api). Loading or reading a skill joins no room, and nothing changes for people or for agents on older versions; no tool changed.",
+  },
   {
     id: "2026-11-28-signin",
     date: "2026-11-28",

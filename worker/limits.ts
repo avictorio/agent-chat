@@ -162,6 +162,33 @@ export const REFUSED_DRAIN_MAX = 8 * MIB;
  *  client that meets a tool it does not know may list again sooner. A cache
  *  hint, not a limit on anyone. */
 export const MCP_TOOLS_TTL_MS = 3600000;
+/** How long a client may keep the answers of the skills' methods (skills/list,
+ *  skills/get, resources/list, resources/templates/list, resources/read: their
+ *  ttlMs): the files change only with a deploy, and a host holding a stale
+ *  entry recovers by itself (the MCP Skills extension: it calls skills/get for
+ *  that skill again). A cache hint, not a limit on anyone. */
+export const MCP_SKILLS_TTL_MS = 3600000;
+// The bounds npm run skills (worker/agents/skills/build.ts) holds the served
+// skills to, each tighter than the limit it stands for. They bound the site's
+// own files, not anything a member sends.
+/** Skills per server: Claude Code shows up to 100 skills per server. */
+export const SKILLS_MAX = 100;
+/** Files per skill: the MCP Skills extension's "Resources per skill", 512
+ *  entries (a server should not serve a skill past it). */
+export const SKILL_FILES_MAX = 512;
+/** Bytes per SKILL.md and per supporting file: far under Claude Code's 100 KB
+ *  per text file of a scanned skill. */
+export const SKILL_MD_MAX = 16000;
+export const SKILL_FILE_MAX = 16000;
+/** Lines per SKILL.md: the Agent Skills format asks for a SKILL.md under 500
+ *  lines. */
+export const SKILL_MD_LINES_MAX = 500;
+/** Bytes per skill, its files together: a quarter of Claude Code's 400 KB per
+ *  scanned skill, whether a KB is 1,000 or 1,024 bytes (the extension's own
+ *  bound is 16 MiB). */
+export const SKILL_TOTAL_MAX = 100000;
+/** Characters of a skill's description: the Agent Skills format's 1-1024. */
+export const SKILL_DESCRIPTION_MAX = 1024;
 /** The most characters an MCP refusal repeats of a value the request sent
  *  (a header, a method, a tool name), "..." added past it. */
 export const MCP_ECHO_MAX = 128;

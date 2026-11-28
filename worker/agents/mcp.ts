@@ -102,8 +102,12 @@ export const MCP_META_VERSION = "io.modelcontextprotocol/protocolVersion";
 export const MCP_META_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
 export const MCP_META_SERVER = "io.modelcontextprotocol/serverInfo";
 /** The methods answered over those revisions; anything else is 404 -32601
- *  (ping is not in them). */
-export const MCP_MODERN_METHODS = ["server/discover", "tools/list", "tools/call"];
+ *  (ping is not in them). The last five serve the skills (agents/skills.ts). */
+export const MCP_MODERN_METHODS = ["server/discover", "tools/list", "tools/call", "resources/list", "resources/templates/list", "resources/read", "skills/list", "skills/get"];
+/** The methods whose Mcp-Name header must name what the request is about, and
+ *  the params field it must equal (the transport's Standard Request Headers),
+ *  for the methods this endpoint answers. */
+export const MCP_NAME_SOURCE: Record<string, string> = { "tools/call": "name", "resources/read": "uri" };
 /** Who answers, for initialize's serverInfo and every per-request result's
  *  _meta: one object for both. @param origin the site's origin */
 export function mcpServerInfo(origin: string) {
@@ -227,14 +231,18 @@ export function mcpCheck(req: Body, get: (name: string) => string | null, spoken
   // 8 to 12: the headers that must be there
   if (header === null) return no(400, -32020, "Header mismatch: the MCP-Protocol-Version header is missing; it must equal " + MCP_META_VERSION + " in params._meta.");
   if (mcpMethod === null) return no(400, -32020, "Header mismatch: the Mcp-Method header is missing; it must equal the request's method.");
-  // Mcp-Name only where params.name is a string: any other name gets the
-  // method's own refusal ("tools/call needs params.name", in-band)
-  if (method === "tools/call" && params && typeof params.name === "string") {
+  // Mcp-Name on the methods of MCP_NAME_SOURCE (an own key, so constructor
+  // is none), only where its field is a string: any other value gets the
+  // method's own refusal ("tools/call needs params.name", in-band); on every
+  // other method the header is not read
+  const field = Object.hasOwn(MCP_NAME_SOURCE, method) ? MCP_NAME_SOURCE[method] : null;
+  const named = field !== null && params ? params[field] : undefined;
+  if (field !== null && typeof named === "string") {
     const sent = get("Mcp-Name");
-    if (sent === null) return no(400, -32020, "Header mismatch: the Mcp-Name header is missing; on tools/call it must equal params.name.");
+    if (sent === null) return no(400, -32020, "Header mismatch: the Mcp-Name header is missing; on " + method + " it must equal params." + field + ".");
     const name = mcpDecodeName(sent);
     if (name === undefined) return no(400, -32020, "Header mismatch: the Mcp-Name header's =?base64?...?= value is not Base64 of UTF-8 text.");
-    if (name !== params.name) return no(400, -32020, "Header mismatch: Mcp-Name header value '" + mcpEcho(name) + "' does not match body value '" + mcpEcho(params.name) + "'");
+    if (name !== named) return no(400, -32020, "Header mismatch: Mcp-Name header value '" + mcpEcho(name) + "' does not match body value '" + mcpEcho(named) + "'");
   }
   // 13: a method this endpoint answers
   if (!MCP_MODERN_METHODS.includes(method)) return no(404, -32601, "Method not found: " + mcpEcho(method));

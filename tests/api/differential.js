@@ -29,7 +29,19 @@
 // Content-Security-Policy may differ only by CSP_ADDED on the answers
 // CSP_CHANGED names, a path this checkout adds (NEW_PATHS) must have been
 // the other's unknown-path 404, and a preflight this checkout answers with
-// its own CORS (PREFLIGHT_CHANGED) the other's generic one.
+// its own CORS (PREFLIGHT_CHANGED) the other's generic one. The MCP skills'
+// methods (worker/agents/skills.ts) are sent to both, at a room's address
+// and the agent key's, for every file this checkout serves: against a
+// checkout that serves none (NEW_METHODS) the other's answer must be the
+// unknown method's 404; otherwise they are compared, but for a skill whose
+// version moved. server/discover's capabilities may differ only by
+// EXPECTED_ANSWER_EDITS. After the compare, two rules about the skills
+// across the two checkouts: the versions rule (versions.json only grows, and
+// a skill's bytes and its version move together) and the facts rule (a fact
+// whose text stays while its anchors or sources change is listed, and passes
+// only when ANCHOR_ONLY_FACTS names it with those new anchors: a person's
+// record of having read them against the fact, which nothing checks; a fact
+// verbatim there and a paraphrase here with the same text fails).
 // Everything else must be identical.
 //
 //   node tests/api/differential.js /path/to/earlier-checkout
@@ -47,20 +59,24 @@ const OTHER = process.argv[2];
 if (!OTHER) { console.error('usage: node tests/api/differential.js /path/to/earlier-checkout'); process.exit(2); }
 
 /** The sections of /api this checkout adds, by heading: taken out whole
- *  (up to the next section's heading) before the compare. Against fc84da6:
- *  none. */
-const ADDED_SECTIONS = [];
+ *  (up to the next section's heading) before the compare. Against 1f2b85b:
+ *  the skills' section. */
+const ADDED_SECTIONS = ['SKILLS (OVER MCP)'];
 /** The sections of /api this checkout rewrites, by heading: taken out of
  *  both copies before the compare. */
 const CHANGED_SECTIONS = [];
 /** The edits this checkout makes to /api and /llms.txt, taken out of its
  *  copy before the compare: [the text this checkout serves, the text the
  *  other serves], filled with the origin and the limits as served (fill).
- *  Against fc84da6: SIGNING IN's sentence on how an app is added, which
- *  now covers an app that publishes no client document (docs.txt). */
+ *  Against 1f2b85b: the skills' methods in START HERE and ROOM TOOLS, and
+ *  GAMES - EVERY MATCH's sentence on what create_game and submit_move take
+ *  over MCP (docs.txt). */
 const EXPECTED_DOC_EDITS = [
-  ["  site's owner after checking its client document and the host it is served from, or, for an app\n  that publishes none, its own requests and the address it returns to. Agent keys keep\n",
-    "  site's owner after checking its client document and the host it is served from. Agent keys keep\n"],
+  ["      initialize, server/discover, ping, notifications, tools/list, the skills' methods\n      (SKILLS), get_invite and get_start_page; and on the agent key's address (AGENT KEYS)\n      initialize, server/discover, ping, notifications, tools/list, the skills' methods,\n      list_rooms, whats_waiting, add_room, remove_room,\n",
+    "      initialize, server/discover, ping, notifications, tools/list, get_invite and\n      get_start_page; and on the agent key's address (AGENT KEYS) initialize, server/discover,\n      ping, notifications, tools/list, list_rooms, whats_waiting, add_room, remove_room,\n"],
+  ["      Mcp-Name, resources/read its uri). server/discover answers anyone, as initialize does;\n      tools/list, tools/call and the skills' methods (SKILLS) need your token. A request that\n      breaks those rules gets the protocol's own error: HTTP\n",
+    "      Mcp-Name). server/discover answers anyone, as initialize does; tools/list and tools/call\n      need your token. A request that breaks those rules gets the protocol's own error: HTTP\n"],
+  ["  Over MCP, create_game takes the fields of the POST /games body as its arguments, and submit_move\n  the fields of the moves body.\n", ""],
 ];
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
@@ -70,16 +86,26 @@ const EXPECTED_SENTENCE_EDITS = [];
 /** The pages whose markup this checkout changes, by label: [this
  *  checkout's, the other's], each taken out of this checkout's copy before
  *  the compare, the words and headers compared as they are. Against
- *  fc84da6: the sign-in's fixed page (GET /oauth/authorize with no app is
- *  the unknown-app page), which now follows the reader's light or dark
- *  setting (worker/routes/oauth.ts fixedPage). */
-const PAGE_EDITS = {
-  'GET /oauth/authorize': [
-    ['<html lang="en" style="color-scheme:light dark">', '<html lang="en">'],
-    ['<meta name="color-scheme" content="light dark">', ''],
-    ['<body style="background:Canvas;color:CanvasText;', '<body style="'],
-  ],
-};
+ *  1f2b85b: none. */
+const PAGE_EDITS = {};
+/** The parts this checkout changes in existing answers: [this checkout's,
+ *  the other's], taken out of this checkout's copy of every answer whose
+ *  label holds server/discover. Against 1f2b85b: server/discover declares
+ *  the resources capability and the skills extension. */
+const EXPECTED_ANSWER_EDITS = [['"capabilities":{"tools":{},"resources":{},"extensions":{"io.modelcontextprotocol/skills":{}}}', '"capabilities":{"tools":{}}']];
+/** The MCP methods this checkout adds over 2026-07-28, which the other did
+ *  not serve: each request of these (tagged where it is sent) is sent to
+ *  both, the other's answer checked to be 404 -32601 "Method not found: M",
+ *  and this one's not compared (the suites check it). Against a checkout
+ *  that serves the skills: empty. Against 1f2b85b: the skills' five. */
+const NEW_METHODS = new Set(['skills/list', 'skills/get', 'resources/list', 'resources/templates/list', 'resources/read']);
+/** The facts whose anchors (or verbatim sources) this checkout changes while
+ *  their text stays: [id, the anchors (or sources) exactly as this checkout's
+ *  facts.ts holds them], each put here by the person who has read those new
+ *  anchors against the fact. The facts rule prints every such fact and fails
+ *  for one not here, or here with other anchors, and for an entry it did not
+ *  print. Against 1f2b85b, which has no facts.ts: none. */
+const ANCHOR_ONLY_FACTS = [];
 /** The answers whose retry time is the seconds left in a counter's window,
  *  which moves with the run (the two servers are asked a while apart): that
  *  number masked in both copies, the Retry-After header and the body's
@@ -87,6 +113,11 @@ const PAGE_EDITS = {
 const MOVING_RETRY = new Set(['agent POST /api/agents, over the per-network cap']);
 /** The limits (worker/limits.ts), loaded before the runs. */
 let LIM;
+/** The skills' requests both servers are sent, at a room's address and the
+ *  key's: [label, method, params, Mcp-Name], every file of this checkout's
+ *  SERVED_SKILLS (worker/agents/skills/served/index.ts), loaded before the
+ *  runs, so both receive the same list. */
+let SKILL_REQUESTS = [];
 /** Response headers that differ per run or per connection, left out of the compare. */
 const VOLATILE_HEADERS = new Set(['date', 'content-length', 'connection', 'keep-alive', 'transfer-encoding', 'cf-ray', 'server', 'report-to', 'nel', 'alt-svc']);
 /** The answers whose Content-Security-Policy this checkout extends (the app
@@ -136,7 +167,7 @@ async function scenario(srv, muse, suf) {
     const text = await r.text();
     const kept = {};
     for (const [k, v] of r.headers) if (!VOLATILE_HEADERS.has(k)) kept[k] = v;
-    out.push({ label, status: r.status, type: r.headers.get('content-type') || '', text, headers: kept });
+    out.push({ label, status: r.status, type: r.headers.get('content-type') || '', text, headers: kept, skills: o.skills });
     let json = null;
     try { json = JSON.parse(text); } catch { /* not JSON: text pages */ }
     return { status: r.status, json, text };
@@ -189,11 +220,19 @@ async function scenario(srv, muse, suf) {
     await send('mcp tools/call get_invite 2026-07-28, ' + what, 'POST', p, Object.assign({}, c, { json: modern('tools/call', { name: 'get_invite', arguments: {} }), headers: mh('tools/call', 'get_invite') }));
     await send('mcp unknown tool, ' + what, 'POST', p, Object.assign({}, c, { json: legacy('tools/call', { name: 'no_such_tool', arguments: {} }) }));
     await send('mcp a batch, ' + what, 'POST', p, Object.assign({}, c, { json: [legacy('ping', {}, 1), legacy('tools/list', {}, 2)] }));
+    // the skills' methods over the initialize kind: answered as they always were
+    await send('mcp resources/list, ' + what, 'POST', p, Object.assign({}, c, { json: legacy('resources/list') }));
+    await send('mcp skills/list, ' + what, 'POST', p, Object.assign({}, c, { json: legacy('skills/list') }));
   }
   await send('mcp GET', 'GET', R + '/mcp', { token: ag });
   await send('mcp not JSON', 'POST', R + '/mcp', { token: ag, body: '{nope', headers: { 'Content-Type': 'application/json' } });
   await send('mcp header mismatch', 'POST', R + '/mcp', { token: ag, json: modern('tools/list'), headers: { 'MCP-Protocol-Version': '2099-01-01', 'Mcp-Method': 'tools/list' } });
   await send('mcp unspoken revision', 'POST', R + '/mcp', { token: ag, json: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: { [V]: '2099-01-01', [C]: {} } } }, headers: { 'MCP-Protocol-Version': '2099-01-01', 'Mcp-Method': 'tools/list' } });
+  // the skills' methods over 2026-07-28 with the active invite, every file this checkout serves
+  const skillCalls = async (prefix, p, o) => {
+    for (const [label, method, params, name] of SKILL_REQUESTS) await send(prefix + label, 'POST', p, Object.assign({}, o, { json: modern(method, params), headers: Object.assign({}, o.headers || {}, mh(method, name)), skills: { method, uri: params.uri } }));
+  };
+  await skillCalls('mcp skills ', R + '/mcp', { token: ag });
   // one tools/call per tool, as the active agent, in catalog order
   const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==';
   const calls = [
@@ -252,6 +291,8 @@ async function scenario(srv, muse, suf) {
     await send('agent mcp tools/list 2026-07-28, ' + what, 'POST', '/api/mcp', { headers: Object.assign({}, h, mh('tools/list')), json: modern('tools/list') });
     await send('agent mcp tools/call whoami, ' + what, 'POST', '/api/mcp', { headers: h, json: legacy('tools/call', { name: 'whoami', arguments: { room } }) });
   }
+  // the skills' methods over 2026-07-28 with the current key, every file this checkout serves
+  await skillCalls('agent mcp skills ', '/api/mcp', { headers: kh });
   for (const [name, args] of [['list_rooms', {}], ['get_start_page', { room }], ['get_invite', { room: room2 }], ['whats_waiting', {}], ['get_members', { room }], ['add_room', { room: room2, token: k3 }], ['remove_room', { room: room2 }], ['add_room', { room: room2, token: k3 }], ['post_message', { room, text: 'through the key', client_msg_id: 'k1' }], ['no_such_tool', { room }], ['whoami', { room: 'difftest-none-' + suf }]]) {
     await send('agent mcp tools/call ' + name + ' ' + JSON.stringify(args).replace(/"token":"[^"]+"/, '"token":"T"'), 'POST', '/api/mcp', { headers: kh, json: legacy('tools/call', { name, arguments: args }) });
   }
@@ -376,6 +417,14 @@ function masked(text, tokens) {
   // the limits the expected edits quote, from limits.ts (the unit tests' module hooks load it)
   register('../unit/txt-hooks.mjs', pathToFileURL(__filename));
   LIM = await import('../../worker/limits.ts');
+  const { SERVED_SKILLS } = await import('../../worker/agents/skills/served/index.ts');
+  SKILL_REQUESTS = [
+    ['skills/list 2026-07-28', 'skills/list', {}],
+    ['skills/get ' + SERVED_SKILLS[0].uri, 'skills/get', { uri: SERVED_SKILLS[0].uri }],
+    ['resources/list 2026-07-28', 'resources/list', {}],
+    ['resources/templates/list 2026-07-28', 'resources/templates/list', {}],
+    ...SERVED_SKILLS.flatMap((s) => s.files.map((f) => ['resources/read ' + f.uri, 'resources/read', { uri: f.uri }, f.uri])),
+  ];
   const mine = require('./server.js');
   const theirs = require(path.resolve(OTHER, 'tests', 'api', 'server.js'));
   // one fake Muse for both bridges (a gadget's account is its own per server)
@@ -397,9 +446,34 @@ function masked(text, tokens) {
     const origin = String((JSON.parse(rb.out.find((x) => x.label === '/api/changes').text).url || '')).replace(/\/api\/changes$/, '');
     const fill = (s) => s.replace(/\{\{origin\}\}/g, origin).replace(/\{\{MUSE_BATCH_MAX\}\}/g, String(LIM.MUSE_BATCH_MAX)).replace(/\{\{room2\}\}/g, 'difftest2-' + suf);
     if (ra.out.length !== rb.out.length) { console.log('FAIL the two runs sent different numbers of requests: ' + ra.out.length + ', ' + rb.out.length); process.exit(1); }
+    // each server's skills, as its skills/list answered at the room's address (none from one that serves none)
+    const listing = (r) => { const hit = r.out.find((o) => o.label === 'mcp skills skills/list 2026-07-28'); try { const j = JSON.parse(hit.text); return j.result && Array.isArray(j.result.skills) ? j.result.skills : null; } catch { return null; /* no skills there */ } };
+    const skillsA = listing(ra), skillsB = listing(rb);
+    const versionOf = (list, name) => { const e = (list || []).find((s) => s.frontmatter && s.frontmatter.name === name); return e ? e.frontmatter.metadata.version : null; };
+    const skillOfUri = (uri) => String(uri).replace(/^skill:\/\/agent-chat\//, '').split('/')[0];
+    /** the skills whose version moved between the two (a skill new here among them): their entries and files are not compared */
+    const moved = new Set((skillsB || []).map((s) => s.frontmatter.name).filter((n) => skillsA && versionOf(skillsA, n) !== versionOf(skillsB, n)));
     for (let i = 0; i < ra.out.length; i++) {
       const x = ra.out[i], y = rb.out[i];
       let tx = masked(x.text, ra.tokens), ty = masked(y.text, rb.tokens);
+      if (y.skills && NEW_METHODS.has(y.skills.method)) {
+        // a method the other checkout did not serve: it answered the unknown method's 404
+        compared++;
+        let e = null;
+        try { e = JSON.parse(x.text).error; } catch { /* not JSON: refused below */ }
+        if (x.status !== 404 || !e || e.code !== -32601 || e.message !== 'Method not found: ' + y.skills.method) { diffs++; console.log('FAIL ' + x.label + ': the earlier checkout answered ' + x.status + ' ' + JSON.stringify(x.text.slice(0, 80)) + ', not the unknown method\'s 404 -32601'); }
+        continue;
+      }
+      if (y.skills && moved.size) {
+        // a skill whose version moved: its entries and files are left out of the compare
+        if (y.skills.uri !== undefined && moved.has(skillOfUri(y.skills.uri))) { leftOut('the files and entry of a skill whose version moved (' + skillOfUri(y.skills.uri) + ')', y.label); continue; }
+        const drop = (t, key) => { try { const j = JSON.parse(t); if (j.result && Array.isArray(j.result[key])) j.result[key] = j.result[key].filter((e) => !moved.has(e.frontmatter ? e.frontmatter.name : skillOfUri(e.uri))); return JSON.stringify(j); } catch { return t; /* not a list: compared as it is */ } };
+        const key = y.skills.method === 'skills/list' ? 'skills' : y.skills.method === 'resources/list' ? 'resources' : null;
+        if (key) { const before = tx + ty; tx = drop(tx, key); ty = drop(ty, key); if (before !== tx + ty) leftOut('the entries of the skills whose version moved (' + [...moved].join(', ') + ')', y.label); }
+      }
+      if (y.label.includes('server/discover')) {
+        EXPECTED_ANSWER_EDITS.forEach(([now, was], e) => { if (ty.includes(now)) { ty = ty.split(now).join(was); leftOut('answer edit ' + (e + 1) + ' (' + JSON.stringify(now.slice(0, 56)) + '...)', y.label); } });
+      }
       if (NEW_PATHS.has(y.label)) {
         // a path the other checkout did not serve: it answered the unknown path's 404
         compared++;
@@ -480,6 +554,64 @@ function masked(text, tokens) {
         console.log('FAIL ' + x.label + ': ' + x.status + ' ' + x.type + ' / ' + y.status + ' ' + y.type + '\n  earlier: ...' + tx.slice(Math.max(0, k - 80), k + 160) + '\n  this:    ...' + ty.slice(Math.max(0, k - 80), k + 160));
       }
     }
+    // The versions rule (worker/agents/skills/versions.json, which only grows): every version the other
+    // checkout recorded is recorded here with the same manifest digest; a skill whose files differ
+    // between the two servers carries a version the other had not recorded; and a skill whose version
+    // moved changed more than its version line.
+    const fs = require('fs');
+    const crypto = require('crypto');
+    const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; /* none there */ } };
+    const vA = readJson(path.resolve(OTHER, 'worker', 'agents', 'skills', 'versions.json')), vB = readJson(path.join(__dirname, '..', '..', 'worker', 'agents', 'skills', 'versions.json'));
+    const ruleFail = (s) => { diffs++; console.log('FAIL ' + s); };
+    if (!vB) ruleFail('versions: this checkout has no worker/agents/skills/versions.json: run npm run skills');
+    if (!vA) console.log('note versions: the earlier checkout records no skill versions (no worker/agents/skills/versions.json: it serves no skills), so nothing holds this one to an earlier record');
+    else {
+      for (const [name, versions] of Object.entries(vA)) {
+        for (const [v, d] of Object.entries(versions)) {
+          const here = vB && vB[name] ? vB[name][v] : undefined;
+          if (here !== d) ruleFail('versions: ' + name + ' version ' + v + ' is recorded in the earlier checkout with ' + d + (here ? ', and here with ' + here : ', and not here') + ': an earlier entry was rewritten or deleted; put it back as it was published, and move the skill\'s metadata.version instead');
+        }
+      }
+      const manifest = (e) => crypto.createHash('sha256').update(JSON.stringify(e.resources)).digest('hex');
+      const fileText = (r, uri) => { const hit = r.out.find((o) => o.label === 'mcp skills resources/read ' + uri); try { const j = JSON.parse(hit.text); return j.result ? j.result.contents[0].text : null; } catch { return null; /* not served there */ } };
+      for (const e of skillsB || []) {
+        const name = e.frontmatter.name, o = (skillsA || []).find((s) => s.frontmatter.name === name);
+        if (!o) continue;
+        const version = e.frontmatter.metadata.version;
+        if (manifest(o) !== manifest(e) && Object.hasOwn(vA[name] || {}, version)) ruleFail('versions: ' + name + '\'s files differ from the earlier checkout\'s, but it carries version ' + version + ', which that checkout recorded: move its metadata.version to a new one (npm run skills says which)');
+        if (moved.has(name)) {
+          const unversioned = (t) => (t === null ? null : t.replace(/^ {2}version: "\d+"$/m, '  version: "N"'));
+          const same = JSON.stringify(o.resources.map((r) => r.uri)) === JSON.stringify(e.resources.map((r) => r.uri)) && e.resources.every((r) => fileText(ra, r.uri) !== null && unversioned(fileText(ra, r.uri)) === unversioned(fileText(rb, r.uri)));
+          if (manifest(o) === manifest(e) || same) ruleFail('versions: ' + name + '\'s version moved from ' + versionOf(skillsA, name) + ' to ' + version + ', but nothing else in its files changed: a version moved for nothing');
+          else console.log('note versions: ' + name + ' moved from version ' + versionOf(skillsA, name) + ' to ' + version + ' with its files');
+        }
+      }
+    }
+    // The facts rule (worker/agents/skills/facts.ts): a fact whose text stays the same while its anchors
+    // (or verbatim sources) change is printed, for a person to read the new anchors against it; it
+    // passes only when ANCHOR_ONLY_FACTS holds it with exactly those anchors, and every entry there
+    // must be printed. A fact verbatim there and a paraphrase here with the same text fails: its
+    // sentence is no longer served, so its text, and its skill's version, must change.
+    const theirFile = path.resolve(OTHER, 'worker', 'agents', 'skills', 'facts.ts');
+    const factsHere = (await import('../../worker/agents/skills/facts.ts')).FACTS;
+    const factsThere = fs.existsSync(theirFile) ? (await import(pathToFileURL(theirFile).href)).FACTS : null;
+    const printed = new Set();
+    if (!factsThere) console.log('note facts: the earlier checkout has no worker/agents/skills/facts.ts (it serves no skills): no fact to compare');
+    else {
+      for (const [id, f] of Object.entries(factsHere)) {
+        const o = Object.hasOwn(factsThere, id) ? factsThere[id] : null;
+        if (!o || o.text !== f.text) continue;
+        const was = o.anchors || o.verbatim, now = f.anchors || f.verbatim;
+        if (JSON.stringify(was) === JSON.stringify(now) && !!o.anchors === !!f.anchors) continue;
+        printed.add(id);
+        console.log('facts: ' + id + ' keeps its text and changes its ' + (f.anchors ? 'anchors' : 'sources') + '\n  text: ' + f.text + '\n  was:  ' + JSON.stringify(was) + '\n  now:  ' + JSON.stringify(now));
+        if (o.verbatim && f.anchors) { ruleFail('facts: ' + id + ' was verbatim in the earlier checkout and is a paraphrase here with the same text: the sentence it was is no longer served, so change its text (and move its skill\'s metadata.version)'); continue; }
+        const entry = ANCHOR_ONLY_FACTS.find(([x]) => x === id);
+        if (!entry) ruleFail('facts: ' + id + '\'s anchors changed while its text did not: read the new anchors against the fact and, if they state all of it, add [' + JSON.stringify(id) + ', its anchors as facts.ts holds them] to ANCHOR_ONLY_FACTS');
+        else if (JSON.stringify(entry[1]) !== JSON.stringify(now)) ruleFail('facts: ANCHOR_ONLY_FACTS holds ' + id + ' with other anchors than facts.ts does: copy the anchors that were read');
+      }
+    }
+    for (const [id] of ANCHOR_ONLY_FACTS) if (!printed.has(id)) ruleFail('facts: ANCHOR_ONLY_FACTS names ' + id + ', whose anchors did not change against the earlier checkout: take it out (the list is written for each release)');
   } finally {
     a.stop();
     b.stop();

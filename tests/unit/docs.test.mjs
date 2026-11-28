@@ -685,7 +685,8 @@ test("/api says how a client of revision 2026-07-28 connects, and which of its c
   for (const want of ["io.modelcontextprotocol/protocolVersion", "io.modelcontextprotocol/clientCapabilities", "server/discover answers anyone, as initialize does", "-32020", "-32022", "data.supported", "-32602", "-32601", "Older revisions open with initialize", "Most client libraries open with initialize; some probe server/discover first. Both work here.", "claude mcp add --transport http agent-chat \\ https://example.test/api/rooms/ROOM/mcp --header \"Authorization: Bearer TOKEN\"", "in its settings file (which keeps the token off command lines)", "Any Origin is accepted.", "initialize, server/discover and tools/list carry a catalog {version, digest}", "Without a valid token only initialize, ping (older revisions) and server/discover are answered", "leaving the room", "stay on REST"]) assert.ok(tools.includes(want), "ROOM TOOLS lacks " + want);
   assert.ok(!/\b(modern|legacy|eras?)\b/i.test(tools), "ROOM TOOLS uses the protocol's words for its two kinds of revision");
   const look = sectionOf(full, "START HERE").replace(/\s+/g, " ");
-  assert.ok(look.includes("over MCP initialize, server/discover, ping, notifications, tools/list, get_invite and get_start_page;"), "Only look names server/discover");
+  assert.ok(look.includes("over MCP initialize, server/discover, ping, notifications, tools/list, the skills' methods (SKILLS), get_invite and get_start_page;"), "Only look names server/discover and the skills' methods");
+  assert.ok(look.includes("on the agent key's address (AGENT KEYS) initialize, server/discover, ping, notifications, tools/list, the skills' methods, list_rooms,"), "and the key's address too");
   assert.ok(look.includes("a method the route does not take on .../me, .../stream, .../agent-recipe or .../mcp, an MCP tools/call that names no tool in the catalog, and GET .../stream"), "the refuse-first list names the unknown tool");
   assert.ok(look.includes("Join: every other room call with your token, every other MCP tool call, and every other tool call through an agent key, in the room it names."), "the join sentence names the agent key's calls too");
   assert.ok(sectionOf(full, "SITE CHANGES").replace(/\s+/g, " ").includes("the MCP initialize and server/discover results carry changes as {\"api_version\", \"catalog_version\", \"url\"}"), "SITE CHANGES names server/discover");
@@ -748,4 +749,23 @@ test("/api says a key's take-off and disconnect let go of its Muse wakes, and wh
   ]) assert.ok(keys.includes(want), "AGENT KEYS lacks " + want);
   assert.ok(errs.includes("a room has not confirmed that your key has let go of the Muse wake it set up there") && errs.includes("taking the room off or disconnecting lets go of it either way"), "the errors say let go");
   assert.ok(muse.includes("A hook you set with your room's own token stays when a key or connection that also set it up for your seat lets go of it (one exception, for a hook set before 23:00 UTC on 2026-11-27: AGENT KEYS)."), "MUSE DELIVERY says a hook of the room's own token stays, and points at the one exception");
+});
+
+// The skills (worker/agents/skills.ts): /api's SKILLS (OVER MCP) section
+// sits between ROOM TOOLS and AGENT KEYS and says at which addresses and over
+// which revision they are served (MCP_MODERN, from MCP_MODERN_VERSIONS), the
+// methods, that each takes tools/list's credential and joins nothing, and
+// what an unknown URI and resources/directory/read answer; ROOM TOOLS names
+// resources/read's Mcp-Name and the skills' credential, and GAMES - EVERY
+// MATCH what create_game and submit_move take over MCP (tests/unit/
+// skills-build.test.mjs holds that last one to games.txt's bodies).
+test("/api's SKILLS section, and the sentences ROOM TOOLS and GAMES - EVERY MATCH gained", () => {
+  const full = docs("https://example.test");
+  const order = ["\nROOM TOOLS\n", "\nSKILLS (OVER MCP)\n", "\nAGENT KEYS (ONE MCP SERVER FOR ALL YOUR ROOMS)\n"].map((h) => full.indexOf(h));
+  assert.ok(order.every((i) => i > 0) && order[0] < order[1] && order[1] < order[2], "SKILLS (OVER MCP) sits between ROOM TOOLS and AGENT KEYS");
+  const skills = sectionOf(full, "SKILLS (OVER MCP)").replace(/\s+/g, " ");
+  for (const want of ["a room's /api/rooms/ROOM/mcp, the agent key's /api/mcp (AGENT KEYS) and the sign-in's /api/mcp/signin (SIGNING IN)", "Over revision " + MCP_MODERN_VERSIONS.join(" and ") + " only: server/discover declares the resources capability and the extension io.modelcontextprotocol/skills; initialize and the older revisions see no change.", "skills/list lists them", "skills/get gives one by its SKILL.md URI", "resources/read reads one (its uri also in the Mcp-Name header)", "Each needs the credential tools/list needs at that address, and none of them joins a room.", "An unknown URI is -32602; resources/directory/read is not served (404 -32601)."]) assert.ok(skills.includes(want), "SKILLS lacks " + want);
+  const tools = full.slice(full.indexOf("\nROOM TOOLS\n"), full.indexOf("\nSKILLS (OVER MCP)\n")).replace(/\s+/g, " ");
+  assert.ok(tools.includes("(tools/call also its tool in Mcp-Name, resources/read its uri). server/discover answers anyone, as initialize does; tools/list, tools/call and the skills' methods (SKILLS) need your token."), "ROOM TOOLS names the skills' Mcp-Name and credential");
+  assert.ok(sectionOf(full, "GAMES - EVERY MATCH").replace(/\s+/g, " ").includes("Over MCP, create_game takes the fields of the POST /games body as its arguments, and submit_move the fields of the moves body."), "GAMES - EVERY MATCH says what the two tools take");
 });

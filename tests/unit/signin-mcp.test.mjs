@@ -18,6 +18,8 @@ import { signinMcpRoute, agentLeaveRoute } from "../../worker/routes/agent.ts";
 import { MCP_SIGNIN_CATALOG_VERSION, mcpSigninCatalogBuilt } from "../../worker/agents/mcp.ts";
 import { AGENT_KEY_INVALID, LEAVE_NO_DELETE, SIGNIN_TOKEN_ENDED, signinInstructions, signinLeaveNote, signinNeeded, signinRemovedNote, signinRoomHeld, signinWrongInstructions, signinWrongInvite, signinWrongKey } from "../../worker/agents/onboarding.ts";
 import { OAUTH_ACCESS_TTL_S, OAUTH_ACCESS_WRITE_GRACE_S, OAUTH_IDLE_DAYS } from "../../worker/limits.ts";
+import { resourceRead, resourceTemplatesList, resourcesList, skillGet, skillsList } from "../../worker/agents/skills.ts";
+import { SERVED_SKILLS } from "../../worker/agents/skills/served/index.ts";
 
 const META = ORIGIN + "/.well-known/oauth-protected-resource/api/mcp/signin";
 const MODERN = "2026-07-28";
@@ -248,4 +250,35 @@ test("near the hour's end: a muse_register whose own write lands after the acces
     const fresh = await token(w, { grant_type: "refresh_token", refresh_token: s.refresh, resource: ADDRESS, client_id: PUBLIC_APP.client_id });
     assert.deepEqual(sc(await signin(w, fresh.json.access_token, toolCall("list_rooms"))).rooms.map((x) => x.room), ["oslo"], tool + ": the room is off");
   }
+});
+
+test("the skills' methods at the sign-in address: served signed in, the room address's bytes; -32001 wrong_address for a key, a room token or another dot form; 401 before the body without a sign-in; no room asked", async () => {
+  const w = makeSigninWorld();
+  const pat = people(w, ["lima"]);
+  const s = await signIn(w, PUBLIC_APP, pat);
+  const file = SERVED_SKILLS[2].files[1].uri;
+  const calls = [["skills/list", {}, undefined, skillsList()], ["skills/get", { uri: SERVED_SKILLS[0].uri }, undefined, skillGet(SERVED_SKILLS[0].uri)], ["resources/list", {}, undefined, resourcesList()], ["resources/templates/list", {}, undefined, resourceTemplatesList()], ["resources/read", { uri: file }, file, resourceRead(file)]];
+  for (const [method, params, name, body] of calls) {
+    let mark = w.asked.length;
+    const r = await signin(w, s.access, modern(method, params), modernHeaders(method, name));
+    assert.equal(r.status, 200, method);
+    const { resultType, _meta, ...rest } = result(r);
+    assert.equal(resultType, "complete", method);
+    assert.equal(_meta["io.modelcontextprotocol/serverInfo"].name, "agent-chat-signin");
+    assert.equal(JSON.stringify(rest), JSON.stringify(body), method + ": the same bytes as at a room's address");
+    assert.match(r.headers.get("Access-Control-Expose-Headers"), /WWW-Authenticate/, "CORS_SIGNIN");
+    assert.ok(!w.asked.slice(mark).some((a) => !a.name.startsWith("__agent-")), method + ": no room asked");
+    for (const [what, bearer, message] of [["a key", ".ac1." + "A".repeat(22) + "." + "A".repeat(43), signinWrongKey(ORIGIN)], ["an invite token", "tok-some-room-invite-x", signinWrongInvite(ORIGIN)], ["another dot form", ".xx1.whatever", AGENT_KEY_INVALID]]) {
+      mark = w.asked.length;
+      const x = await signin(w, bearer, modern(method, params), modernHeaders(method, name));
+      assert.deepEqual([x.status, x.json.error], [200, { code: -32001, message, data: { code: "wrong_address" } }], method + " " + what);
+      assert.deepEqual(w.asked.slice(mark), [], method + " " + what + ": no object asked");
+    }
+    mark = w.asked.length;
+    const none = await signin(w, null, modern(method, params), modernHeaders(method, name));
+    assert.equal(none.status, 401, method + " without a sign-in");
+    assert.deepEqual(none.json.error.data, { code: "sign_in_required" });
+    assert.ok(!w.asked.slice(mark).some((a) => !a.name.startsWith("__agent-")), method + ": no room asked");
+  }
+  assert.equal(w.harness("lima").one("SELECT used FROM inv WHERE name = 'Scout'").used, null, "the seat is still unopened");
 });

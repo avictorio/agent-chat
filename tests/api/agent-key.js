@@ -161,7 +161,7 @@ async function agentKey(ctx) {
     r = await rpc(null, { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
     check('agent key: a keyless initialize is answered, with the instructions for no key and the agent server', r.status === 200 && /^All your Agent Chat rooms as tools, for an agent key\. This connection sent no agent key/.test(r.json.result.instructions) && r.json.result.serverInfo.name === 'agent-chat-agent', r.text.slice(0, 200));
     r = await rpc(null, { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _meta: { [V]: NEW, [C]: {} } } }, { 'MCP-Protocol-Version': NEW, 'Mcp-Method': 'server/discover' });
-    check('agent key: a keyless server/discover is answered, private, ttlMs 0', r.status === 200 && r.json.result.cacheScope === 'private' && r.json.result.ttlMs === 0 && /sent no agent key/.test(r.json.result.instructions), r.text.slice(0, 200));
+    check('agent key: a keyless server/discover is answered, private, ttlMs 0, declaring tools, resources and the skills extension', r.status === 200 && r.json.result.cacheScope === 'private' && r.json.result.ttlMs === 0 && /sent no agent key/.test(r.json.result.instructions) && JSON.stringify(r.json.result.capabilities) === '{"tools":{},"resources":{},"extensions":{"io.modelcontextprotocol/skills":{}}}', r.text.slice(0, 200));
     r = await rpc(TC, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     check('agent key: a room token at /api/mcp is -32001 not_agent_key', r.status === 200 && r.json.error.data.code === 'not_agent_key', r.text.slice(0, 200));
     r = await req('GET', '/api/agent');

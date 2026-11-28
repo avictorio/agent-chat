@@ -25,10 +25,13 @@ import {
   mcpRequestKind,
 } from "../../worker/agents/mcp.ts";
 import { API_VERSION } from "../../worker/agents/notices.ts";
-import { MCP_TOOLS_TTL_MS, SMALL_BODY_MAX } from "../../worker/limits.ts";
+import { MCP_SKILLS_TTL_MS, MCP_TOOLS_TTL_MS, SMALL_BODY_MAX } from "../../worker/limits.ts";
 import { OWNER_NO_START_PAGE, START_INVALID, startPage } from "../../worker/agents/start.ts";
 import { watcherPin } from "../../worker/agents/docs.ts";
 import { base } from "./start-views.mjs";
+import { mcpDiscoverCapabilities, resourceRead, resourceTemplatesList, resourcesList, skillGet, skillsList } from "../../worker/agents/skills.ts";
+import { SERVED_SKILLS } from "../../worker/agents/skills/served/index.ts";
+import { GONE_MSG } from "../../worker/lib/errors.ts";
 
 // Node wants duplex: "half" on a Request built with a stream body, which
 // settleBody (lib/http.ts) makes; the Workers runtime does not.
@@ -333,7 +336,8 @@ const REFUSALS = [
   ["12: case-sensitive", toolCall("whoami", {}), heads("tools/call", "WHOAMI"), [400, 1, -32020, "Header mismatch: Mcp-Name header value 'WHOAMI' does not match body value 'whoami'"]],
   ["12: cut to 128", toolCall(long, {}), heads("tools/call", "y"), [400, 1, -32020, "Header mismatch: Mcp-Name header value 'y' does not match body value '" + cut + "'"]],
   ["13: ping", req("ping"), heads("ping"), [404, 1, -32601, "Method not found: ping"]],
-  ["13: initialize-kind methods and others", req("resources/list"), heads("resources/list"), [404, 1, -32601, "Method not found: resources/list"]],
+  ["13: initialize-kind methods and others", req("prompts/list"), heads("prompts/list"), [404, 1, -32601, "Method not found: prompts/list"]],
+  ["13: resources/directory/read (no skill declares it)", req("resources/directory/read", { uri: "skill://agent-chat/taking-part" }), heads("resources/directory/read"), [404, 1, -32601, "Method not found: resources/directory/read"]],
   ["13: subscriptions/listen", req("subscriptions/listen"), heads("subscriptions/listen"), [404, 1, -32601, "Method not found: subscriptions/listen"]],
   ["13: cut to 128", req(long), heads(long), [404, 1, -32601, "Method not found: " + cut]],
 ];
@@ -456,7 +460,8 @@ test("server/discover answers every token state, with the instructions for it an
     assert.deepEqual(Object.keys(r), ["resultType", "supportedVersions", "capabilities", "instructions", "catalog", "changes", "ttlMs", "cacheScope", "_meta"], label);
     assert.equal(r.resultType, "complete");
     assert.deepEqual(r.supportedVersions, MCP_MODERN_VERSIONS);
-    assert.deepEqual(r.capabilities, { tools: {} });
+    assert.equal(JSON.stringify(r.capabilities), JSON.stringify(mcpDiscoverCapabilities()), label + ": tools, resources and the skills extension, in that order");
+    assert.deepEqual(r.capabilities, { tools: {}, resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } });
     assert.equal(r.instructions, mcpInstructions(ORIGIN, variant), label);
     assert.ok(r.instructions.length < 4096, label);
     assert.deepEqual(r.catalog, { version: MCP_CATALOG_VERSION, digest: mcpCatalogBuilt().digest });
@@ -653,4 +658,160 @@ test("every tool has its own title, the titles name no other tool, and every too
     try { await mcpCallTool({}, stub, "unit", ORIGIN, false, { kind: "agent" }, "Ada", t.name, {}, "tok"); } catch (e) { error = String(e && e.message); }
     assert.ok(!/^Unknown tool/.test(String(error)), t.name + ": " + error);
   }
+});
+
+// ---- 14. The skills over revision 2026-07-28 (worker/agents/skills.ts) ----
+
+/** the five methods, each with params that pass its own check, and the result body it answers */
+const SKILL_CALLS = () => {
+  const first = SERVED_SKILLS[0], file = SERVED_SKILLS[2].files[1];
+  return [
+    ["skills/list", {}, undefined, skillsList()],
+    ["skills/get", { uri: first.uri }, undefined, skillGet(first.uri)],
+    ["resources/list", {}, undefined, resourcesList()],
+    ["resources/templates/list", {}, undefined, resourceTemplatesList()],
+    ["resources/read", { uri: file.uri }, file.uri, resourceRead(file.uri)],
+  ];
+};
+const ROOM_GONE = { ok: false, status: 410, code: "room_deleted", error: GONE_MSG };
+
+test("the skills' five methods take exactly tools/list's verdict at a room's address, asking at most the one look, and serve the same bytes in every passing state", async () => {
+  const refused = [
+    ["no token", {}, "invite_missing", MCP_NO_TOKEN, []],
+    ["a token only in the URL", { search: "?invite=tok-in-the-url" }, "invite_missing", MCP_NO_TOKEN, []],
+    ["an unknown token", { invite: "tok-bad" }, "invite_invalid", START_INVALID, ["lookupInvite"]],
+    ["a revoked token", { invite: "tok-gone", lookup: REVOKED }, "invite_revoked", REVOKED.error, ["lookupInvite"]],
+    ["a token at a room that does not exist", { invite: "tok-good", lookup: ROOM_GONE }, "room_deleted", GONE_MSG, ["lookupInvite"]],
+  ];
+  const passing = [
+    ["an unused invite", { invite: "tok-good", lookup: UNUSED }, ["lookupInvite"]],
+    ["an active invite", { invite: "tok-good", lookup: ACTIVE }, ["lookupInvite"]],
+    ["the owner key", { owner: true }, []],
+    ["the owner key beside a token", { owner: true, invite: "tok-good" }, []],
+  ];
+  for (const [method, params, name, body] of SKILL_CALLS()) {
+    for (const [label, o, code, message, asked] of refused) {
+      const a = await answer(req(method, params), { ...o, headers: heads(method, name), access: ACC });
+      assert.equal(a.status, 200, method + ", " + label);
+      assert.deepEqual(a.json, { jsonrpc: "2.0", id: 1, error: { code: -32001, message, data: { code } } }, method + ", " + label);
+      assert.deepEqual(a.asked, asked, method + ", " + label + ": only the look, nothing opened");
+    }
+    for (const [label, o, asked] of passing) {
+      const a = await answer(req(method, params), { ...o, headers: heads(method, name), access: ACC });
+      assert.equal(a.status, 200, method + ", " + label);
+      const r = a.json.result;
+      assert.deepEqual(Object.keys(r), ["resultType", ...Object.keys(body), "_meta"], method + ", " + label + ": resultType first, _meta last");
+      const { resultType, _meta, ...rest } = r;
+      assert.equal(resultType, "complete");
+      assert.deepEqual(_meta, { "io.modelcontextprotocol/serverInfo": SERVER });
+      assert.equal(JSON.stringify(rest), JSON.stringify(body), method + ", " + label + ": the module's answer, byte for byte");
+      assert.equal(r.ttlMs, MCP_SKILLS_TTL_MS);
+      assert.equal(r.cacheScope, "private");
+      assert.deepEqual(a.asked, asked, method + ", " + label + ": at most the one look; never access()");
+      assert.equal(a.headers.get("Access-Control-Allow-Origin"), "*");
+    }
+  }
+});
+
+test("the skills' own parameter checks come before the credential's, in-band; a URI no skill serves comes after it", async () => {
+  const file = SERVED_SKILLS[0].files[0].uri;
+  const cases = [
+    ["skills/list", { cursor: "abc" }, undefined, "Invalid cursor: skills/list answers in one page; send it without a cursor."],
+    ["resources/list", { cursor: 0 }, undefined, "Invalid cursor: resources/list answers in one page; send it without a cursor."],
+    ["resources/templates/list", { cursor: "" }, undefined, "Invalid cursor: resources/templates/list answers in one page; send it without a cursor."],
+    ["skills/get", {}, undefined, "skills/get needs params.uri: the URI of a skill's SKILL.md."],
+    ["skills/get", { uri: 5 }, undefined, "skills/get needs params.uri: the URI of a skill's SKILL.md."],
+    ["skills/get", { uri: "" }, undefined, "skills/get needs params.uri: the URI of a skill's SKILL.md."],
+    ["resources/read", {}, undefined, "resources/read needs params.uri."],
+    ["resources/read", { uri: ["x"] }, undefined, "resources/read needs params.uri."],
+    ["resources/read", { uri: "" }, "", "resources/read needs params.uri."],
+  ];
+  for (const [method, params, name, message] of cases) {
+    for (const [tl, o] of [...TOKENS, ["a revoked token", { invite: "tok-gone", lookup: REVOKED }]]) {
+      const a = await answer(req(method, params), { ...o, headers: heads(method, name) });
+      assert.equal(a.status, 200, method + " " + JSON.stringify(params) + ", " + tl);
+      assert.deepEqual(a.json, { jsonrpc: "2.0", id: 1, error: { code: -32602, message } }, method + " " + JSON.stringify(params) + ", " + tl);
+    }
+  }
+  // a null cursor is none
+  assert.equal((await answer(req("skills/list", { cursor: null }), { invite: "tok-good", lookup: ACTIVE, headers: heads("skills/list") })).json.result.resultType, "complete");
+  // an unknown URI: after the verdict, so a caller without a credential learns nothing of the skills
+  const longUri = "skill://agent-chat/" + "x".repeat(300);
+  const unknown = [
+    ["skills/get", "skill://agent-chat/no-such/SKILL.md", { code: -32602, message: "No skill is served at skill://agent-chat/no-such/SKILL.md" }],
+    ["skills/get", SERVED_SKILLS[2].files[1].uri, { code: -32602, message: "No skill is served at " + SERVED_SKILLS[2].files[1].uri }],
+    ["skills/get", "skill://agent-chat/taking-part", { code: -32602, message: "No skill is served at skill://agent-chat/taking-part" }],
+    ["skills/get", "constructor", { code: -32602, message: "No skill is served at constructor" }],
+    ["resources/read", "skill://agent-chat/taking-part/", { code: -32602, message: "Resource not found: skill://agent-chat/taking-part/", data: { uri: "skill://agent-chat/taking-part/" } }],
+    ["resources/read", "__proto__", { code: -32602, message: "Resource not found: __proto__", data: { uri: "__proto__" } }],
+    ["resources/read", longUri, { code: -32602, message: "Resource not found: " + longUri.slice(0, 128) + "...", data: { uri: longUri.slice(0, 128) + "..." } }],
+  ];
+  for (const [method, uri, error] of unknown) {
+    const name = method === "resources/read" ? uri : undefined;
+    let a = await answer(req(method, { uri }), { invite: "tok-good", lookup: ACTIVE, headers: heads(method, name) });
+    assert.equal(a.status, 200, method + " " + uri);
+    assert.deepEqual(a.json, { jsonrpc: "2.0", id: 1, error }, method + " " + uri);
+    a = await answer(req(method, { uri }), { headers: heads(method, name) });
+    assert.deepEqual(a.json.error, { code: -32001, message: MCP_NO_TOKEN, data: { code: "invite_missing" } }, method + " " + uri + " without a token: the credential first");
+  }
+  // and a known one, so the refusal above is not every answer
+  const a = await answer(req("resources/read", { uri: file }), { invite: "tok-good", lookup: ACTIVE, headers: heads("resources/read", file) });
+  assert.equal(a.json.result.contents[0].uri, file);
+});
+
+test("Mcp-Name on resources/read: required and compared with params.uri, its Base64 sentinel decoded; not read on skills/get or the lists", async () => {
+  const uri = SERVED_SKILLS[0].uri;
+  const o = { invite: "tok-good", lookup: ACTIVE };
+  const refusals = [
+    [heads("resources/read"), "Header mismatch: the Mcp-Name header is missing; on resources/read it must equal params.uri."],
+    [heads("resources/read", "skill://agent-chat/room-board/SKILL.md"), "Header mismatch: Mcp-Name header value 'skill://agent-chat/room-board/SKILL.md' does not match body value '" + uri + "'"],
+    [heads("resources/read", uri.toUpperCase()), "Header mismatch: Mcp-Name header value '" + uri.toUpperCase() + "' does not match body value '" + uri + "'"],
+    [heads("resources/read", "=?base64?abc?="), "Header mismatch: the Mcp-Name header's =?base64?...?= value is not Base64 of UTF-8 text."],
+  ];
+  for (const [label, oo] of [["a good token", o], ["no token", {}]]) {
+    for (const [headers, message] of refusals) {
+      const a = await answer(req("resources/read", { uri }), { ...oo, headers });
+      assert.equal(a.status, 400, label + " " + message);
+      assert.deepEqual(a.json, { jsonrpc: "2.0", id: 1, error: { code: -32020, message } }, label);
+      assert.deepEqual(a.asked, oo.invite ? ["lookupInvite"] : [], label);
+    }
+  }
+  // the sentinel of the uri itself is served, as the plain one is
+  const plain = await answer(req("resources/read", { uri }), { ...o, headers: heads("resources/read", uri) });
+  const coded = await answer(req("resources/read", { uri }), { ...o, headers: heads("resources/read", "=?base64?" + btoa(uri) + "?=") });
+  assert.equal(plain.status, 200);
+  assert.equal(coded.text, plain.text);
+  // a uri that is no string: no header is asked for, and the method's own refusal answers
+  assert.equal((await answer(req("resources/read", { uri: 5 }), { ...o, headers: heads("resources/read") })).json.error.message, "resources/read needs params.uri.");
+  // skills/get and the lists do not read the header: any value, or none, answers the same
+  for (const [method, params] of [["skills/get", { uri }], ["skills/list", {}], ["resources/list", {}]]) {
+    const none = await answer(req(method, params), { ...o, headers: heads(method) });
+    const other = await answer(req(method, params), { ...o, headers: heads(method, "anything at all") });
+    assert.equal(none.status, 200, method);
+    assert.equal(other.text, none.text, method);
+  }
+  // tools/call's refusals come out as before
+  assert.equal((await answer(toolCall("whoami", {}), { ...o, headers: heads("tools/call") })).json.error.message, "Header mismatch: the Mcp-Name header is missing; on tools/call it must equal params.name.");
+});
+
+test("over the initialize kind nothing changes: the skills' methods are refused or not found as before, initialize declares only tools", async () => {
+  for (const method of ["skills/list", "skills/get", "resources/list", "resources/templates/list", "resources/read"]) {
+    const body = { jsonrpc: "2.0", id: 4, method, params: method.endsWith("get") || method.endsWith("read") ? { uri: SERVED_SKILLS[0].uri } : {} };
+    for (const [label, o, want] of [
+      ["an active invite", { invite: "tok-good", lookup: ACTIVE }, { code: -32601, message: "Method not found: " + method }],
+      ["the owner key", { owner: true }, { code: -32601, message: "Method not found: " + method }],
+      ["no token", {}, { code: -32001, message: MCP_NO_TOKEN, data: { code: "invite_missing" } }],
+      ["an unknown token", { invite: "tok-bad" }, { code: -32001, message: INVALID.error, data: { code: "invite_invalid" } }],
+    ]) {
+      for (const headers of [{}, { "MCP-Protocol-Version": "2025-11-25" }]) {
+        const a = await answer(body, { ...o, headers });
+        assert.equal(a.status, 200, method + ", " + label);
+        assert.deepEqual(a.json, { jsonrpc: "2.0", id: 4, error: want }, method + ", " + label);
+        assert.ok(!a.asked.includes("access"), method + ", " + label);
+      }
+    }
+  }
+  const init = await answer({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } }, { invite: "tok-good", lookup: UNUSED });
+  assert.deepEqual(init.json.result.capabilities, { tools: {} });
+  assert.ok(!init.text.includes("io.modelcontextprotocol/skills") && !init.text.includes("\"resources\""), "initialize names no skill");
 });

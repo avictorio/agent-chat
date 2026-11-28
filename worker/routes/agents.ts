@@ -27,6 +27,7 @@ import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { LEAVE_OWNER, invitePreviewBody, leaveAfter, leaveAsk, leaveBody, leaveConfirmRefusal, leaveRefusalBody } from "./members.js";
 import { MCP_NO_TOKEN, mcpInstructions, type McpVariant } from "../agents/onboarding.js";
+import { mcpDiscoverCapabilities, resourceRead, resourceTemplatesList, resourcesList, skillGet, skillsList } from "../agents/skills.js";
 import { recipe, watcher, watcherPin } from "../agents/docs.js";
 import { OWNER_NO_START_PAGE, START_INVALID, START_LIMITS, START_NO_TOKEN, startPage } from "../agents/start.js";
 import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
@@ -160,8 +161,8 @@ export function changesRoute(rc: RouteContext) {
 // handshake formality here; notifications get a bare 202), which handleRpc
 // answers, and those that carry their revision and the client's
 // capabilities on every request (from MCP_FIRST_MODERN_VERSION on), which
-// pass mcpCheck and then ask server/discover, tools/list or tools/call
-// (perRequest). Both are mcpServe, which the agent key's address
+// pass mcpCheck and then ask server/discover, tools/list, tools/call or one of
+// the skills' methods (perRequest). Both are mcpServe, which the agent key's address
 // (routes/agent.ts agentMcpRoute) shares; this route gives it the room's
 // catalog, instructions, token checks and tool calls (roomToolAnswer).
 export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
@@ -342,7 +343,7 @@ export async function mcpServe(rc: RouteContext, s: McpSurface, rpcBody: unknown
     // can go stale the moment an invite is revoked
     if (method === "server/discover") {
       return done({
-        supportedVersions: MCP_MODERN_VERSIONS, capabilities: { tools: {} },
+        supportedVersions: MCP_MODERN_VERSIONS, capabilities: mcpDiscoverCapabilities(),
         instructions: s.instructions,
         catalog: { version: s.catalogVersion, digest: s.catalog().digest },
         changes: changesLink(url.origin), ttlMs: 0, cacheScope: "private",
@@ -358,7 +359,31 @@ export async function mcpServe(rc: RouteContext, s: McpSurface, rpcBody: unknown
       const cat = s.catalog();
       return done({ tools: cat.tools, catalog: { version: s.catalogVersion, digest: cat.digest }, ttlMs: MCP_TOOLS_TTL_MS, cacheScope: "private" });
     }
-    // tools/call, the one method left (mcpCheck refused the rest)
+    // The skills (agents/skills.ts), with the credential tools/list needs: the
+    // method's own check first, then the same verdict (the one look this
+    // request made, which opens nothing), then a module constant chosen by
+    // the URI sent, so nothing of the room or the caller is in the answer. A
+    // URI no skill serves is answered after the verdict, so a caller without
+    // a credential learns nothing of the skills.
+    if (method === "resources/list" || method === "resources/templates/list" || method === "skills/list") {
+      if (params.cursor !== undefined && params.cursor !== null) return fail(-32602, "Invalid cursor: " + method + " answers in one page; send it without a cursor.");
+      const tk = await s.verdict();
+      if (!tk.ok) return refuse(tk);
+      return done(method === "skills/list" ? skillsList() : method === "resources/list" ? resourcesList() : resourceTemplatesList());
+    }
+    if (method === "resources/read" || method === "skills/get") {
+      const uri = params.uri;
+      if (typeof uri !== "string" || !uri) return fail(-32602, method === "skills/get" ? "skills/get needs params.uri: the URI of a skill's SKILL.md." : "resources/read needs params.uri.");
+      const tk = await s.verdict();
+      if (!tk.ok) return refuse(tk);
+      if (method === "skills/get") {
+        const got = skillGet(uri);
+        return got ? done(got) : fail(-32602, "No skill is served at " + mcpEcho(uri));
+      }
+      const read = resourceRead(uri);
+      return read ? done(read) : fail(-32602, "Resource not found: " + mcpEcho(uri), { uri: mcpEcho(uri) });
+    }
+    // tools/call, the one method left (mcpCheck refused every other)
     const tname = params.name;
     if (typeof tname !== "string" || !tname) return fail(-32602, "tools/call needs params.name");
     if (params.arguments !== undefined && !isObject(params.arguments)) return fail(-32602, "Invalid params for tools/call: 'arguments' must be an object");

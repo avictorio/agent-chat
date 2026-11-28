@@ -3,9 +3,10 @@
 // tests/api/mcp-clients.js): server/discover in each token state, tools/list
 // and tools/call with what that revision adds, one request per refusal
 // before a method runs, notifications and batches, the unknown tool that
-// joins nothing, and the headers that change nothing. Called from
-// api.test.js; its room is its own.
+// joins nothing, the headers that change nothing, and the skills' methods.
+// Called from api.test.js; its room is its own.
 'use strict';
+const crypto = require('crypto');
 
 const NEW = '2026-07-28';
 const V = 'io.modelcontextprotocol/protocolVersion', C = 'io.modelcontextprotocol/clientCapabilities';
@@ -30,7 +31,7 @@ async function mcpModern(ctx) {
   r = await post(rpc('server/discover'), heads('server/discover'));
   const d = (r.json || {}).result || {};
   check('mcp 2026-07-28: a tokenless server/discover is answered 200 with its fields', r.status === 200 && JSON.stringify(Object.keys(d)) === JSON.stringify(['resultType', 'supportedVersions', 'capabilities', 'instructions', 'catalog', 'changes', 'ttlMs', 'cacheScope', '_meta']), r.status + ' ' + JSON.stringify(Object.keys(d)));
-  check('mcp 2026-07-28: server/discover lists 2026-07-28 only, declares tools, ttlMs 0, private', d.resultType === 'complete' && JSON.stringify(d.supportedVersions) === JSON.stringify([NEW]) && JSON.stringify(d.capabilities) === '{"tools":{}}' && d.ttlMs === 0 && d.cacheScope === 'private', JSON.stringify(d).slice(0, 300));
+  check('mcp 2026-07-28: server/discover lists 2026-07-28 only, declares tools, resources and the skills extension, ttlMs 0, private', d.resultType === 'complete' && JSON.stringify(d.supportedVersions) === JSON.stringify([NEW]) && JSON.stringify(d.capabilities) === '{"tools":{},"resources":{},"extensions":{"io.modelcontextprotocol/skills":{}}}' && d.ttlMs === 0 && d.cacheScope === 'private', JSON.stringify(d).slice(0, 300));
   check('mcp 2026-07-28: a tokenless server/discover gets the instructions for no token', /^One Agent Chat room as tools\. This connection sent no invite token, so no tool will work\./.test(d.instructions || ''), String(d.instructions).slice(0, 120));
   check('mcp 2026-07-28: server/discover carries the server in _meta and the changes link', !!d._meta && JSON.stringify(d._meta['io.modelcontextprotocol/serverInfo']) === JSON.stringify({ name: 'agent-chat', title: 'Agent Chat', version: d.catalog && d.catalog.version, websiteUrl: ORIGIN }) && !!d.changes && d.changes.url === ORIGIN + '/api/changes', JSON.stringify(d._meta));
   r = await post(rpc('server/discover'), heads('server/discover'), 'not-one-of-this-rooms');
@@ -102,6 +103,40 @@ async function mcpModern(ctx) {
     const b = await post(body, Object.assign({ Origin: 'https://evil.example' }, headers), T);
     check('mcp: an Origin header changes nothing (' + body.method + (body.params && body.params._meta ? ', 2026-07-28' : '') + ')', a.status === b.status && a.text === b.text && b.headers.get('access-control-allow-origin') === '*' && !b.headers.get('mcp-session-id'), a.status + ' ' + b.status);
   }
+
+  // the skills (worker/agents/skills.ts), by hand, with a fresh invite that must stay unused
+  const S = await mk('ModSkills');
+  const cors = (x) => x.headers.get('access-control-allow-origin') === '*';
+  r = await post(rpc('skills/list'), heads('skills/list'));
+  check('mcp skills: a tokenless skills/list is 200 -32001 invite_missing', r.status === 200 && !!r.json.error && r.json.error.code === -32001 && r.json.error.data.code === 'invite_missing' && cors(r), r.status + ' ' + r.text.slice(0, 160));
+  r = await post(rpc('skills/list'), heads('skills/list'), S);
+  const listed = ((r.json || {}).result || {}).skills || [];
+  check('mcp skills: skills/list gives the five skills, complete, an hour\'s ttlMs, private, with CORS', r.status === 200 && r.json.result.resultType === 'complete' && JSON.stringify(listed.map((x) => x.frontmatter.name)) === JSON.stringify(['taking-part', 'staying-present', 'playing-games', 'room-board', 'sharing-files']) && r.json.result.ttlMs === 3600000 && r.json.result.cacheScope === 'private' && cors(r), r.status + ' ' + r.text.slice(0, 200));
+  r = await post(rpc('skills/list', { cursor: 'x' }), heads('skills/list'), S);
+  check('mcp skills: a cursor is 200 -32602', r.status === 200 && r.json.error && r.json.error.code === -32602 && r.json.error.message === 'Invalid cursor: skills/list answers in one page; send it without a cursor.' && cors(r), r.text.slice(0, 160));
+  const first = listed[0] && listed[0].uri, support = listed[2] && listed[2].resources[1] && listed[2].resources[1].uri;
+  r = await post(rpc('resources/read', { uri: first }), heads('resources/read'), S);
+  check('mcp skills: resources/read without Mcp-Name is 400 -32020 with its sentence', r.status === 400 && r.json.error && r.json.error.code === -32020 && r.json.error.message === 'Header mismatch: the Mcp-Name header is missing; on resources/read it must equal params.uri.' && cors(r), r.status + ' ' + r.text.slice(0, 160));
+  r = await post(rpc('resources/read', { uri: first }), heads('resources/read', first), S);
+  const body = ((r.json || {}).result || {}).contents || [];
+  const entry = listed[0] && listed[0].resources[0];
+  const bytes = Buffer.from(String(body[0] && body[0].text), 'utf8');
+  check('mcp skills: resources/read with Mcp-Name gives the SKILL.md whose size and digest skills/list names', r.status === 200 && body.length === 1 && body[0].mimeType === 'text/markdown' && !!entry && bytes.length === entry.size && 'sha256:' + crypto.createHash('sha256').update(bytes).digest('hex') === entry.digest && cors(r), r.status + ' ' + r.text.slice(0, 160));
+  r = await post(rpc('resources/read', { uri: 'skill://agent-chat/no-such/SKILL.md' }), heads('resources/read', 'skill://agent-chat/no-such/SKILL.md'), S);
+  check('mcp skills: an unknown URI is 200 -32602 with data.uri', r.status === 200 && r.json.error && r.json.error.code === -32602 && r.json.error.message === 'Resource not found: skill://agent-chat/no-such/SKILL.md' && r.json.error.data && r.json.error.data.uri === 'skill://agent-chat/no-such/SKILL.md' && cors(r), r.text.slice(0, 200));
+  r = await post(rpc('skills/get', { uri: support }), heads('skills/get'), S);
+  check('mcp skills: skills/get of a supporting file is 200 -32602, no skill', !!support && r.status === 200 && r.json.error && r.json.error.code === -32602 && r.json.error.message === 'No skill is served at ' + support && cors(r), r.text.slice(0, 200));
+  r = await post(rpc('skills/get', { uri: first }), heads('skills/get'), S);
+  check('mcp skills: skills/get of a SKILL.md gives its entry, the one skills/list gives', r.status === 200 && JSON.stringify(r.json.result.skill) === JSON.stringify(listed[0]), r.text.slice(0, 160));
+  r = await post(rpc('resources/templates/list'), heads('resources/templates/list'), S);
+  check('mcp skills: resources/templates/list is empty', r.status === 200 && JSON.stringify(r.json.result.resourceTemplates) === '[]' && r.json.result.ttlMs === 3600000 && cors(r), r.text.slice(0, 160));
+  r = await post(rpc('resources/list'), heads('resources/list'), S);
+  check('mcp skills: resources/list lists every file of every skill', r.status === 200 && (r.json.result.resources || []).length === listed.reduce((n, x) => n + x.resources.length, 0) && cors(r), r.text.slice(0, 160));
+  r = await post(rpc('resources/directory/read', { uri: 'skill://agent-chat/taking-part' }), heads('resources/directory/read'), S);
+  check('mcp skills: resources/directory/read is 404 -32601', r.status === 404 && r.json.error && r.json.error.code === -32601 && r.json.error.message === 'Method not found: resources/directory/read' && cors(r), r.status + ' ' + r.text.slice(0, 160));
+  r = await post({ jsonrpc: '2.0', id: 1, method: 'skills/list' }, {}, S);
+  check('mcp skills: skills/list over the initialize kind is -32601, as before', r.status === 200 && r.json.error && r.json.error.code === -32601 && r.json.error.message === 'Method not found: skills/list' && cors(r), r.text.slice(0, 160));
+  check('mcp skills: none of it opened the invite', (await row('ModSkills')).used === null, JSON.stringify(await row('ModSkills')));
 
   await req('DELETE', R + '/invites', { owner: true });
   await req('DELETE', R + '?confirm=' + room, { owner: true });
