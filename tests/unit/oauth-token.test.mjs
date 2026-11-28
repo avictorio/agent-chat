@@ -13,7 +13,7 @@ import {
   makeSigninWorld, people, signIn, token, clientAuth, assertion, dpopProof, keyPair, poppyApp, pkce, authzQuery, decide, jws, newJti,
   PUBLIC_APP, ORIGIN, ADDRESS, signins, signin, toolCall,
 } from "./signin-world.mjs";
-import { OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_KEYSET_TTL_MAX_S, OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
+import { OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_KEYSET_REFETCH_S, OAUTH_KEYSET_TTL_MAX_S, OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
 import { forgetKeySets, jwkThumbprint } from "../../worker/lib/oauth.ts";
 import { resetWarnings } from "../../worker/lib/log.ts";
 
@@ -70,7 +70,7 @@ test("every answer: CORS_OAUTH, no-store and Pragma: no-cache; a 401 invalid_cli
   assert.equal(r.headers.get("WWW-Authenticate"), null);
 });
 
-test("the order of the checks: the method, the client, its authentication (the failed-authentication limit just before a signed assertion's check), DPoP, then the grant", async () => {
+test("the order of the checks: the method, the form, the client (before any proof), the proof, the client's authentication (the app's failed-check limit just before its assertion's check), the proof's verdict, then the grant", async () => {
   const c = await poppyCode();
   const w = c.w;
   // a method other than POST
@@ -92,47 +92,173 @@ test("the order of the checks: the method, the client, its authentication (the f
   // no grant named: a missing parameter (RFC 6749 5.2)
   r = await token(w, { ...(await asserted(c, c.es)) });
   assert.deepEqual([r.status, r.json.error], [400, "invalid_request"]);
-  // a parameter sent twice, and a body too large
+  // a parameter sent twice (one of them empty included: the duplicate check reads the form as sent), and a body too large
   r = await token(w, { grant_type: ["authorization_code", "authorization_code"], ...(await asserted(c, c.es)) });
   assert.deepEqual([r.status, r.json.error], [400, "invalid_request"]);
+  r = await token(w, { grant_type: "authorization_code", code: ["", c.code], code_verifier: c.verifier, redirect_uri: c.redirect, resource: ADDRESS, ...(await asserted(c, c.es)) });
+  assert.deepEqual([r.status, r.json.error], [400, "invalid_request"], "code=&code=X");
   r = await token(w, { grant_type: "authorization_code", pad: "x".repeat(9000) });
   assert.deepEqual([r.status, r.json.error], [413, "invalid_request"]);
-  // the limit, full, stops a signed assertion's check: a good one is 429, before its proof and its grant
+  // the limit, full, stops a signed assertion's check: a good one is 429, before its proof's verdict and its grant
   w.harness(OAUTH_QUOTA_ROOM).room.setTestAgentLimits({ per_ip: 1 });
   const net = { "CF-Connecting-IP": "10.50.0.1" };
-  r = await token(w, { client_id: "https://nobody.example/c", grant_type: "authorization_code" }, net);
-  assert.equal(r.status, 401, "the one failure the counter takes");
+  r = await token(w, { grant_type: "authorization_code", ...(await asserted(c, await keyPair("ES256", c.es.jwk.kid))) }, net);
+  assert.equal(r.status, 401, "the one failed check the counter takes");
   r = await token(w, { client_id: "https://nobody.example/c", grant_type: "authorization_code" }, net);
   assert.deepEqual([r.status, r.json.error], [401, "invalid_client"], "an unknown client is never refused by the counter");
   r = await token(w, { grant_type: "nope", ...(await asserted(c, c.es)) }, { DPoP: "bad", ...net });
-  assert.deepEqual([r.status, r.json.error], [429, "slow_down"], "before the proof and the grant");
+  assert.deepEqual([r.status, r.json.error], [429, "slow_down"], "before the proof's verdict and the grant");
   r = await exchange(c, await asserted(c, c.es), {}, net);
-  assert.deepEqual([r.status, r.json], [429, { error: "slow_down", error_description: "Too many failed attempts from this network; try again later." }]);
+  assert.deepEqual([r.status, r.json], [429, { error: "slow_down", error_description: "Too many failed attempts for this app from this network; try again later." }]);
   assert.ok(Number(r.headers.get("Retry-After")) > 0);
   assert.equal(r.headers.get("Pragma"), "no-cache");
   w.harness(OAUTH_QUOTA_ROOM).room.setTestAgentLimits(null);
   assert.equal((await exchange(c, await asserted(c, c.es), {}, net)).status, 200, "the limit cleared, the same code redeems");
 });
 
-test("the failed-authentication limit: OAUTH_AUTH_FAILS_PER_IP failures per network, each counted; full, it refuses a signed assertion's check (429 slow_down with Retry-After) and never a public client's or an unknown client's request", async () => {
-  const P = await poppyApp();
-  const w = makeSigninWorld([PUBLIC_APP, P.app]);
+// The failed-authentication limit is one app's on one network, and only the
+// work it exists for fills it: a signature that was checked and matched no
+// key. In the order the checks run: a request naming no known app, a public
+// app's failure, no assertion, a malformed one and claims that fail as
+// presented come before the counter is read, and never ask it (the quota
+// object's agentPeek and agentReserve; under TEST_HOOKS the stand-in apps
+// are also read from that object, oauthTestApps, which live has no call
+// for); a kid no key could be tried for, and a replay whose signature
+// matched, come after: one read, no place.
+test("the failed-authentication limit is one app's on one network, filled only by a signature that matched no key: OAUTH_AUTH_FAILS_PER_IP of each other failure take no place (those before the read never ask the counter, those after read it once), and a fresh good assertion is taken after each batch; as many bad signatures for app X refuse X there (429 slow_down with Retry-After), and not another app or another network", async () => {
+  const X = await poppyApp();
+  const yKey = await keyPair("ES256", "y-1");
+  const Y = { ...X.app, key: "standin-poppy-y", client_id: "https://agent-y.example/.well-known/poppy-client", name: "Muse Y", jwks: { keys: [yKey.jwk] } };
+  const w = makeSigninWorld([PUBLIC_APP, X.app, Y]);
   const pat = people(w, ["lima"]);
-  const s = await signIn(w, PUBLIC_APP, pat);
-  const s2 = await signIn(w, PUBLIC_APP, pat, { name: "Scout2" });
-  for (let i = 0; i < OAUTH_AUTH_FAILS_PER_IP; i++) assert.equal((await token(w, { client_id: "https://nobody.example/c", grant_type: "refresh_token" })).status, 401);
-  // a public client's refresh and revoke from that network: answered
-  assert.equal((await refreshOf(w, PUBLIC_APP, s.refresh, { client_id: PUBLIC_APP.client_id })).status, 200, "a public refresh");
-  const { revoke } = await import("./signin-world.mjs");
-  const rv = await revoke(w, { token: s2.refresh, client_id: PUBLIC_APP.client_id });
-  assert.deepEqual([rv.status, rv.json], [200, {}], "a public revoke");
-  assert.deepEqual((await token(w, { client_id: "https://nobody.example/c", grant_type: "refresh_token" })).json, { error: "invalid_client" }, "an unknown client: 401, not 429");
-  // a signed assertion from it: refused before its check
-  const r = await token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", ...(await clientAuth(P.app, P.es)) });
-  assert.deepEqual([r.status, r.json.error], [429, "slow_down"]);
+  const calls = (m) => w.asked.filter((a) => a.name === OAUTH_QUOTA_ROOM && a.method === m).length;
+  const sx = await signIn(w, X.app, pat, { pair: X.es });
+  assert.equal(sx.token.status, 200, sx.token.text);
+  let rt = sx.refresh;
+  const N = "10.70.0.1", at = (ip) => ({ "CF-Connecting-IP": ip });
+  /** X's good refresh (a fresh assertion) from a network: its answer, and the next refresh token kept */
+  const good = async (ip) => {
+    const r = await refreshOf(w, X.app, rt, await clientAuth(X.app, X.es), {}, at(ip));
+    if (r.status === 200) rt = r.json.refresh_token;
+    return r;
+  };
+  const send = async (fields) => token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", ...fields }, at(N));
+  const signed = async (pair, claims) => send({ client_assertion_type: URN, client_assertion: await assertion(X.app, pair, claims) });
+  const replayed = { client_assertion_type: URN, client_assertion: await assertion(X.app, X.es) };
+  assert.equal((await send(replayed)).json.error, "invalid_grant", "the assertion to replay, taken once");
+  const realVerify = crypto.subtle.verify;
+  let verifies = 0;
+  crypto.subtle.verify = async (...a) => { verifies++; return realVerify.apply(crypto.subtle, a); };
+  try {
+    // [what, the request, counter reads per request, signatures checked per request]
+    const batches = [
+      ["a request naming no known app", () => token(w, { client_id: "https://nobody.example/c", grant_type: "refresh_token" }, at(N)), 0, 0],
+      ["a public app sending a client_secret", () => refreshOf(w, PUBLIC_APP, ".ar1.x", { client_id: PUBLIC_APP.client_id, client_secret: "s" }, {}, at(N)), 0, 0],
+      ["a request naming X with no assertion", () => send({ client_id: X.app.client_id }), 0, 0],
+      ["a malformed assertion", () => send({ client_id: X.app.client_id, client_assertion_type: URN, client_assertion: "not.an.assertion" }), 0, 0],
+      ["a good signature with an expired exp", () => signed(X.es, { iat: nowS() - 400, exp: nowS() - 120 }), 0, 0],
+      ["a good signature with another aud", () => signed(X.es, { aud: "https://elsewhere.example" }), 0, 0],
+      ["a kid X's set lacks", async () => signed(await keyPair("ES256", "es-9")), 1, 0],
+      ["a replay of one good assertion", () => send(replayed), 1, 1],
+    ];
+    for (const [what, f, reads, sigs] of batches) {
+      const peeks = calls("agentPeek"), places = calls("agentReserve");
+      verifies = 0;
+      for (let i = 0; i < OAUTH_AUTH_FAILS_PER_IP; i++) {
+        const r = await f();
+        assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], what);
+      }
+      assert.deepEqual([calls("agentPeek") - peeks, calls("agentReserve") - places, verifies], [reads * OAUTH_AUTH_FAILS_PER_IP, 0, sigs * OAUTH_AUTH_FAILS_PER_IP], what + ": counter reads, places taken, signatures checked");
+      const r = await good(N);
+      assert.equal(r.status, 200, what + ": then X's fresh good assertion from that network is taken: " + r.text);
+    }
+  } finally {
+    crypto.subtle.verify = realVerify;
+  }
+  // as many assertions for X whose signature fails (a key of X's kid that X does not hold): each takes a place
+  const wrong = await keyPair("ES256", X.es.jwk.kid);
+  const places = calls("agentReserve");
+  for (let i = 0; i < OAUTH_AUTH_FAILS_PER_IP; i++) assert.equal((await refreshOf(w, X.app, rt, await clientAuth(X.app, wrong), {}, at(N))).status, 401);
+  assert.equal(calls("agentReserve") - places, OAUTH_AUTH_FAILS_PER_IP);
+  const r = await good(N);
+  assert.deepEqual([r.status, r.json], [429, { error: "slow_down", error_description: "Too many failed attempts for this app from this network; try again later." }], "X from that network: refused before its check");
   assert.ok(Number(r.headers.get("Retry-After")) > 0);
-  const other = await token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", ...(await clientAuth(P.app, P.es)) }, { "CF-Connecting-IP": "10.99.0.1" });
-  assert.deepEqual([other.status, other.json.error], [400, "invalid_grant"], "another network: the assertion checked and accepted");
+  const sy = await signIn(w, Y, pat, { pair: yKey, name: "Scout Y" });
+  assert.equal(sy.token.status, 200, "another app's sign-in: taken");
+  const y = await refreshOf(w, Y, sy.refresh, await clientAuth(Y, yKey), {}, at(N));
+  assert.equal(y.status, 200, "another app from the same network: taken: " + y.text);
+  assert.equal((await good("10.71.0.1")).status, 200, "X from another network: taken");
+});
+
+// The claims are judged as the assertion presents them, before any key or
+// signature: each failing claim with a good signature costs no signature
+// check, no key-set fetch and no call to the counter.
+test("an assertion's claims are judged before any key or signature: each failing claim with a good signature is 401, with no signature checked, no key set fetched and no counter call", async () => {
+  const real = globalThis.fetch, realVerify = crypto.subtle.verify;
+  let fetches = 0, verifies = 0;
+  try {
+    forgetKeySets();
+    const c = await poppyCode({ app: { key: "remote-o7", client_id: "https://remote.example/o7", jwks: undefined, jwks_uri: "http://127.0.0.1:9/o7.json" } });
+    globalThis.fetch = async () => { fetches++; return new Response(JSON.stringify({ keys: [c.es.jwk] }), { status: 200, headers: { "Cache-Control": "max-age=600" } }); };
+    const counterCalls = () => c.w.asked.filter((a) => a.name === OAUTH_QUOTA_ROOM && (a.method === "agentPeek" || a.method === "agentReserve")).length;
+    crypto.subtle.verify = async (...a) => { verifies++; return realVerify.apply(crypto.subtle, a); };
+    const before = counterCalls();
+    for (const [what, claims] of [
+      ["iss", { iss: "https://other.example/c" }], ["sub", { sub: "https://other.example/c" }], ["aud", { aud: ORIGIN + "/api/oauth/token" }],
+      ["exp past", { iat: nowS() - 400, exp: nowS() - 120 }], ["iat ahead", { iat: nowS() + 600, exp: nowS() + 700 }], ["nbf ahead", { nbf: nowS() + 600 }],
+      ["exp - iat too long", { iat: nowS(), exp: nowS() + 3600 }], ["a short jti", { jti: "short" }],
+    ]) {
+      const r = await exchange(c, await asserted(c, c.es, claims), { code: "x" });
+      assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], what);
+    }
+    assert.deepEqual([verifies, fetches, counterCalls() - before], [0, 0, 0], "no signature checked, no key set fetched, no counter call");
+  } finally {
+    globalThis.fetch = real;
+    crypto.subtle.verify = realVerify;
+    forgetKeySets();
+  }
+});
+
+// The limit stops the work it is for: with X's counter full, X's assertion
+// is refused before any signature is verified and before any key-set fetch.
+test("with an app's counter full, its assertion is refused before any signature is verified or any key set fetched", async () => {
+  const real = globalThis.fetch, realVerify = crypto.subtle.verify;
+  let fetches = 0, verifies = 0;
+  try {
+    const c = await poppyCode({ app: { key: "remote-v1", client_id: "https://remote.example/v1", jwks: undefined, jwks_uri: "http://127.0.0.1:9/v1.json" } });
+    globalThis.fetch = async () => { fetches++; return new Response(JSON.stringify({ keys: [c.es.jwk] }), { status: 200, headers: { "Cache-Control": "max-age=600" } }); };
+    forgetKeySets();
+    c.w.harness(OAUTH_QUOTA_ROOM).room.setTestAgentLimits({ per_ip: 1 });
+    assert.equal((await exchange(c, await asserted(c, await keyPair("ES256", c.es.jwk.kid)))).status, 401, "one failed check fills it");
+    forgetKeySets();
+    fetches = 0;
+    crypto.subtle.verify = async (...a) => { verifies++; return realVerify.apply(crypto.subtle, a); };
+    const r = await exchange(c, await asserted(c, c.es));
+    assert.deepEqual([r.status, r.json.error], [429, "slow_down"]);
+    assert.deepEqual([verifies, fetches], [0, 0], "no signature verified, no key set fetched");
+  } finally {
+    globalThis.fetch = real;
+    crypto.subtle.verify = realVerify;
+    forgetKeySets();
+  }
+});
+
+// A request that names no known app is refused before its DPoP proof is
+// looked at: no signature is verified for it.
+test("an unknown client with a DPoP proof: 401 invalid_client, and no signature verified", async () => {
+  const w = makeSigninWorld();
+  const pair = await keyPair("PS384", "p");
+  const proof = await dpopProof(pair);
+  const realVerify = crypto.subtle.verify;
+  let verifies = 0;
+  crypto.subtle.verify = async (...a) => { verifies++; return realVerify.apply(crypto.subtle, a); };
+  try {
+    const r = await token(w, { client_id: "https://nobody.example/c", grant_type: "refresh_token", refresh_token: ".ar1.x" }, { DPoP: proof });
+    assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }]);
+    assert.equal(verifies, 0, "the proof was not checked");
+  } finally {
+    crypto.subtle.verify = realVerify;
+  }
 });
 
 test("a parameter sent without a value is treated as omitted (RFC 6749 3.1): an empty scope at a refresh, an empty resource at the exchange, an empty client_secret from a public client, which is no failure either", async () => {
@@ -227,7 +353,7 @@ test("the client the code or refresh token is bound to: another known app's auth
   assert.equal((await exchange(c, { client_id: PUBLIC_APP.client_id })).status, 200, "the code still serves its own app");
 });
 
-test("a key set: a key without a kid is skipped and logged once; the refetch gate grants one fetch per OAUTH_KEYSET_REFETCH_S site-wide, across isolates, failures counted", async () => {
+test("a key set: a key without a kid is skipped and logged once; an isolate holding no set fetches its own; a kid the kept set lacks asks the site-wide gate, one fetch per OAUTH_KEYSET_REFETCH_S across isolates", async () => {
   // inline: a key with no kid is skipped (so the assertion it signs fails) and logged
   const P = await poppyApp();
   const bare = { ...P.es.jwk };
@@ -239,41 +365,49 @@ test("a key set: a key without a kid is skipped and logged once; the refetch gat
     assert.equal(r.status, 401, "the key without a kid is not used");
   });
   assert.deepEqual(lines.filter((l) => l.warn === "oauth.keyset"), [{ warn: "oauth.keyset", error: null, app: "nokid", reason: "no_kid" }]);
-  // a key set at an address (a stand-in's local one, fetch stubbed): two unknown kids within the window make one fetch
+  // a key set at an address (a stand-in's local one, fetch stubbed)
   const real = globalThis.fetch;
   const asked = [];
   let serve = null;
   globalThis.fetch = async (url, init) => { asked.push([String(url), init.redirect, "credentials" in init]); return new Response(JSON.stringify(serve), { status: 200, headers: { "Cache-Control": "max-age=600" } }); };
   try {
+    forgetKeySets();
     const uri = "http://127.0.0.1:9/jwks.json";
     const c = await poppyCode({ app: { key: "remote", client_id: "https://remote.example/c", jwks: undefined, jwks_uri: uri } });
     serve = { keys: [c.es.jwk] };
     let r = await exchange(c, await asserted(c, c.es));
-    assert.equal(r.status, 200, "the first fetch: granted (nothing kept yet): " + r.text);
+    assert.equal(r.status, 200, "an isolate holding no set fetches its own: " + r.text);
     assert.deepEqual(asked, [[uri, "manual", false]], "no redirects followed, and no credentials field (a Worker's fetch sends no cookie)");
-    const fresh = await keyPair("ES256", "es-2");
-    serve = { keys: [c.es.jwk, fresh.jwk] };
-    // a kid this isolate does not hold, within the window: the gate (the app's store, site-wide) is closed
-    r = await exchange(c, await asserted(c, fresh), { code: "x" });
-    assert.equal(r.status, 401, "an unknown kid within the window: no refetch, refused");
-    // another isolate, its memory empty: the gate still closed
-    forgetKeySets();
-    r = await exchange(c, await asserted(c, fresh), { code: "x" });
-    assert.equal(r.status, 401, "a second isolate: still no refetch");
-    assert.equal(asked.length, 1, "one fetch for two unknown kids, across two isolates");
-    // past the window, the refetch is granted and the new key works
-    const name = c.w.asked.find((a) => a.method === "clientNote").name;
-    c.w.harness(name).db.prepare("UPDATE ok SET tried = tried - 31000").run();
-    r = await exchange(c, await asserted(c, fresh), { code: "x" });
-    assert.equal(r.json.error, "invalid_grant", "authenticated with the new key (the code is not one)");
+    // a kid the set lacks: the gate (the app's store, site-wide) grants one fetch, and the new key is taken
+    const k2 = await keyPair("ES256", "es-2"), k3 = await keyPair("ES256", "es-3");
+    serve = { keys: [c.es.jwk, k2.jwk] };
+    r = await exchange(c, await asserted(c, k2), { code: "x" });
+    assert.equal(r.json.error, "invalid_grant", "granted: authenticated with the new key (the code is not one)");
     assert.equal(asked.length, 2);
+    // another kid within the window: the gate is closed, here and in another isolate whose set lacks it too
+    serve = { keys: [c.es.jwk, k2.jwk, k3.jwk] };
+    r = await exchange(c, await asserted(c, k3), { code: "x" });
+    assert.deepEqual([r.status, asked.length], [401, 2], "an unknown kid within the window: no fetch, refused");
+    // a new isolate holds no set: it fetches its own, asking no gate, and finds the key
+    forgetKeySets();
+    r = await exchange(c, await asserted(c, k3), { code: "x" });
+    assert.deepEqual([r.json.error, asked.length], ["invalid_grant", 3], "a new isolate's own fetch");
+    // past the window, the gate grants again
+    const k4 = await keyPair("ES256", "es-4");
+    serve = { keys: [c.es.jwk, k4.jwk] };
+    r = await exchange(c, await asserted(c, k4), { code: "x" });
+    assert.deepEqual([r.status, asked.length], [401, 3], "still within the window");
+    const name = c.w.asked.find((a) => a.method === "clientNote").name;
+    c.w.harness(name).db.prepare("UPDATE ok SET tried = tried - " + (OAUTH_KEYSET_REFETCH_S + 1) * 1000).run();
+    r = await exchange(c, await asserted(c, k4), { code: "x" });
+    assert.deepEqual([r.json.error, asked.length], ["invalid_grant", 4]);
   } finally {
     globalThis.fetch = real;
     forgetKeySets();
   }
 });
 
-test("a key set's time: once it is up the set is a miss, so a key the app removed stops working at the next fetch; the last set serves while the gate refuses or the fetch fails, never past its time plus OAUTH_KEYSET_TTL_MAX_S", async () => {
+test("a key set's time: once it is up the isolate fetches it again itself, asking no gate, so a key the app removed stops working while the site-wide gate is spent; the last set serves only after a fetch that failed, never past its time plus OAUTH_KEYSET_TTL_MAX_S; within OAUTH_KEYSET_REFETCH_S of a failed fetch, no other fetch", async () => {
   const real = globalThis.fetch;
   let serve = null, fail = false, fetches = 0;
   globalThis.fetch = async () => { fetches++; return fail ? new Response("down", { status: 500 }) : new Response(JSON.stringify(serve), { status: 200, headers: { "Cache-Control": "max-age=" + OAUTH_KEYSET_TTL_MIN_S } }); };
@@ -288,30 +422,38 @@ test("a key set's time: once it is up the set is a miss, so a key the app remove
       fail = false;
       fetches = 0;
       assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), end + ": the key fetched and taken");
+      assert.equal(fetches, 1);
       const store = c.w.asked.find((x) => x.method === "clientNote").name;
-      const openGate = () => c.w.harness(store).db.prepare("UPDATE ok SET tried = tried - 31000").run();
       if (end === "removed") {
-        // the app removes es-1; while the set's time lasts the isolate keeps it, once it is up the next fetch drops it
+        // the app removes es-1; while the set's time lasts the isolate keeps it
         serve = { keys: [k2.jwk] };
         assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), "within the set's time: kept");
         await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
-          openGate();
+          // the site-wide gate spent (by unknown kids, elsewhere): its time up, the isolate fetches its set all the same
+          const spent = Date.now();
+          c.w.harness(store).db.prepare("INSERT INTO ok (k, tried) VALUES (1, ?) ON CONFLICT(k) DO UPDATE SET tried = excluded.tried").run(spent);
           const r = await exchange(c, await asserted(c, c.es), { code: "x" });
           assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], "its time up: fetched again, and the removed key refused");
-          assert.equal(fetches, 2);
+          assert.equal(fetches, 2, "one fetch");
+          assert.equal(c.w.harness(store).one("SELECT tried FROM ok").tried, spent, "the gate was not asked");
           assert.ok(authed(await exchange(c, await asserted(c, k2), { code: "x" })), "the new key taken");
         });
       } else {
-        // the set cannot be fetched: the last one serves within its bound, and not past it
+        // the set cannot be fetched: the last one serves after the failed fetch, within its bound
         fail = true;
         await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
-          openGate();
           assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), "a failed fetch: the last set, within its bound");
+          assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), "again within the window");
+          assert.equal(fetches, 2, "two requests within OAUTH_KEYSET_REFETCH_S of a failed fetch: one fetch");
+        });
+        await later((OAUTH_KEYSET_TTL_MIN_S + OAUTH_KEYSET_REFETCH_S + 2) * 1000, async () => {
+          assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), "past the window: fetched again, failed, the last set");
+          assert.equal(fetches, 3);
         });
         await later((OAUTH_KEYSET_TTL_MIN_S + OAUTH_KEYSET_TTL_MAX_S + 1) * 1000, async () => {
-          openGate();
           const r = await exchange(c, await asserted(c, c.es), { code: "x" });
           assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], "an outage past the bound: no set, refused");
+          assert.equal(fetches, 4, "the fetch was tried, and failed");
         });
       }
     }

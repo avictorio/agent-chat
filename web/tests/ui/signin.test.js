@@ -192,10 +192,20 @@ async function scenario(name, o, fn) {
     // no cookie on any origin
     const jar = await ctx.cookies();
     if (jar.length) throw new Error('a cookie was set: ' + JSON.stringify(jar.map((c) => c.domain + ' ' + c.name)));
-    // every tab's sessionStorage on the site holds the seeding flag alone (a tab that left the site is brought back to a blank page of it to read its own)
+    // every tab's last address on the site: the approval page's carries no fragment, any other the one the
+    // scenario opened, and none holds a history state; and the tab's sessionStorage there holds the seeding
+    // flag alone (a tab that left the site is taken back to its last entry there; one never on it reads a
+    // blank page of the site)
+    const opened = new URL(o.url || authorizeUrl(o.app || 'claude')).hash;
     for (const pg of ctx.pages()) {
       if (pg.isClosed()) continue;
-      if (new URL(pg.url()).origin !== ORIGIN) await pg.goto(ORIGIN + '/__session');
+      if (new URL(pg.url()).origin !== ORIGIN) await pg.goBack({ waitUntil: 'domcontentloaded' }).catch(() => null);
+      if (new URL(pg.url()).origin === ORIGIN) {
+        const u = new URL(pg.url());
+        const st = await pg.evaluate(() => history.state);
+        const want = u.pathname === '/oauth/authorize' ? '' : opened;
+        if (u.hash !== want || st !== null) throw new Error('the address on the site keeps more than it was opened with: ' + JSON.stringify({ fragment: u.hash !== want, state: st !== null }));
+      } else await pg.goto(ORIGIN + '/__session');
       const ss = await pg.evaluate(() => Object.entries(sessionStorage));
       if (JSON.stringify(ss) !== '[["seeded","1"]]') throw new Error('sessionStorage holds more than the seeding flag: ' + JSON.stringify(ss.map(([k]) => k)));
     }
@@ -227,7 +237,10 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
 const text = (page, sel) => page.$eval(sel, (e) => e.innerText.replace(/\s+/g, ' ').trim());
 const row = (page, room) => page.$eval('#signinRooms li[data-room="' + room + '"]', (e) => e.innerText.replace(/\s+/g, ' ').trim());
 const tick = (page, room) => page.click('#signinRooms li[data-room="' + room + '"] .key-pick input');
-const connect = (page) => page.click('#signinConnect');
+// the two buttons, clicked without waiting for the navigation they may start: a callback that answers 204
+// (stayBack) never commits one, and Playwright's wait for it can then run out (each scenario waits for what it needs)
+const connect = (page) => page.click('#signinConnect', { noWaitAfter: true });
+const deny = (page) => page.click('#signinDeny', { noWaitAfter: true });
 const decides = (S) => S.calls.filter((c) => c.p === '/api/oauth/decide');
 // the page's own sentences
 const NEVER = 'Agent Chat never sends you a link to approve a connection: approve only one you started yourself, in your own app, a moment before.';
@@ -415,6 +428,16 @@ const USED = "This sign-in link has already been used. If you just approved it a
     must(page.url() === at && !S.backs.length && (await page.evaluate(() => window.__ran)) === undefined, 'no navigation, and no script ran');
     must(!(await page.$('#signinConnect')) && !(await page.$eval('#signinDeny', (b) => b.disabled)), "Don't connect stays");
   });
+  // nor a data: or a blob: address: only http and https are followed
+  for (const [kind, to] of [['data', 'data:text/html,<script>opener=null</script>'], ['blob', 'blob:' + ORIGIN + '/0b4c5d6e-0000-4000-8000-000000000000']]) {
+    await scenario('signin-stopped-' + kind, { app: 'claude', api: { decide: async (body) => (body.check ? { body: { redirect: to } } : DECIDE('claude')(body)) } }, async (page, S) => {
+      const at = page.url();
+      await tick(page, 'family-trip');
+      await connect(page);
+      await page.waitForSelector('#signinStopped', { timeout: 5000 });
+      must((await text(page, '#signinStopped')) === UNFOLLOWED && page.url() === at && !S.backs.length, 'a ' + kind + ': address is not followed');
+    });
+  }
   await state('success', { app: 'claude', api: { decide: DECIDE('claude') }, stayBack: true, stored: /^chat-signin:/ }, async (page, S) => {
     await tick(page, 'family-trip');
     await connect(page);
@@ -423,7 +446,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
     return { back: S.backs[0] };
   });
   await state('declined', { app: 'claude', api: { decide: DECIDE('claude') }, stayBack: true }, async (page, S) => {
-    await page.click('#signinDeny');
+    await deny(page);
     await page.waitForFunction(() => document.getElementById('signinSay')?.textContent === 'Not connected. Returning you to Claude…', null, { timeout: 5000 });
     must(await until(() => S.backs.length === 1) && /error=access_denied/.test(S.backs[0]), 'the deny redirect: ' + S.backs[0]);
   });
@@ -437,7 +460,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
   }, '#signinReuse');
   const wrong = { decide: async () => ({ status: 400, body: { error: 'This sign-in request is not valid.', code: 'invalid_request' } }) };
   await state('wrong', { app: 'claude', api: wrong }, async (page) => {
-    await page.click('#signinDeny');
+    await deny(page);
     await page.waitForSelector('#signinWrong', { timeout: 5000 });
     must((await text(page, '#signinWrong')) === "This sign-in link doesn't match the app it names, so it was stopped. Nothing was shared. Start again from the app.", await text(page, '#signinWrong'));
     must(!(await page.$('#signinDeny')) && !(await page.$('#signinConnect')), 'no button: the app is to start again');
@@ -517,7 +540,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
     const sent = S.calls.filter((c) => c.p === '/api/oauth/disconnect').map((c) => c.body);
     must(JSON.stringify(sent) === JSON.stringify([{ code: DCODE }]), 'one disconnect, with the code: ' + JSON.stringify(sent));
     must(!S.backs.length, 'the callback is not reached: ' + JSON.stringify(S.backs));
-    await page.click('#signinDeny');
+    await deny(page);
     await page.waitForSelector('#back', { timeout: 10000 });
     must(S.backs.length === 1 && S.backs[0] === back('claude', { error: 'access_denied', state: 'st-1' }), "Don't connect tells the app: " + JSON.stringify(S.backs));
     must(decides(S).length === 3 && decides(S)[2].body.approve === false, 'the decline');
@@ -541,7 +564,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
   });
   // an answer the page will not follow, to the decline: it stays, says so, and Don't connect can be chosen again
   await scenario('signin-stopped-decline', { app: 'claude', api: { decide: async (body) => (body.approve === false ? { body: { redirect: 'javascript:window.__ran=1' } } : DECIDE('claude')(body)) } }, async (page, S) => {
-    await page.click('#signinDeny');
+    await deny(page);
     await page.waitForSelector('#signinStopped', { timeout: 5000 });
     must((await page.evaluate(() => window.__ran)) === undefined && !S.backs.length, 'not followed');
     must(!(await page.$eval('#signinDeny', (b) => b.disabled)), "Don't connect again");
@@ -571,7 +594,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
     must(!(await page.$('#signinAgentsOnly')) && !!(await page.$('#signinForm')) && (await page.$eval('#signinConnect', (b) => b.disabled)), 'the form, no sentence, and Connect waiting');
   });
   await scenario('signin-decline-requests', { app: 'claude', api: { decide: DECIDE('claude') } }, async (page, S) => {
-    await page.click('#signinDeny');
+    await deny(page);
     await page.waitForSelector('#back', { timeout: 10000 });
     const d = decides(S);
     must(d.length === 1 && JSON.stringify(d[0].body) === JSON.stringify({ params: new URL(authorizeUrl('claude')).search.slice(1), approve: false }), JSON.stringify(d.map((x) => x.body)));

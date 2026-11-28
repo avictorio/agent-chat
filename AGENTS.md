@@ -90,7 +90,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
 | Worker script | `victorio-chat` |
 | Code | `worker/` (entry `worker/index.ts`), `web/`, `contract/`: see Repository layout. `.txt`, `.md` and `.sh` files are text modules (`wrangler.toml`'s Text rule). |
-| Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*`, the sign-in's documents and approval page `/.well-known/*` and `/oauth/*`, and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`. |
+| Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*`, the sign-in's documents and approval page `/.well-known/*` and `/oauth/*`, and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`, and at `/oauth/authorize` with that page's own headers (`AUTHORIZE_HEADERS`). |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
 | Related repos | `avictorio/muse-gadget` (the ESP32 gadget's firmware patch and tools, locally `C:\users\operator\dev\muse-gadget`), with its own AGENTS.md. This repo serves the gadget's guide (`/muse-gadget`, `worker/routes/pages.ts`, images in `web/app/public/muse-gadget/`; retake them over USB when the gadget's screens change) and its terms (`/muse-terms`). It is the only related repo: the Muse bridge came from `avictorio/muse-bridge` at `ef113b6` into `worker/bridge/`, `tests/bridge/` and `scripts/bridge/`, runs inside this Worker (`docs/agents/muse-bridge.md`) and changes here only; the separate `muse-bridge` Worker it replaces is retired (section 8). muse-gadget's `tools/agent_chat/seal_check.ts`, which checks that the gadget's C seals open with the bridge's code, still loads `<dir>/src/seal.ts` from a directory it is given: give it one whose `src` links to this repo's `worker/bridge`, under this repo's loader (`docs/agents/muse-bridge.md`, The sealed handover). |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
@@ -203,8 +203,11 @@ rooms' invites sealed under the key (`docs/agents/rooms-and-api.md`,
 Agent keys), and one per sign-in connection, the same kind of object
 with a slot per credential (`docs/agents/rooms-and-api.md`, Sign-in).
 The sign-in adds two kinds there: `__oauth-quota` holds the
-failed-authentication counters per network (and, under `TEST_HOOKS`
-only, the stand-in apps of `/api/test-hooks/oauth-app`), and one
+failed-authentication counters of the token and revocation endpoints, one
+per network and app, a place taken only when a signature check ran for a
+known app's assertion and none matched, and asked only after that
+assertion's claims pass and before its key and signature (and, under
+`TEST_HOOKS` only, the stand-in apps of `/api/test-hooks/oauth-app`), and one
 `__oauth-client-<32 hex>` per known app (the hash of its `client_id`)
 holds the hashes it has seen (an assertion's or a DPoP proof's `jti`,
 as long as that could still be accepted; an approved request, for
@@ -347,10 +350,12 @@ The home page and the room page share one on-device identity model.
   storage, a URL or the history. So Forget
   (`forgetRoomKeys`) has nothing new to forget. It reads the device's
   `chat-invite:*` tokens to offer the rooms a person can make a key from.
-- `chat-signin:<id>` = `{app, name, at, rooms, code}`: one record per connection approved in this browser (with
-  `OAUTH_DISCONNECT_CODE` on), and nothing else of the sign-in. `code` is the connection's disconnect-only code: it can only disconnect
-  it (it opens the wake list inside the Worker, never the room list). Agent keys view lists and removes these; Home's Forget does not
-  touch them.
+- `chat-signin:<id>` = `{app, name, at, rooms, code}`: one record per connection approved in this browser and
+  handed to its app (with `OAUTH_DISCONNECT_CODE` on), and nothing else of the sign-in. A connection whose record the browser cannot
+  keep is never handed to the app: the page stops, disconnects it once, and says so. A disconnect that leaves rooms to retry keeps the
+  record; one that ends it, or whose list could not be read (the connection is deleted then), removes it. `code` is the connection's
+  disconnect-only code: it can only disconnect it (it opens the wake list inside the Worker, never the room list). Agent keys view lists
+  and removes these; Home's Forget does not touch them.
 
 ---
 
@@ -735,9 +740,10 @@ native-only features. The Android app is retired (section 8).
   seats only as that invite's holder could by inviting, and answers no
   token: the seats it makes go onto the key, sealed, and a refused token
   learns nothing about its room. A sign-in, like a key, never gives out a
-  room's token: the approval page sends the person's tokens only to
-  `POST /api/oauth/decide`, same-origin, whose answer carries none, and
-  the seats go onto the connection, sealed.
+  room's token: the approval page sends the person's tokens only to this
+  origin, to each room's look (`GET /invite`, which opens nothing) and to
+  `POST /api/oauth/decide`, whose answer carries none, and the seats go
+  onto the connection, sealed.
 - **Trust follows the credential that created the content:** a server
   convenience path (an auto-publish, a game's post) acts as the member,
   with `owner` false.

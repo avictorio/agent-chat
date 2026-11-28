@@ -8,7 +8,7 @@
 // moving; an unreadable wake list. Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeSigninWorld, people, signIn, revoke, token, clientAuth, poppyApp, PUBLIC_APP, ADDRESS, signins, signin, toolCall, museSignIn, hookOf, holdersOf, disconnect } from "./signin-world.mjs";
+import { makeSigninWorld, people, signIn, revoke, token, clientAuth, poppyApp, keyPair, PUBLIC_APP, ADDRESS, signins, signin, toolCall, museSignIn, hookOf, holdersOf, disconnect } from "./signin-world.mjs";
 import { AGENT_SWAP_TRIES, OAUTH_QUOTA_ROOM } from "../../worker/limits.ts";
 import { signinDropNote } from "../../worker/agents/onboarding.ts";
 import { resetWarnings } from "../../worker/lib/log.ts";
@@ -61,7 +61,7 @@ test("an access token issued to the client ends itself only; anything else, unkn
   assert.equal((await signin(w, r3.json.access_token, toolCall("list_rooms"))).status, 200, "nothing of those ended anything");
 });
 
-test("the client authenticates by kind first: an unknown client or a failed assertion is 401 invalid_client (WWW-Authenticate only for an Authorization header sent), counted, and nothing is revoked", async () => {
+test("the client authenticates by kind first: an unknown client, a request with no assertion or a failed assertion is 401 invalid_client (WWW-Authenticate only for an Authorization header sent) and revokes nothing; only a failed assertion check is counted", async () => {
   const P = await poppyApp();
   const w = makeSigninWorld([P.app]);
   const pat = people(w, ["lima"]);
@@ -75,8 +75,13 @@ test("the client authenticates by kind first: an unknown client or a failed asse
   const get = await read(revokeRoute(w.rc("GET", "/api/oauth/revoke")));
   assert.deepEqual([get.status, get.json.error, get.headers.get("Allow")], [405, "invalid_request", "POST"]);
   w.harness(OAUTH_QUOTA_ROOM).room.setTestAgentLimits({ per_ip: 3 });
+  assert.deepEqual((await revoke(w, { token: ".ar1.x", ...(await clientAuth(P.app, P.es)) })).json, {}, "those three took no place: an assertion is still checked");
+  // three assertions that fail their signature check (a key of the same kid the app does not hold) fill the app's counter
+  const wrong = await keyPair("ES256", P.es.jwk.kid);
+  for (let i = 0; i < 3; i++) assert.equal((await revoke(w, { token: s.refresh, ...(await clientAuth(P.app, wrong)) })).status, 401);
   const full = await revoke(w, { token: s.refresh, ...(await clientAuth(P.app, P.es)) });
-  assert.equal(full.status, 429, "the failures counted");
+  assert.deepEqual([full.status, full.json.error], [429, "slow_down"], "the failed checks counted");
+  assert.equal(signins(w).length, 1, "nothing revoked");
   w.harness(OAUTH_QUOTA_ROOM).room.setTestAgentLimits(null);
   assert.deepEqual((await revoke(w, { token: s.refresh, ...(await clientAuth(P.app, P.es)) })).json, {});
   assert.deepEqual(signins(w), []);

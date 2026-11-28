@@ -145,6 +145,22 @@ test("parameters sent twice: client_id and redirect_uri are the wrong-address pa
   assert.equal(params(one.headers.get("Location")).error, "invalid_target");
 });
 
+// The duplicate check reads the query as sent: a parameter sent twice is
+// refused even when one of the two is empty (RFC 6749 3.1, "MUST NOT be
+// included more than once"), before empty values are taken as omitted.
+test("a parameter sent twice, one of them empty, is still sent twice: client_id=&client_id=X and redirect_uri=&redirect_uri=X are the wrong-address page, state=&state=x is invalid_request by redirect", async () => {
+  const w = makeSigninWorld();
+  const { challenge } = await pkce();
+  const page = "This sign-in link doesn't match the app it names, so it was stopped. Nothing was shared. Start again from the app.";
+  for (const [what, extra] of [["client_id", { client_id: ["", PUBLIC_APP.client_id] }], ["redirect_uri", { redirect_uri: ["", "http://127.0.0.1:4000/callback"] }]]) {
+    const r = await authorize(w, authzQuery(PUBLIC_APP, challenge, extra));
+    assert.deepEqual([r.status, r.headers.get("Location"), r.text.includes(page)], [400, null, true], what + " sent empty and with a value");
+  }
+  const r = await authorize(w, authzQuery(PUBLIC_APP, challenge, { state: ["", "x"] }));
+  assert.equal(r.status, 302);
+  assert.equal(params(r.headers.get("Location")).error, "invalid_request");
+});
+
 test("resource: the sign-in address or the domain, with an upper-case scheme or host or a trailing slash; nothing else", async () => {
   const w = makeSigninWorld();
   const { challenge } = await pkce();

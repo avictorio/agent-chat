@@ -660,8 +660,8 @@ test("/api names the MCP revisions initialize answers and the MCP headers CORS a
   assert.ok(mcp.includes("protocolVersion"), "found the MCP paragraph");
   for (const line of mcp.split("\n")) assert.ok(line.length <= 96, "an MCP line is " + line.length + " columns once filled: " + line);
   const written = TEXT.slice(TEXT.indexOf("\nROOM TOOLS\n"), TEXT.indexOf("\nTAKING TURNS"));
-  // the one date written in is the day rooms began to keep who set up each Muse hook (a hook set
-  // before it cannot be told from a key's own); no MCP revision is written in
+  // the one date written in is the moment from which rooms keep who sets up each Muse hook (a hook
+  // set before it cannot be told from a wake an untagged key set up); no MCP revision is written in
   const dates = written.match(/\b20\d\d-\d\d-\d\d\b/g) ?? [];
   assert.ok(written.length > 500, "found the sections");
   assert.deepEqual(dates, ["2026-11-27"], "docs.txt writes no revision date itself");
@@ -715,12 +715,14 @@ test("/api's SIGNING IN says where Claude and Claude Code connect, who approves,
     "The address serves the tools of AGENT KEYS but add_room",
     "leave_room there also takes the room off the connection, and remove_room takes off only a room that refused its seat",
     "muse_register works there too",
-    "Only apps Agent Chat knows can connect; any other app is told so and nothing is shared",
+    "Only apps Agent Chat knows can connect; any other app's sign-in stops on a page that says so, and nothing is shared.",
+    "(to add rooms, ask them to approve the app again, ticking every room it should hold: that is a new connection, and under the same name the agent keeps the seats it has)",
     "Agent keys keep working at " + o + "/api/mcp; that address never takes a sign-in, and this one never takes a key.",
   ]) assert.ok(d.includes(want), "SIGNING IN lacks " + want);
   assert.ok(d.trimEnd().endsWith("Agent Chat never sends you a link to approve a connection: approve only one you started yourself, in your own app, a moment before."), "it ends with the approval page's reminder");
   assert.ok(!/poppy|well-known|Muse[^.]*sign/i.test(d), "nothing of Muse signing in");
   assert.ok(full.replace(/\s+/g, " ").includes("and the sign-in's approval (it invites agents with your own invite: SIGNING IN)."), "START HERE names the approval among the calls that act without joining");
+  assert.ok(full.replace(/\s+/g, " ").includes("get_invite and get_start_page, and the same calls on the sign-in address (SIGNING IN), which has no add_room; the public pages"), "START HERE names the sign-in address's calls among those that only look");
   assert.ok(full.includes("\n  To connect Claude or Claude Code without a key, see SIGNING IN.\n"), "AGENT KEYS points to it");
   assert.ok(primer(o).includes("\nClaude and Claude Code can sign in instead: SIGNING IN at " + o + "/api.\n"), "the primer points to it");
 });
@@ -738,11 +740,11 @@ test("/api says a key's take-off and disconnect let go of its Muse wakes, and wh
   }
   for (const want of [
     "or disconnecting the key first lets go of every Muse wake the key set up there: the wake goes when nothing else holds it, and stays on while another key or connection holding the same seat, or a hook you set yourself with the room's own token, holds it",
-    "(a hook you set yourself for the same Muse before 2026-11-27 cannot be told from the key's own, and goes with it). A hook several hold keeps the routing of the last set.",
+    "(a hook you set yourself before 23:00 UTC on 2026-11-27 cannot be told from a wake a key set up before keys had tags of their own, and goes when that key lets go of it). A hook several hold keeps the routing of the last set.",
     "the room says the key holds no hook there on that link (the room keeps, beside each Muse hook, who set it up: each key and connection by a random tag of its own, a hook you set with the room's own token, and hooks older than these holders)",
     "muse_wakes_removed (rooms where a wake it let go of went off) and muse_wakes_left (rooms that did not confirm it let go:",
     "another key or connection that holds the same seat still works for it",
   ]) assert.ok(keys.includes(want), "AGENT KEYS lacks " + want);
   assert.ok(errs.includes("a room has not confirmed that your key has let go of the Muse wake it set up there") && errs.includes("taking the room off or disconnecting lets go of it either way"), "the errors say let go");
-  assert.ok(muse.includes("A hook you set with your room's own token stays when a key or connection that also set it up for your seat lets go of it."), "MUSE DELIVERY says a hook of the room's own token stays");
+  assert.ok(muse.includes("A hook you set with your room's own token stays when a key or connection that also set it up for your seat lets go of it (one exception, for a hook set before 23:00 UTC on 2026-11-27: AGENT KEYS)."), "MUSE DELIVERY says a hook of the room's own token stays, and points at the one exception");
 });

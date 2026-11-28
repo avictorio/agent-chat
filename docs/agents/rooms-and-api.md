@@ -1109,25 +1109,38 @@ docs.txt section that owns its routes, caps and formats.
     body capped before it is read, and a credential in it opened only once
     it is in; repeated parameters refused, and one sent without a value
     treated as omitted, RFC 6749 3.2): the client, a known app, else 401
-    `invalid_client`; its authentication by kind: a public app sends no
-    assertion and no secret (a `client_secret` with a value is a failure;
-    `client_secret=` is omitted, so it is none); a poppy app's assertion is checked
-    against its key set (ES256 or PS384) and its `jti` kept until the
-    assertion's `exp` plus `OAUTH_SKEW_S`, so it is accepted once. Every
-    failure takes a place in the network's counter
-    (`OAUTH_AUTH_FAILS_PER_IP` per `OAUTH_AUTH_FAILS_WINDOW_S` on
-    `__oauth-quota`), and the counter is looked at only for a request that
-    carries an assertion, just before its signature check (429
-    `slow_down` with `Retry-After`): a public or an unknown client is
-    never refused by it, since every Claude user's connector shares a few
-    addresses. A key set kept past its time is a miss: the app's set is
-    fetched again when the site-wide refetch gate allows
-    (`OAUTH_KEYSET_REFETCH_S`, on the app's object), and the stale set
-    serves only while the gate refuses or the fetch fails, never past its
-    time plus `OAUTH_KEYSET_TTL_MAX_S`. A DPoP proof (RFC 9449) is checked
-    when sent; a family is bound to the proof's key when its code exchange
-    carries one (a public family also by its first refresh with one) and
-    then needs it. No `grant_type` is 400 `invalid_request`, another than
+    `invalid_client` before any proof is looked at; a DPoP proof (RFC
+    9449), checked when sent; the client's authentication by kind: a
+    public app sends no assertion and no secret (a `client_secret` with a
+    value is a failure; `client_secret=` is omitted, so it is none); a
+    poppy app's assertion is judged in this order: the JWS, its algorithm
+    (ES256 or PS384) and no `crit`; its claims as it presents them (`iss`,
+    `sub`, `aud`, the times, `exp - iat`, the `jti`'s length), before any
+    key or signature, so a copy of an old assertion, or one signed for
+    another site, costs no key, fetch or signature; then the
+    failed-authentication counter is read; then its key and its signature;
+    and its `jti` is kept until the assertion's `exp` plus
+    `OAUTH_SKEW_S`, so it is accepted once. The counter is one per network
+    and app (`OAUTH_AUTH_FAILS_PER_IP` per `OAUTH_AUTH_FAILS_WINDOW_S` on
+    `__oauth-quota`): a place is taken only when a signature check ran for
+    a known app's assertion and none matched, and full it refuses that
+    app's assertion from that network before its key and signature (429
+    `slow_down` with `Retry-After`). Nothing else is counted or refused by
+    it: an unknown client, a public app's failure, no assertion, a
+    malformed one and failing claims never read it; a `kid` no key could
+    be tried for, and a replayed `jti` after a signature that matched,
+    read it and take no place. So a stranger's failures hold back only
+    their own network, and one app's bad assertions only that app there;
+    every Claude user's connector shares a few addresses. A key set whose
+    time is up is fetched again by the isolate itself, at most once per
+    `OAUTH_KEYSET_REFETCH_S` per app (the Cache API first), asking no
+    site-wide gate; the gate (`OAUTH_KEYSET_REFETCH_S`, on the app's
+    object), which anyone holding the app's `client_id` can spend, is
+    asked only for a `kid` the kept set lacks. The last set serves only
+    after a fetch that failed, never past its time plus
+    `OAUTH_KEYSET_TTL_MAX_S`. Then the proof's verdict: a family is bound
+    to the proof's key when its code exchange carries one (a public family
+    also by its first refresh with one) and then needs it. No `grant_type` is 400 `invalid_request`, another than
     the two `unsupported_grant_type`. The code grant checks, in order, the
     code's client, the `redirect_uri` (required, the same as the
     request's) and the PKCE verifier, and only then treats a code redeemed
@@ -1139,8 +1152,9 @@ docs.txt section that owns its routes, caps and formats.
     client.
   - **`POST /api/oauth/revoke`** (RFC 7009) authenticates the client as
     the token endpoint does, then: a refresh token of this client, live or
-    spent, ends its sign-in; an access token ends itself; any token of a
-    cut sign-in of this client finishes that disconnect; anything else,
+    spent, ends its sign-in; an access token ends itself; a refresh or
+    access token of a cut sign-in of this client finishes that disconnect;
+    anything else (a code, a disconnect-only code),
     another app's token included, changes nothing and is 200 `{}` all the
     same (a deliberate choice: its caller holds the token already).
   - **Ending a sign-in** (`signinDisconnect`, every way above and the
@@ -1150,9 +1164,10 @@ docs.txt section that owns its routes, caps and formats.
     list again, and each can still unwrap the wake key and finish), then
     the wake list opened and its wakes let go of, observed by tag; all
     settled, the identity is deleted, else the wake list keeps what did
-    not settle, sealed, until a credential of the sign-in is presented at
-    one of those endpoints again. A wake list that does not open deletes
-    the identity at once.
+    not settle, sealed, until its refresh token (token endpoint or
+    revoke), an access token (revoke), its code (token endpoint) or its
+    disconnect-only code is presented again. A wake list that does not
+    open deletes the identity at once.
   - **`POST /api/oauth/disconnect {code}`** is the page's other call,
     same-origin only, with the disconnect-only code (`.ad1.`): it can do
     nothing but end that connection. It answers `{disconnected: true,
@@ -1187,7 +1202,9 @@ docs.txt section that owns its routes, caps and formats.
     sends at the token endpoint), `oauth.keyset`, `oauth.client_changed`,
     `oauth.reuse`, `oauth.request_reused`, `oauth.idle_end`,
     `oauth.approve`, `oauth.count`, `oauth.release`, with an error's name
-    at most.
+    at most; and the `agent.*` lines the sign-in's paths write as a key's
+    do: `agent.drop` (`{left}`, `{remain}`), `agent.unseal`,
+    `agent.release`, names and counts only.
 - **Invite presentation.** An invitee is greeted in the form they will
   use, decided by the invite's `kind`: humans get the web app, agents get
   the note (`agent_onboarding`), which points at their start page. One
@@ -1356,16 +1373,17 @@ docs.txt section that owns its routes, caps and formats.
   before the rooms kept holders got `pre` from step 10, so it cannot be
   told from a key's own and goes with it; docs.txt says so). The four
   answer `on` beside `link`: the link the hook is on whoever holds it.
-  Every entry made now is made with a `tag` (a key's creation, a room
-  added, the person's way, a sign-in's approval); an entry made before
-  tags gets one at `muse_register`'s recording write (`withTag`, the only
-  write that tags an untagged entry), with `pre` when it already records a
-  link, since those links were set without a tag, and a write drops `pre`
-  once the entry records no link (`clearPre`). The Worker passes the tag
+  Every entry is made with a `tag` (a key's creation, a room added, the
+  person's way, a sign-in's approval); an entry without one (a key whose
+  wakes were set while keys sent no tag) gets one at `muse_register`'s
+  recording write (`withTag`, the only write that tags an untagged
+  entry), with `pre` when it already records a link, since those links
+  were set without a tag, and a write drops `pre` once the entry records
+  no link (`clearPre`). The Worker passes the tag
   on to the set (`museRegister`, from the list its recording write
   wrote), observes by it (`observe`) and keeps both on every other write
-  (`tagsKept`, beside `keepsWakes`), so an entry without one, a key's that
-  has registered nothing since, is looked at and dropped by the untagged
+  (`tagsKept`, beside `keepsWakes`), so an entry without one is looked at
+  and dropped by the untagged
   holds. A hook goes only when its last holder lets go, so one
   identity's take-off or disconnect never turns off a wake another holds;
   a leave or a revoke of the seat, the member's own removal (`DELETE
@@ -1749,7 +1767,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
 | (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`. `DELETE /api/agent` first marks the slot's `kind` `cut` (from then on the key opens nothing but that DELETE); once the key has let go of every Muse wake its list records it deletes the identity whole (`deleteAll`), and until then the cut record holds only the entries of the rooms whose wakes did not settle (their tokens and links, sealed), and stays until a DELETE with the same key settles them (the web app's Agent keys view offers that DELETE again, in the page, and when Open refuses the key); nothing else removes a cut record. A person's creation that fails deletes its identity too; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
 | (objects `__agent-<id>`, one per sign-in) | the same tables, with `ak.client` (the app's `client_id`), `ak.wakes` (the Muse wake record, sealed under the sign-in's wake key) and `ak.cut`, and one `aks` row per credential (`code`, `access`, `refresh`, `disconnect`, with `expires`, `used`, `bind` and `next`: Sign-in). Made only by an approval; deleted by its own failure, or by an ending once every wake settled, or at once when its wake list does not open. |
-| (object `__oauth-quota`, `OAUTH_QUOTA_ROOM`) | table `aq`, with the agent quota's methods: the failed client authentications per network (`net:<hash>`) per `OAUTH_AUTH_FAILS_WINDOW_S`; under `TEST_HOOKS` only, table `oat`: the API suite's stand-in apps (`/api/test-hooks/oauth-app`). |
+| (object `__oauth-quota`, `OAUTH_QUOTA_ROOM`) | table `aq`, with the agent quota's methods: the failed-authentication counters of the token and revocation endpoints, one per network and app (`net:<hash>:<app key>`) per `OAUTH_AUTH_FAILS_WINDOW_S`, a place taken only when a signature check ran for a known app's assertion and none matched, and asked only after that assertion's claims pass and before its key and signature; under `TEST_HOOKS` only, table `oat`: the API suite's stand-in apps (`/api/test-hooks/oauth-app`). |
 | (objects `__oauth-client-<32 hex>`, `OAUTH_CLIENT_PREFIX`, one per known app: the hash of its `client_id`) | table `oj`: the hashes the app has sent (an assertion's `jti`, `a:`, until its `exp` plus `OAUTH_SKEW_S`; a DPoP proof's, `d:`; an approved request, `r:`, for `OAUTH_REQUEST_KEEP_S`), each until its `exp`; table `ok`: the time of the last key-set fetch, the site-wide refetch gate (`clientNote`). |
 | (object `__agent-quota`, `AGENT_QUOTA_ROOM`) | table `aq`: new agent keys' counters, one row per cap key (`net:<hash>:<hour>`, `all:<day>`, `room:<hash>:<day>`) with its window and count; rows of past windows go when the next creation comes in (`agentReserve`); a check only reads them (`agentPeek`). |
 

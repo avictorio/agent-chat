@@ -156,8 +156,8 @@ function MakeKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
     if (made && cardRef.current) cardRef.current.focus();
   }, [made]);
   const settled = rooms.length > 0 && rooms.every((r) => (looks[r.room] || CHECKING).state !== "checking");
-  const person = rooms.some((r) => (looks[r.room] || CHECKING).state === "person");
-  const agentsOnly = settled && !person && rooms.some((r) => (looks[r.room] || CHECKING).state === "agent");
+  // said only when every room's invite is an agent's: any other mix leaves the rows to say why each one can't be ticked
+  const agentsOnly = settled && rooms.every((r) => (looks[r.room] || CHECKING).state === "agent");
   if (made) {
     return (
       <KeyMade

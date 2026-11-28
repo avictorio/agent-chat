@@ -348,8 +348,13 @@ export const OAUTH_SKEW_S = 30;
 export const OAUTH_DPOP_WINDOW_S = 60;
 // A known app's key set: at most OAUTH_KEYSET_MAX_BYTES, fetched within
 // OAUTH_FETCH_TIMEOUT_MS, cached between OAUTH_KEYSET_TTL_MIN_S and
-// OAUTH_KEYSET_TTL_MAX_S, refetched at most once per OAUTH_KEYSET_REFETCH_S
-// site-wide (failures included); an assertion with no kid tries at most
+// OAUTH_KEYSET_TTL_MAX_S. An isolate holding no set whose time lasts fetches
+// it again itself, at most once per OAUTH_KEYSET_REFETCH_S per app; an
+// assertion whose kid the kept set lacks asks for a fetch at most once per
+// OAUTH_KEYSET_REFETCH_S site-wide (failures included), a gate anyone with
+// the app's client_id can spend, so it never holds back a set whose time is
+// up. The last set serves only after a fetch that failed, and never past its
+// time plus OAUTH_KEYSET_TTL_MAX_S. An assertion with no kid tries at most
 // OAUTH_KEYS_TRIED_MAX keys.
 export const OAUTH_KEYSET_MAX_BYTES = 65536;
 export const OAUTH_FETCH_TIMEOUT_MS = 5000;
@@ -357,12 +362,18 @@ export const OAUTH_KEYSET_TTL_MIN_S = 60;
 export const OAUTH_KEYSET_TTL_MAX_S = 86400;
 export const OAUTH_KEYSET_REFETCH_S = 30;
 export const OAUTH_KEYS_TRIED_MAX = 10;
-// Failed client authentications per network per OAUTH_AUTH_FAILS_WINDOW_S
-// (the counters on OAUTH_QUOTA_ROOM, with the agent quota's methods); once
-// full, a request carrying a client assertion is refused 429 before its
-// signature check, and a public or an unknown client never is (every Claude
-// user's connector shares a few addresses). A token, revoke or disconnect
-// body is at most OAUTH_FORM_MAX.
+// Failed signature checks of one app's client assertions from one network
+// per OAUTH_AUTH_FAILS_WINDOW_S (the counters on OAUTH_QUOTA_ROOM, with the
+// agent quota's methods, keyed by the network and the app): an assertion
+// whose signature was checked and matched no key takes a place; once full,
+// that app's next assertion from that network is refused 429 before any
+// fetch or signature check. Only that work costs anything, and it is limited
+// by network as an unverified request is: nothing else takes a place or asks
+// the counter (a request naming no known app, a public app's failure, no
+// assertion, a malformed one, claims that fail, a jti seen already, a kid no
+// key could be tried for), so a stranger's failures hold back nobody but
+// their own network (every Claude user's connector shares a few addresses).
+// A token, revoke or disconnect body is at most OAUTH_FORM_MAX.
 export const OAUTH_AUTH_FAILS_PER_IP = 20;
 export const OAUTH_AUTH_FAILS_WINDOW_S = 600;
 export const OAUTH_FORM_MAX = 8192;

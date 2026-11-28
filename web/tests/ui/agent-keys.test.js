@@ -241,6 +241,18 @@ async function worker() {
     await page.waitForSelector('#keyAgentsOnly', { timeout: 5000 });
     must((await text(page, '#keyAgentsOnly')) === "Every invite this browser holds is an agent's. A key is made with a person's own invite: open your own invite link here first.", await text(page, '#keyAgentsOnly'));
   });
+  // only when every invite is an agent's does the view say so: beside a room whose look failed, or one that is gone, the rows say why
+  await state('agent-beside-failed', { rooms: { 'work-notes': ROOMS['work-notes'], 'flaky-room': ROOMS['flaky-room'] }, api: {} }, async (page) => {
+    await page.waitForSelector('#keyRooms .key-retry', { timeout: 5000 });
+    must(!(await page.$('#keyAgentsOnly')), 'not every invite is an agent\'s, so the sentence does not show');
+    must((await row(page, 'keyRooms', 'work-notes')) === "work-notes The invite this browser holds here is an agent's." && (await row(page, 'keyRooms', 'flaky-room')) === "flaky-room Couldn't check this room; try again. Try again", (await row(page, 'keyRooms', 'work-notes')) + ' | ' + (await row(page, 'keyRooms', 'flaky-room')));
+    must(await page.$eval('#keyGo', (b) => b.disabled), 'Make key waits while nothing is ticked');
+  }, '#keyRooms');
+  await scenario('keys-agent-beside-gone', { rooms: { 'work-notes': ROOMS['work-notes'], 'gone-room': ROOMS['gone-room'] }, api: {} }, async (page) => {
+    await page.waitForFunction(() => /no longer exists/.test(document.getElementById('keyRooms')?.textContent || ''), null, { timeout: 5000 });
+    must(!(await page.$('#keyAgentsOnly')), 'not every invite is an agent\'s, so the sentence does not show');
+    must((await row(page, 'keyRooms', 'gone-room')) === 'gone-room This room no longer exists.', await row(page, 'keyRooms', 'gone-room'));
+  });
   await state('name-error', { rooms: MINE, api: {} }, async (page, S) => {
     await page.fill('#keyName', 'Sc<out');
     await tick(page, 'keyRooms', 'family-trip');

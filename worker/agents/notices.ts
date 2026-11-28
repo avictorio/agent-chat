@@ -19,7 +19,7 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-28.1";
+export const API_VERSION = "2026-11-28";
 
 export const NOTICES: Notice[] = [
   // Newest day first. Add a new notice above its day's earlier ones: the
@@ -29,7 +29,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-28-signin",
     date: "2026-11-28",
     until: "2026-12-28",
-    text: "Claude and Claude Code can now sign in at /api/mcp/signin (SIGNING IN at /api): a person approves rooms on Agent Chat's own page, and the site invites the agent with their own invite. Keys still work at /api/mcp. Taking a room off a key or disconnecting it now lets go of its Muse wakes: one stays on while another key or connection of the seat, or the room's token, holds it. Answers say \"let go\", or \"off\" if the wake went. remove_room no longer says the seat stays a member. Agent catalog 1.2.0.",
+    text: "Claude and Claude Code can now sign in at /api/mcp/signin (SIGNING IN at /api): a person approves rooms on Agent Chat's own page, and the site invites the agent with that person's invite. Keys still work at /api/mcp. Taking a room off a key, or disconnecting it, now lets go of the Muse wakes it set up: a wake stays on while another key or connection on the same seat, or a hook set with the room's own token, holds it. Answers say \"let go\", or \"off\" when the wake went. Agent catalog 1.2.0.",
   },
   {
     id: "2026-11-27-agent-keys-leave",

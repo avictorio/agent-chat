@@ -58,6 +58,9 @@ const CHANGED_SECTIONS = [];
  *  a key's take-off or disconnect turns a Muse wake off, now that it lets go
  *  of its own hold (docs.txt, primer.txt). */
 const EXPECTED_DOC_EDITS = [
+  // START HERE, Only look, never join: the same calls on the sign-in address
+  ["      get_invite and get_start_page, and the same calls on the sign-in address (SIGNING IN),\n      which has no add_room; the public pages (/llms.txt, /api, /api/games, /api/changes) and the\n      room page's HTML (/r/ROOM fetched as a page; the web app it starts in a browser joins once\n      it reads the room).\n",
+    "      get_invite and get_start_page; the public pages (/llms.txt, /api, /api/games,\n      /api/changes) and the room page's HTML (/r/ROOM fetched as a page; the web app it starts in\n      a browser joins once it reads the room).\n"],
   // START HERE, Act without joining: the sign-in's approval
   ["      KEYS), which refuse an invite never opened and leave it unopened, and the sign-in's approval\n      (it invites agents with your own invite: SIGNING IN).\n",
     "      KEYS), which refuse an invite never opened and leave it unopened.\n"],
@@ -67,8 +70,8 @@ const EXPECTED_DOC_EDITS = [
   // ERRORS, answer_lost: taking the room off or disconnecting lets go of it
   ["                          the room off or disconnecting lets go of it either way): register\n",
     "                          the room off or disconnecting turns it off either way): register\n"],
-  // MUSE DELIVERY: a hook set with the room's own token stays
-  ["  register again with a new code.\n  A hook you set with your room's own token stays when a key or connection that also set it up for\n  your seat lets go of it.\n",
+  // MUSE DELIVERY: a hook set with the room's own token stays, with its one exception
+  ["  register again with a new code.\n  A hook you set with your room's own token stays when a key or connection that also set it up for\n  your seat lets go of it (one exception, for a hook set before 23:00 UTC on 2026-11-27: AGENT\n  KEYS).\n",
     "  register again with a new code.\n"],
   // AGENT KEYS, POST /api/agents/invite: another key or connection holding the seat
   ["  else 409 seat_in_use; \"none\" never): another key or connection that holds the same seat still\n  works for it, and disconnecting this key does not cut that one. claude_code is Claude\n",
@@ -88,8 +91,8 @@ const EXPECTED_DOC_EDITS = [
   // AGENT KEYS, muse_register: the room says the key holds no hook there, and who set each hook up
   ["  only when, after the record was read, the room says the key holds no hook there on that link\n  (the room keeps, beside each Muse hook, who set it up: each key and connection by a random tag of\n  its own, a hook you set with the room's own token, and hooks older than these holders), and\n",
     "  only when, after the record was read, the room says its hook is on another link or none, and\n"],
-  // AGENT KEYS, muse_register: a take-off or a disconnect lets go, and when a wake stays
-  ["  or disconnecting the key first lets go of every Muse wake the key set up there: the wake goes\n  when nothing else holds it, and stays on while another key or connection holding the same seat,\n  or a hook you set yourself with the room's own token, holds it (a hook you set yourself for the\n  same Muse before 2026-11-27 cannot be told from the key's own, and goes with it). A hook several\n  hold keeps the routing of the last set. While a recording there is outstanding (a\n",
+  // AGENT KEYS, muse_register: a take-off or a disconnect lets go, when a wake stays, and the hooks set before 23:00 UTC on 2026-11-27
+  ["  or disconnecting the key first lets go of every Muse wake the key set up there: the wake goes\n  when nothing else holds it, and stays on while another key or connection holding the same seat,\n  or a hook you set yourself with the room's own token, holds it (a hook you set yourself before\n  23:00 UTC on 2026-11-27 cannot be told from a wake a key set up before keys had tags of their\n  own, and goes when that key lets go of it). A hook several hold keeps the routing of the last\n  set. While a recording there is outstanding (a\n",
     "  or disconnecting the key turns off every Muse wake the key set up there first (a hook you set\n  yourself for the same Muse gadget goes too); while a recording there is outstanding (a\n"],
   // AGENT KEYS, muse_wakes_removed and muse_wakes_left
   ["  record. DELETE /api/agent answers muse_wakes_removed (rooms where a wake it let go of went off)\n  and muse_wakes_left (rooms that did not confirm it let go: until they do, the key's record keeps\n",
@@ -150,6 +153,11 @@ const NEW_PATHS = new Set([
   'GET /.well-known/oauth-authorization-server', 'GET /oauth/authorize', 'POST /api/mcp/signin', 'POST /api/mcp/signin/',
   'POST /api/oauth/decide', 'POST /api/oauth/token', 'POST /api/oauth/revoke', 'POST /api/oauth/disconnect',
 ]);
+/** Of NEW_PATHS, the one that must stay a 404 on this checkout too: no
+ *  document names the key's address as a resource (a document there would
+ *  make an MCP client sign in at an address that takes no sign-in). This
+ *  checkout's answer there is the documents' own 404, {"error":"not found"}. */
+const STAYS_404 = new Set(['GET /.well-known/oauth-protected-resource/api/mcp']);
 /** The preflights this checkout answers with their own CORS, which the
  *  other answered as every path's: sent to both, the other's answer checked
  *  to be the generic preflight (PREFLIGHT_GENERIC's), not compared. Against
@@ -446,6 +454,7 @@ function masked(text, tokens) {
         // a path the other checkout did not serve: it answered the unknown path's 404
         compared++;
         if (x.status !== 404 || x.text !== 'Not found') { diffs++; console.log('FAIL ' + x.label + ': the earlier checkout answered ' + x.status + ' ' + JSON.stringify(x.text.slice(0, 60)) + ', not the unknown path\'s 404'); }
+        if (STAYS_404.has(y.label) && (y.status !== 404 || y.text !== '{"error":"not found"}')) { diffs++; console.log('FAIL ' + y.label + ': this checkout answered ' + y.status + ' ' + JSON.stringify(y.text.slice(0, 60)) + ', not a 404'); }
         continue;
       }
       if (PREFLIGHT_CHANGED.has(y.label)) {

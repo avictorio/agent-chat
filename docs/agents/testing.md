@@ -131,12 +131,18 @@ Playwright); `tests/fixtures/` holds the files they share.
   test with Web Crypto). The documents (`oauth-metadata`), the authorize
   page's checks in order, its fixed pages and headers (`oauth-authorize`,
   with RFC 6749 3.1's empty parameters and an exact HTTPS redirect's near
-  misses), the approval (`oauth-decide`), the token endpoint
-  (`oauth-token`: each assertion refusal, the key set and its refetch
-  gate, a set past its time, the failed-authentication limit refusing
-  only a request with an assertion, the code exchange and a redeemed
-  code's copy, the refresh's rotation, grace and reuse, idle, DPoP and
-  `jwkThumbprint` against RFC 9449's and RFC 7638's published values),
+  misses, and a parameter sent twice with one value empty), the approval
+  (`oauth-decide`), the token endpoint (`oauth-token`: each assertion
+  refusal, the claims judged before any key or signature, the key set
+  with the isolate's own refetch and the site-wide gate for an unknown
+  `kid`, a set past its time and its bound after a failed fetch, the
+  failed-authentication limit one per network and app, filled only by a
+  signature that matched no key, with the quota object's calls and the
+  signature checks counted per case, and refusing before any fetch or
+  signature, an unknown client refused before its DPoP proof, the code
+  exchange and a redeemed code's copy, the refresh's rotation, grace and
+  reuse, idle, DPoP and `jwkThumbprint` against RFC 9449's and RFC 7638's
+  published values),
   the revocation and every way a sign-in ends (`oauth-revoke`, a cut
   sign-in's credentials opening no room list), the disconnect-only code
   (`oauth-disconnect`), the sign-in address (`signin-mcp`), the identity
@@ -162,9 +168,11 @@ Playwright); `tests/fixtures/` holds the files they share.
   else is refused), with the authorize page served with the Worker's own
   `AUTHORIZE_HEADERS`; at the end of every scenario it requires the
   site's `localStorage` as seeded but for an expected connection record,
-  `sessionStorage` holding only the harness's seeding flag (a tab that
-  left the site is brought back to a blank page of it to read its own),
-  and no cookie.
+  no cookie, and in every tab, at its last address on the site (a tab
+  that left the site is taken back to that entry, one never on it to a
+  blank page of the site), no fragment on the approval page (any other
+  page keeps the one it was opened with), no history state, and
+  `sessionStorage` holding only the harness's seeding flag.
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
   in the same `npm run test:unit`, with the same hook, and need no
   network and no Python. `bridge.test.mjs` runs the bridge's router and
@@ -300,15 +308,19 @@ Playwright); `tests/fixtures/` holds the files they share.
   (`tests/api/fake-muse.mjs`, hosted by `phase.js muse`): the older Worker
   links two gadgets, a member registers its Muse hooks with its own
   tokens and an agent key sets up its wakes (`muse_register`); this
-  checkout lists the key's wakes, keeps the member's hooks on and turns
-  the key's off on its disconnect (settling through the `pre` step 10
-  gave them), and the member registers again in the aged room on a third
+  checkout lists the key's wakes, and on its disconnect the key lets go
+  of them (their one holder, `pre`), so they go while the member's hooks
+  stay on; the member registers again in the aged room on a third
   gadget's link, so its hook there is held by `self` alone; then `age.py
   --version-only` clears the aged room's schema version again and a
   second start runs every step again there; `inspect.py` checks the hooks'
-  holders (`mhh`): the member's hook held by exactly `pre` in one room and
-  exactly `self` in the aged one (a second run of step 10 that gave `pre`
-  to a hook held already would show there), no row left for the key's,
+  holders (`mhh`): the member's hook in the room not aged held by exactly
+  the holder the older Worker left, `self` when it already kept holders
+  (it records a registration with the room's own token as it is made) or
+  `pre` when it did not (step 10 backfills it here; `run.sh` reads which
+  from the old checkout's `worker/room/Room.ts`, whether it creates
+  `mhh`), and exactly `self` in the aged one (a second run of step 10 that
+  gave `pre` to a hook held already would show there), no row left for the key's,
   none for a member without a Muse hook. About 3 minutes,
   port 8799 (it stops if another server holds it), local only. Run it
   before shipping a schema step (`AGENTS.md` section 13, Schema changes).

@@ -349,21 +349,21 @@ test("the notice of a leave through an agent key is second and says what it does
 // SIGNING IN) and what a key's take-off and disconnect now do to a Muse wake
 // (a hook keeps who holds it): the newest notice, listed first. It says where
 // an app signs in and where that is written, that a person approves on the
-// site's own page with their own invite, that keys keep their address, that a
-// take-off or a disconnect lets go of the key's hold and when a wake stays,
-// the answers' words, remove_room's description, and the agent catalog's
-// version as a literal (a dated notice does not change when a constant moves
-// later). It says nothing of Muse signing in. The API's version moves with it,
-// the day's first.
+// site's own page with that person's invite, that keys keep their address,
+// that a take-off or a disconnect lets go of the wakes the key set up and when
+// a wake stays, the answers' words, and the agent catalog's version as a
+// literal (a dated notice does not change when a constant moves later). It
+// says nothing of Muse signing in. The API's version moves with it: the
+// day's first release, the bare date.
 test("the sign-in's notice is first and says where an app signs in, who approves, what stays, and what a key now lets go of", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-28-signin");
   assert.ok(n, "the notice is there");
   assert.equal(NOTICES[0].id, n.id, "listed first: the newest");
   assert.equal(n.date, "2026-11-28");
   assert.equal(n.until, "2026-12-28");
-  assert.equal(API_VERSION, "2026-11-28.1", "the API's version moves with it, the day's first");
+  assert.equal(API_VERSION, "2026-11-28", "the API's version moves with it: the day's first release is the bare date");
   assert.ok(n.text.length <= 500, String(n.text.length));
-  for (const want of ["Claude and Claude Code can now sign in at /api/mcp/signin", "(SIGNING IN at /api)", "a person approves rooms on Agent Chat's own page", "the site invites the agent with their own invite", "Keys still work at /api/mcp", "Taking a room off a key or disconnecting it now lets go of its Muse wakes", "one stays on while another key or connection of the seat, or the room's token, holds it", "Answers say \"let go\", or \"off\" if the wake went", "remove_room no longer says the seat stays a member", "Agent catalog 1.2.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  for (const want of ["Claude and Claude Code can now sign in at /api/mcp/signin", "(SIGNING IN at /api)", "a person approves rooms on Agent Chat's own page", "the site invites the agent with that person's invite", "Keys still work at /api/mcp", "Taking a room off a key, or disconnecting it, now lets go of the Muse wakes it set up", "a wake stays on while another key or connection on the same seat, or a hook set with the room's own token, holds it", "Answers say \"let go\", or \"off\" when the wake went", "Agent catalog 1.2.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
   assert.ok(!/turns? off/.test(n.text), "a take-off or a disconnect no longer turns a wake off by itself");
   assert.ok(!/muse[^.]*sign/i.test(n.text) && !/poppy|well-known/i.test(n.text), "nothing of Muse signing in");
   assert.ok(!/user[- ]?agent/i.test(n.text) && !/[?&]invite=/.test(n.text), "no User-Agent, no token in a URL");

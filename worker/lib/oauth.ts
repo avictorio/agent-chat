@@ -22,8 +22,8 @@
 // /api/mcp refuse them as they refuse any malformed key.
 
 import {
-  OAUTH_ASSERTION_MAX_S, OAUTH_DPOP_WINDOW_S, OAUTH_FETCH_TIMEOUT_MS, OAUTH_KEYS_TRIED_MAX, OAUTH_KEYSET_MAX_BYTES, OAUTH_KEYSET_TTL_MAX_S,
-  OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_SKEW_S, SIGNIN_SCOPE, SITE_ORIGIN,
+  OAUTH_ASSERTION_MAX_S, OAUTH_DPOP_WINDOW_S, OAUTH_FETCH_TIMEOUT_MS, OAUTH_KEYS_TRIED_MAX, OAUTH_KEYSET_MAX_BYTES, OAUTH_KEYSET_REFETCH_S,
+  OAUTH_KEYSET_TTL_MAX_S, OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_SKEW_S, SIGNIN_SCOPE, SITE_ORIGIN,
 } from "../limits.js";
 import { AGENT_KEY_RE, decodeExact } from "./agentkey.js";
 import { b64urlDecode, b64urlEncode, sha256hex } from "./crypto.js";
@@ -374,10 +374,14 @@ function claimNumber(p: Record<string, unknown>, name: string): number | null | 
 
 /** Key sets in this isolate's memory: the keys kept, and until when (ms). */
 const keysets = new Map<string, { keys: Jwk[], until: number }>();
+/** When this isolate last fetched each set itself, holding none whose time
+ *  lasted (ms), and whether that fetch failed. */
+const ownFetches = new Map<string, { at: number, failed: boolean }>();
 
 /** Only for tests: this isolate's key sets forgotten, as a new isolate starts. */
 export function forgetKeySets(): void {
   keysets.clear();
+  ownFetches.clear();
 }
 
 /** The keys of a set this server takes: public EC P-256 or RSA of 2048 to
@@ -397,38 +401,49 @@ function keptKeys(app: KnownApp, set: unknown): Jwk[] {
   return out;
 }
 
-/** The app's keys: a stand-in's inline set, or the pinned jwks_uri's.
- *  kept: as this isolate or the Cache API keeps it, while its time lasts
- *  (an expired set is a miss, so an app's removed key stops working once
- *  its set's time is up); fetch: fetched now (the site-wide gate granted
- *  it), or on a failure the last set this isolate held; stale: that last
- *  set, for when the gate refuses. A last set is never used once older than
- *  its time plus OAUTH_KEYSET_TTL_MAX_S. null when there are none to be had. */
-export async function appKeys(app: KnownApp, how: "kept" | "fetch" | "stale"): Promise<Jwk[] | null> {
+/** The app's keys (null when there are none to be had), and whether this
+ *  call fetched them: a stand-in's inline set, or the pinned jwks_uri's.
+ *  kept: as this isolate or the Cache API keeps it while its time lasts;
+ *  else this isolate fetches it again itself, at most once per
+ *  OAUTH_KEYSET_REFETCH_S per app, asking no site-wide gate (a caller with no
+ *  key can spend that gate, and must not keep an app's removed key in use),
+ *  and once such a fetch has failed, the last set it held serves, never
+ *  once older than its time plus OAUTH_KEYSET_TTL_MAX_S. fetch: fetched now,
+ *  for a kid the kept set lacks (the site-wide gate granted it); nothing on
+ *  a failure, since the last set lacks the kid as well. */
+export async function appKeys(app: KnownApp, how: "kept" | "fetch"): Promise<{ keys: Jwk[] | null, fetched: boolean }> {
   if (app.jwks !== undefined) {
     const id = "inline:" + app.client_id + ":" + JSON.stringify(app.jwks);
     const had = keysets.get(id);
-    if (had) return had.keys;
+    if (had) return { keys: had.keys, fetched: false };
     const keys = keptKeys(app, app.jwks);
     keysets.set(id, { keys, until: Infinity });
-    return keys;
+    return { keys, fetched: false };
   }
   const uri = app.jwks_uri;
-  if (!uri) return null;
+  if (!uri) return { keys: null, fetched: false };
   const now = Date.now();
+  if (how === "fetch") return { keys: await fetchAndKeep(app, uri, now), fetched: true };
   const mem = keysets.get(uri);
-  const last = mem && now <= mem.until + OAUTH_KEYSET_TTL_MAX_S * 1000 ? mem.keys : null;
-  if (how === "stale") return last;
-  if (how === "kept") {
-    if (mem && mem.until > now) return mem.keys;
-    const cached = await cacheGet(uri);
-    if (!cached) return null;
+  if (mem && mem.until > now) return { keys: mem.keys, fetched: false };
+  const cached = await cacheGet(uri);
+  if (cached) {
     const keys = keptKeys(app, cached.set);
     keysets.set(uri, { keys, until: cached.until });
-    return keys;
+    return { keys, fetched: false };
   }
+  const last = mem && now <= mem.until + OAUTH_KEYSET_TTL_MAX_S * 1000 ? mem.keys : null;
+  const own = ownFetches.get(uri);
+  if (own && now - own.at < OAUTH_KEYSET_REFETCH_S * 1000) return { keys: own.failed ? last : null, fetched: false };
+  const got = await fetchAndKeep(app, uri, now);
+  ownFetches.set(uri, { at: now, failed: !got });
+  return { keys: got || last, fetched: true };
+}
+
+/** The set fetched and kept in this isolate and the Cache API; null on a failure. */
+async function fetchAndKeep(app: KnownApp, uri: string, now: number): Promise<Jwk[] | null> {
   const got = await fetchKeySet(app, uri);
-  if (!got) return last;
+  if (!got) return null;
   const keys = keptKeys(app, got.set);
   keysets.set(uri, { keys, until: now + got.ttl * 1000 });
   await cachePut(uri, got.text, got.ttl);
@@ -490,32 +505,33 @@ async function cachePut(uri: string, text: string, ttl: number): Promise<void> {
 
 /* ---------- the client assertion (RFC 7523, Poppy 4.1) ---------- */
 
-/** The assertion's checks short of its replay (the caller records its jti,
- *  clientNote): a JWS whose alg is ES256 or PS384 with no crit; a key of the
- *  app's set (its kid's, or each of its type, at most OAUTH_KEYS_TRIED_MAX,
- *  with no kid; a refetch only when granted: refetchGrant asks the app's
- *  store); the signature; iss and sub the client_id, aud the issuer (a
- *  string, character for character), exp, iat and nbf with OAUTH_SKEW_S of
- *  skew, exp - iat at most OAUTH_ASSERTION_MAX_S, a jti of at least 16
- *  characters. jku, x5u, jwk and x5c are ignored. */
-export async function checkAssertion(app: KnownApp, assertion: unknown, issuer: string, nowS: number, refetchGrant: () => Promise<boolean>): Promise<{ ok: true, jti: string, exp: number, alg: string, hasKid: boolean } | { ok: false, alg: string | null, hasKid: boolean }> {
+/** What checkAssertion asks its caller: whether the costly part may run
+ *  (the caller's limit, asked once the claims passed and before any key is
+ *  resolved: false stops the check), and whether the site-wide gate grants
+ *  a fetch for a kid the kept set lacks. */
+export type AssertionHooks = { mayVerify: () => Promise<boolean>, refetchGrant: () => Promise<boolean> };
+
+/** A client assertion's checks, in this order, so that a copy of an app's
+ *  old assertion, or one it signed for another site, costs no key, fetch or
+ *  signature: the JWS parsed, its alg ES256 or PS384, no crit; the claims as
+ *  the assertion presents them (iss and sub the client_id, aud the issuer, a
+ *  string, character for character; exp, iat and nbf with OAUTH_SKEW_S of
+ *  skew; exp - iat at most OAUTH_ASSERTION_MAX_S; a jti of at least 16
+ *  characters), refused before the signature proves them; then
+ *  hooks.mayVerify (the caller's limit); then the key (appKeys: the kept
+ *  set, fetched again by this isolate once its time is up; its kid's key, or
+ *  each of its type, at most OAUTH_KEYS_TRIED_MAX, with no kid; for a kid
+ *  the set lacks, a fetch only when the site-wide gate grants one); then the
+ *  signature. The caller records the jti once this passes, and refuses a
+ *  replay there. Not ok: checked says a signature was checked and none
+ *  matched (the one failure the caller counts); stopped that mayVerify
+ *  refused. jku, x5u, jwk and x5c are ignored. */
+export async function checkAssertion(app: KnownApp, assertion: unknown, issuer: string, nowS: number, hooks: AssertionHooks): Promise<{ ok: true, jti: string, exp: number, alg: string, hasKid: boolean } | { ok: false, alg: string | null, hasKid: boolean, checked: boolean, stopped?: true }> {
   const j = parseJws(assertion);
   const alg = j && typeof j.header.alg === "string" ? j.header.alg : null;
   const kid = j && typeof j.header.kid === "string" ? j.header.kid : null;
-  const no = { ok: false as const, alg, hasKid: kid !== null };
+  const no = { ok: false as const, alg, hasKid: kid !== null, checked: false };
   if (!j || (alg !== "ES256" && alg !== "PS384") || "crit" in j.header) return no;
-  const pick = (keys: Jwk[]) => (kid !== null ? keys.filter((k) => k.kid === kid && jwkAlg(k) === alg) : keys.filter((k) => jwkAlg(k) === alg).slice(0, OAUTH_KEYS_TRIED_MAX));
-  // the set as kept; when it has no key for this assertion, or its time is up, a fetch if the gate grants one,
-  // else the last set this isolate held (within its bound)
-  const kept = await appKeys(app, "kept");
-  let tried = kept ? pick(kept) : [];
-  if (!tried.length) {
-    const keys = await appKeys(app, (await refetchGrant()) ? "fetch" : "stale");
-    tried = keys ? pick(keys) : [];
-  }
-  let good = false;
-  for (const k of tried) if (await jwsVerifies(j, k, alg)) { good = true; break; }
-  if (!good) return no;
   const p = j.payload;
   if (p.iss !== app.client_id || p.sub !== app.client_id || typeof p.aud !== "string" || p.aud !== issuer) return no;
   const exp = claimNumber(p, "exp"), iat = claimNumber(p, "iat"), nbf = claimNumber(p, "nbf");
@@ -523,7 +539,19 @@ export async function checkAssertion(app: KnownApp, assertion: unknown, issuer: 
   if (!(exp > nowS - OAUTH_SKEW_S) || !(iat <= nowS + OAUTH_SKEW_S) || (typeof nbf === "number" && !(nbf <= nowS + OAUTH_SKEW_S))) return no;
   if (exp - iat > OAUTH_ASSERTION_MAX_S) return no;
   if (typeof p.jti !== "string" || p.jti.length < 16) return no;
-  return { ok: true, jti: p.jti, exp, alg, hasKid: kid !== null };
+  if (!(await hooks.mayVerify())) return { ...no, stopped: true };
+  const pick = (keys: Jwk[]) => (kid !== null ? keys.filter((k) => k.kid === kid && jwkAlg(k) === alg) : keys.filter((k) => jwkAlg(k) === alg).slice(0, OAUTH_KEYS_TRIED_MAX));
+  // the set as this isolate has it (fetched again by itself once its time is up); when it lacks the
+  // assertion's key and was not just fetched, one more fetch if the site-wide gate grants it
+  const kept = await appKeys(app, "kept");
+  let tried = kept.keys ? pick(kept.keys) : [];
+  if (kept.keys && !tried.length && !kept.fetched && (await hooks.refetchGrant())) {
+    const again = await appKeys(app, "fetch");
+    tried = again.keys ? pick(again.keys) : [];
+  }
+  if (!tried.length) return no;
+  for (const k of tried) if (await jwsVerifies(j, k, alg)) return { ok: true, jti: p.jti, exp, alg, hasKid: kid !== null };
+  return { ...no, checked: true };
 }
 
 /** A client assertion's sub, decoded and not yet trusted: which app it names

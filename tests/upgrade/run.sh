@@ -13,13 +13,20 @@
 #    brings back a retired one and clears the schema version - a room as
 #    an older deploy could have left it.
 # 3. This checkout's Worker starts on the same state and reads both rooms
-#    back, posts, opens a draft upload, turns off the key's wakes, and has
+#    back, posts, opens a draft upload, disconnects the key (its wakes,
+#    which nothing else holds, go off while the member's own stays), and has
 #    the member register again in the aged room on a third gadget's link
 #    (phase.js new). Then the aged room's schema version is cleared again
 #    and this checkout starts again, so every step runs a second time
 #    there on rows this code wrote (phase.js again); inspect.py checks every
 #    room reached the latest schema version with all its columns, and the
-#    holders of its Muse hooks.
+#    holders of its Muse hooks. The holder the member's own registration
+#    has in the room that was not aged depends on OLD_REF: "self" when
+#    OLD_REF's Worker already keeps holders (its Room.ts creates mhh, and
+#    records a registration with the room's own token as "self" when it is
+#    made), "pre" when it does not (schema step 10 here backfills a hook it
+#    finds with no holder). run.sh reads which from the old checkout itself
+#    and tells inspect.py.
 # Both Workers run with the config the API suite's server writes (the Muse
 # bridge's classes created with SQLite: tests/api/local-config.mjs), a seal
 # key of the run's own, and one fake Muse (tests/api/fake-muse.mjs) for both
@@ -46,6 +53,8 @@ cleanup() {
 }
 trap cleanup EXIT
 git -C "$ROOT" worktree add --detach -q "$OLD" "$OLD_REF" || exit 1
+# the holder OLD_REF's Worker gives a member's own registration: "self" where it keeps holders, else none ("pre" after step 10)
+if grep -q "CREATE TABLE IF NOT EXISTS mhh" "$OLD/worker/room/Room.ts" 2>/dev/null; then OLD_SELF=self; else OLD_SELF=pre; fi
 # the old Worker needs the toolchain and a web build to serve; reuse this checkout's
 ln -s "$ROOT/node_modules" "$OLD/node_modules"
 [ -d "$OLD/web/app/dist" ] || { mkdir -p "$OLD/web/app"; ln -s "$ROOT/web/app/dist" "$OLD/web/app/dist"; }
@@ -97,5 +106,5 @@ echo "== the aged room runs every step again, on rows this code wrote"
 python3 "$HERE/age.py" --version-only "$STATE" || exit 1
 start "$ROOT" again "$(cat "$WORK/config-new")"; node "$HERE/phase.js" again "$WORK"; R4=$?; stop
 if [ $had_vars -eq 1 ]; then cp "$WORK/dev.vars.bak" "$ROOT/.dev.vars"; else rm -f "$ROOT/.dev.vars"; fi
-python3 "$HERE/inspect.py" "$STATE"; R3=$?
+python3 "$HERE/inspect.py" "$STATE" "$OLD_SELF"; R3=$?
 [ $R2 -eq 0 ] && [ $R4 -eq 0 ] && [ $R3 -eq 0 ] && echo "UPGRADE TEST: passed" || { echo "UPGRADE TEST: failed"; exit 1; }

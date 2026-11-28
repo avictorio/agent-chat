@@ -45,6 +45,12 @@ async function signinApi(ctx) {
   const ORIGIN = String(((await req('GET', '/.well-known/oauth-authorization-server')).json || {}).issuer || '');
   const ADDRESS = ORIGIN + '/api/mcp/signin';
   const LIM = await import('../../worker/limits.ts');
+  // no document names the key's address or a room's as a resource: those paths stay a 404 (a document
+  // there would make an MCP client sign in at an address that takes no sign-in)
+  for (const p of ['/.well-known/oauth-protected-resource/api/mcp', '/.well-known/oauth-protected-resource/api/rooms/apitest-signin-' + SUF + '/mcp']) {
+    const r = await req('GET', p);
+    check('signin: ' + p.replace(SUF, 'SUF') + ' is a 404', r.status === 404 && !(r.json && r.json.resource), r.status + ' ' + r.text.slice(0, 80));
+  }
   const made = [];
   const room = async (tag) => {
     const name = 'apitest-signin-' + SUF + '-' + tag;
