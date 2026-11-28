@@ -42,7 +42,8 @@ export function signinOrigin(env: Env): string {
 
 /* ---------- the known apps ---------- */
 
-/** An app that may sign in, as pinned from its client document. */
+/** An app that may sign in, as pinned from its client document (or, for an
+ *  app that publishes none, from its own requests). */
 export type KnownApp = {
   /** a short name for logs */
   key: string,
@@ -68,17 +69,24 @@ export type KnownApp = {
   jwks?: unknown,
 };
 
-/** The known apps. Claude's two, public clients, are watched: their
+/** The known apps, all public clients and all watched: their
  *  oauth.token_watch lines say what they send at the token endpoint, which
- *  no document says. */
+ *  no document says. Claude's two are pinned from their client documents.
+ *  Muse's connector publishes none: the person types its Client ID, muse,
+ *  so its entry is pinned as the owner read it from Muse's own request,
+ *  return address included, and nothing is fetched for it. If Meta changes
+ *  that address, Muse's sign-in stops at the wrong-address page until the
+ *  entry is changed. */
 export const KNOWN_APPS: KnownApp[] = [
   { key: "claude", client_id: "https://claude.ai/oauth/mcp-oauth-client-metadata", kind: "public", name: "Claude", host: "claude.ai", redirect_uris: ["https://claude.ai/api/mcp/auth_callback"], loopback: false, watch: true, page: "claude" },
   { key: "claude-code", client_id: "https://claude.ai/oauth/claude-code-client-metadata", kind: "public", name: "Claude Code", host: "a program on this computer", redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"], loopback: true, watch: true, page: "claude-code" },
+  { key: "muse", client_id: "muse", kind: "public", name: "Muse", host: "agent.meta.ai", redirect_uris: ["https://agent.meta.ai/api/hatch/oauth/callback"], loopback: false, watch: true, page: "agent" },
 ];
 
 /** What a known app's document said when it was pinned, for the daily
  *  comparison (compareDocument): a difference is logged and followed by a
- *  person, never by the code. */
+ *  person, never by the code. Muse has none to compare: it publishes no
+ *  client document. */
 const PINNED_DOCUMENTS: Record<string, { client_name: string, redirect_uris: string[], grant_types: string[], token_endpoint_auth_method: string }> = {
   claude: { client_name: "Claude", redirect_uris: ["https://claude.ai/api/mcp/auth_callback"], grant_types: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:jwt-bearer"], token_endpoint_auth_method: "none" },
   "claude-code": { client_name: "Claude Code", redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"], grant_types: ["authorization_code", "refresh_token"], token_endpoint_auth_method: "none" },
@@ -137,8 +145,8 @@ const compared = new Map<string, string>();
  *  at most once a UTC day per isolate, on an authorize for that app, no
  *  redirects, at most 5 KB, within OAUTH_FETCH_TIMEOUT_MS. A difference, or
  *  a document that cannot be read, is logged oauth.client_changed with the
- *  app's key, and nothing else follows from it. A stand-in has no pinned
- *  document and is never fetched. */
+ *  app's key, and nothing else follows from it. An app with no pinned
+ *  document, Muse or a stand-in, is never fetched. */
 export async function compareDocument(app: KnownApp): Promise<void> {
   const pinned = PINNED_DOCUMENTS[app.key];
   if (!pinned || KNOWN_APPS.indexOf(app) < 0) return;

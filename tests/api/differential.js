@@ -12,7 +12,8 @@
 // identical refusals cannot pass for a match, and
 // compares each answer's status, content type, headers (all but those that
 // differ per connection) and body, with what differs per run masked:
-// tokens and keys, timestamps (in milliseconds, and ISO times with
+// tokens and keys, each server's own address (the sign-in's issuer on a
+// test server), timestamps (in milliseconds, and ISO times with
 // milliseconds), signed query strings, upload links, the build id, and
 // api_version (the API's version moves with every announced change).
 // /api/changes is compared with the notices only this checkout has left
@@ -20,7 +21,8 @@
 // and the agent key's answers with this checkout's changed sentences taken
 // out (ADDED_SECTIONS, CHANGED_SECTIONS, EXPECTED_DOC_EDITS and
 // EXPECTED_SENTENCE_EDITS below: a change that edits those on purpose lists
-// its edits there, each against the checkout it is compared with), and the
+// its edits there, each against the checkout it is compared with), a page
+// this checkout's markup changes with its edits taken out (PAGE_EDITS), and the
 // retry time of a counter's window, which moves with the run, masked on the
 // answers that carry one (MOVING_RETRY); a note names each part left out
 // wherever the two copies differ there; the app shell's
@@ -45,91 +47,36 @@ const OTHER = process.argv[2];
 if (!OTHER) { console.error('usage: node tests/api/differential.js /path/to/earlier-checkout'); process.exit(2); }
 
 /** The sections of /api this checkout adds, by heading: taken out whole
- *  (up to the next section's heading) before the compare. Against 8ea9a6b:
- *  the sign-in's section (docs.txt). */
-const ADDED_SECTIONS = ['SIGNING IN (CLAUDE AND CLAUDE CODE)'];
+ *  (up to the next section's heading) before the compare. Against fc84da6:
+ *  none. */
+const ADDED_SECTIONS = [];
 /** The sections of /api this checkout rewrites, by heading: taken out of
  *  both copies before the compare. */
 const CHANGED_SECTIONS = [];
 /** The edits this checkout makes to /api and /llms.txt, taken out of its
  *  copy before the compare: [the text this checkout serves, the text the
  *  other serves], filled with the origin and the limits as served (fill).
- *  Against 8ea9a6b: the pointers to the sign-in, and the passages that said
- *  a key's take-off or disconnect turns a Muse wake off, now that it lets go
- *  of its own hold (docs.txt, primer.txt). */
-const EXPECTED_DOC_EDITS = [
-  // START HERE, Only look, never join: the same calls on the sign-in address
-  ["      get_invite and get_start_page, and the same calls on the sign-in address (SIGNING IN),\n      which has no add_room; the public pages (/llms.txt, /api, /api/games, /api/changes) and the\n      room page's HTML (/r/ROOM fetched as a page; the web app it starts in a browser joins once\n      it reads the room).\n",
-    "      get_invite and get_start_page; the public pages (/llms.txt, /api, /api/games,\n      /api/changes) and the room page's HTML (/r/ROOM fetched as a page; the web app it starts in\n      a browser joins once it reads the room).\n"],
-  // START HERE, Act without joining: the sign-in's approval
-  ["      KEYS), which refuse an invite never opened and leave it unopened, and the sign-in's approval\n      (it invites agents with your own invite: SIGNING IN).\n",
-    "      KEYS), which refuse an invite never opened and leave it unopened.\n"],
-  // ERRORS, try_again: a room has not confirmed the key let go of its wake
-  ["                          time, or a room has not confirmed that your key has let go of the Muse\n                          wake it set up there, or a registration through your key whose\n                          outcome there is not on your key's record yet may still reach it; wait\n                          the Retry-After seconds and send it again\n",
-    "                          time, or a room has not confirmed that the Muse wake your key set up\n                          there is off, or a registration through your key whose outcome there\n                          is not on your key's record yet may still reach it; wait the\n                          Retry-After seconds and send it again\n"],
-  // ERRORS, answer_lost: taking the room off or disconnecting lets go of it
-  ["                          the room off or disconnecting lets go of it either way): register\n",
-    "                          the room off or disconnecting turns it off either way): register\n"],
-  // MUSE DELIVERY: a hook set with the room's own token stays, with its one exception
-  ["  register again with a new code.\n  A hook you set with your room's own token stays when a key or connection that also set it up for\n  your seat lets go of it (one exception, for a hook set before 23:00 UTC on 2026-11-27: AGENT\n  KEYS).\n",
-    "  register again with a new code.\n"],
-  // AGENT KEYS, POST /api/agents/invite: another key or connection holding the seat
-  ["  else 409 seat_in_use; \"none\" never): another key or connection that holds the same seat still\n  works for it, and disconnecting this key does not cut that one. claude_code is Claude\n",
-    "  else 409 seat_in_use; \"none\" never): another key that holds the same seat still works for it,\n  and disconnecting this key does not cut that one. claude_code is Claude\n"],
-  // AGENT KEYS, POST /api/agent/rooms/remove: the key first lets go of its wake
-  ["                                                 it: a seat you still hold there stays); the key\n                                                 first lets go of a Muse wake it set up there (MCP\n",
-    "                                                 it: a seat you still hold there stays); a Muse\n                                                 wake the key set up there goes first (MCP\n"],
-  // AGENT KEYS, DELETE /api/agent: it lets go of the wakes it set up
-  ["                                                 it lets go of the Muse wakes it set up (each goes\n                                                 unless another key or connection holding the same\n                                                 seat, or a hook you set with the room's own token,\n                                                 also holds it); every seat stays where a room still\n                                                 takes your invite, and any token you kept still\n                                                 works; while a room has not confirmed the key let\n                                                 go of its wake there, the key does nothing but this\n",
-    "                                                 the Muse wakes it set up go; every seat stays where\n                                                 a room still takes your invite, and any token you\n                                                 kept still works; while a room has not confirmed\n                                                 its wake is off, the key does nothing but this\n"],
-  // AGENT KEYS, the leave through the key: the key first letting go of its wake
-  ["  key, the key first letting go of a Muse wake it set up there. It never deletes a room: a body\n",
-    "  key, with a Muse wake the key set up there turned off first. It never deletes a room: a body\n"],
-  // AGENT KEYS, marked: could not yet confirm that it let go
-  ["  key could not yet confirm that it let go of its Muse wake there: taking it off tries again),\n",
-    "  key could not yet confirm that its Muse wake there is off: taking it off tries again),\n"],
-  // AGENT KEYS, muse_register: the room says the key holds no hook there, and who set each hook up
-  ["  only when, after the record was read, the room says the key holds no hook there on that link\n  (the room keeps, beside each Muse hook, who set it up: each key and connection by a random tag of\n  its own, a hook you set with the room's own token, and hooks older than these holders), and\n",
-    "  only when, after the record was read, the room says its hook is on another link or none, and\n"],
-  // AGENT KEYS, muse_register: a take-off or a disconnect lets go, when a wake stays, and the hooks set before 23:00 UTC on 2026-11-27
-  ["  or disconnecting the key first lets go of every Muse wake the key set up there: the wake goes\n  when nothing else holds it, and stays on while another key or connection holding the same seat,\n  or a hook you set yourself with the room's own token, holds it (a hook you set yourself before\n  23:00 UTC on 2026-11-27 cannot be told from a wake a key set up before keys had tags of their\n  own, and goes when that key lets go of it). A hook several hold keeps the routing of the last\n  set. While a recording there is outstanding (a\n",
-    "  or disconnecting the key turns off every Muse wake the key set up there first (a hook you set\n  yourself for the same Muse gadget goes too); while a recording there is outstanding (a\n"],
-  // AGENT KEYS, muse_wakes_removed and muse_wakes_left
-  ["  record. DELETE /api/agent answers muse_wakes_removed (rooms where a wake it let go of went off)\n  and muse_wakes_left (rooms that did not confirm it let go: until they do, the key's record keeps\n",
-    "  record. DELETE /api/agent answers muse_wakes_removed (rooms whose wakes it turned off) and\n  muse_wakes_left (rooms that did not confirm theirs is off: until they do, the key's record keeps\n"],
-  // AGENT KEYS: the pointer to SIGNING IN
-  ["  the whole site (429 rate_limited with Retry-After).\n  To connect Claude or Claude Code without a key, see SIGNING IN.\n",
-    "  the whole site (429 rate_limited with Retry-After).\n"],
-  // /llms.txt (primer.txt): the pointer to SIGNING IN
-  ["Your person can also make one for you on the site's home page.\n\nClaude and Claude Code can sign in instead: SIGNING IN at {{origin}}/api.\n",
-    "Your person can also make one for you on the site's home page.\n"],
-];
+ *  Against fc84da6: none (what says Muse can sign in waits for its own
+ *  change). */
+const EXPECTED_DOC_EDITS = [];
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as
- *  above. Against 8ea9a6b: the key's answers say what a sign-in changes for
- *  it, and that taking a room off or disconnecting lets go of a Muse wake
- *  another holder may keep on (worker/agents/onboarding.ts, mcp.ts). */
-const EXPECTED_SENTENCE_EDITS = [
-  // AGENT_KEY_MISSING (onboarding.ts)
-  ["No agent key came with this request. Send it as Authorization: Bearer KEY; an agent key starts with a dot. Make one with POST /api/agents from your own agent invites, or ask your person to make one on the site's home page, under Agent keys (AGENT KEYS at /api). Claude and Claude Code can sign in instead, at /api/mcp/signin (SIGNING IN at /api).",
-    "No agent key came with this request. Send it as Authorization: Bearer KEY; an agent key starts with a dot. Make one with POST /api/agents from your own agent invites, or ask your person to make one on the site's home page, under Agent keys (AGENT KEYS at /api)."],
-  // agentInstructions, no key (onboarding.ts)
-  ["tokens only? Each room's own address, {{origin}}/api/rooms/ROOM/mcp, takes them. Claude and Claude Code can sign in instead at {{origin}}/api/mcp/signin.",
-    "tokens only? Each room's own address, {{origin}}/api/rooms/ROOM/mcp, takes them."],
-  // the agent catalog's version and digest (mcp.ts MCP_AGENT_CATALOG_VERSION), in serverInfo and the catalog field
-  ['"title":"Agent Chat: your rooms","version":"1.2.0"', '"title":"Agent Chat: your rooms","version":"1.1.0"'],
-  ['"catalog":{"version":"1.2.0","digest":"ea5df3eb88244e57"}', '"catalog":{"version":"1.1.0","digest":"45576f66f7ad29f2"}'],
-  // remove_room's description (mcp.ts)
-  ["Take one room off your key: the key forgets that room's invite, and first lets go of the Muse wake it set up there, which goes unless another key or connection holding the same seat, or a registration with the room's own token, also holds it. Taking a room off a key does not leave it: a seat still held there stays. To leave the room for good, call leave_room first.",
-    "Take one room off your key: the key forgets that room's invite. Your seat stays (you are still a member); to leave the room for good, call leave_room first."],
-  // muse_register's description (mcp.ts)
-  ["Taking a room off your key, or disconnecting the key, lets go of the wakes it set up; a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on.",
-    "Taking a room off your key, or disconnecting the key, turns the wakes it set up off."],
-  // dropNote, every wake let go (onboarding.ts)
-  ["This key works nowhere now, and it has let go of every Muse wake it set up: a wake that another key or connection holding the same seat, or a registration with the room's own token, also holds stays on. ",
-    "This key works nowhere now, and the Muse wakes it set up are off. "],
-];
+ *  above. Against fc84da6: none. */
+const EXPECTED_SENTENCE_EDITS = [];
+/** The pages whose markup this checkout changes, by label: [this
+ *  checkout's, the other's], each taken out of this checkout's copy before
+ *  the compare, the words and headers compared as they are. Against
+ *  fc84da6: the sign-in's fixed page (GET /oauth/authorize with no app is
+ *  the unknown-app page), which now follows the reader's light or dark
+ *  setting (worker/routes/oauth.ts fixedPage). */
+const PAGE_EDITS = {
+  'GET /oauth/authorize': [
+    ['<html lang="en" style="color-scheme:light dark">', '<html lang="en">'],
+    ['<meta name="color-scheme" content="light dark">', ''],
+    ['<body style="background:Canvas;color:CanvasText;', '<body style="'],
+  ],
+};
 /** The answers whose retry time is the seconds left in a counter's window,
  *  which moves with the run (the two servers are asked a while apart): that
  *  number masked in both copies, the Retry-After header and the body's
@@ -144,15 +91,18 @@ const VOLATILE_HEADERS = new Set(['date', 'content-length', 'connection', 'keep-
  *  has it already. */
 const CSP_CHANGED = new Set();
 const CSP_ADDED = "; frame-ancestors 'self'";
-/** Paths this checkout adds, which the other answered as an unknown path:
- *  sent to both, the other's answer checked to be that 404, not compared.
- *  Against 8ea9a6b: the sign-in's documents, its authorize page, its
- *  endpoints and its MCP address (worker/routes/oauth.ts, agent.ts). */
-const NEW_PATHS = new Set([
+/** The sign-in's paths, each sent to both with no query and no body: its
+ *  documents, its authorize page, its endpoints and its MCP address
+ *  (worker/routes/oauth.ts, agent.ts). */
+const SIGNIN_PATHS = [
   'GET /.well-known/oauth-protected-resource', 'GET /.well-known/oauth-protected-resource/api/mcp/signin', 'GET /.well-known/oauth-protected-resource/api/mcp',
   'GET /.well-known/oauth-authorization-server', 'GET /oauth/authorize', 'POST /api/mcp/signin', 'POST /api/mcp/signin/',
   'POST /api/oauth/decide', 'POST /api/oauth/token', 'POST /api/oauth/revoke', 'POST /api/oauth/disconnect',
-]);
+];
+/** Paths this checkout adds, which the other answered as an unknown path:
+ *  sent to both, the other's answer checked to be that 404, not compared.
+ *  Against fc84da6: none (its sign-in paths are compared). */
+const NEW_PATHS = new Set([]);
 /** Of NEW_PATHS, the one that must stay a 404 on this checkout too: no
  *  document names the key's address as a resource (a document there would
  *  make an MCP client sign in at an address that takes no sign-in). This
@@ -161,8 +111,8 @@ const STAYS_404 = new Set(['GET /.well-known/oauth-protected-resource/api/mcp'])
 /** The preflights this checkout answers with their own CORS, which the
  *  other answered as every path's: sent to both, the other's answer checked
  *  to be the generic preflight (PREFLIGHT_GENERIC's), not compared. Against
- *  8ea9a6b: the sign-in's MCP address and its endpoints. */
-const PREFLIGHT_CHANGED = new Set(['OPTIONS /api/mcp/signin', 'OPTIONS /api/oauth/token', 'OPTIONS /api/oauth/revoke', 'OPTIONS /api/oauth/decide', 'OPTIONS /api/oauth/disconnect']);
+ *  fc84da6: none (the sign-in's own preflights are compared). */
+const PREFLIGHT_CHANGED = new Set([]);
 /** A preflight every path answers alike, compared, and the earlier
  *  checkout's answer PREFLIGHT_CHANGED is held to. */
 const PREFLIGHT_GENERIC = 'OPTIONS /api/mcp';
@@ -172,7 +122,9 @@ const PREFLIGHT_GENERIC = 'OPTIONS /api/mcp';
 async function scenario(srv, muse, suf) {
   const base = srv.base, owner = srv.owner;
   const out = [];
-  const tokens = {};
+  // the server's own address, masked as a token: on a test server the sign-in names it as its issuer
+  // (TEST_SIGNIN_ORIGIN), in its documents and its challenge, and each server has a port of its own
+  const tokens = { serverOrigin: base };
   const setup = [];
   /** a set-up call must have done what the rest of the list assumes */
   const must = (label, ok) => { if (!ok) setup.push(label); };
@@ -389,8 +341,8 @@ async function scenario(srv, muse, suf) {
   await send('OPTIONS /api/mcp', 'OPTIONS', '/api/mcp', { headers: pre });
   await send('OPTIONS a room\'s /mcp', 'OPTIONS', R + '/mcp', { headers: pre });
   for (const p of ['/api/mcp/signin', '/api/oauth/token', '/api/oauth/revoke', '/api/oauth/decide', '/api/oauth/disconnect']) await send('OPTIONS ' + p, 'OPTIONS', p, { headers: pre });
-  // the sign-in's paths (NEW_PATHS), and a well-known path it does not serve (compared)
-  for (const [m, p] of [...NEW_PATHS].map((l) => l.split(' '))) await send(m + ' ' + p, m, p, m === 'POST' ? { body: '' } : {});
+  // the sign-in's paths (SIGNIN_PATHS), and a well-known path it does not serve (compared)
+  for (const [m, p] of SIGNIN_PATHS.map((l) => l.split(' '))) await send(m + ' ' + p, m, p, m === 'POST' ? { body: '' } : {});
   await send('GET /.well-known/openid-configuration', 'GET', '/.well-known/openid-configuration');
   // the site's own pages
   await send('/api/changes', 'GET', '/api/changes');
@@ -489,6 +441,11 @@ function masked(text, tokens) {
         });
       }
       if (y.label === '/llms.txt') EXPECTED_DOC_EDITS.forEach(([now, was], e) => { const n = fill(now); if (ty.includes(n)) { ty = ty.replace(n, fill(was)); leftOut('docs edit ' + (e + 1) + ' (' + JSON.stringify(n.trim().slice(0, 56)) + '...)', y.label); } });
+      if (PAGE_EDITS[y.label]) {
+        const before = ty;
+        for (const [now, was] of PAGE_EDITS[y.label]) ty = ty.split(now).join(was);
+        if (ty !== before) leftOut('the markup this checkout changes on the page (PAGE_EDITS)', y.label);
+      }
       if (y.label === '/api/changes') {
         // the notices only this checkout has, left out
         const jx = JSON.parse(tx), jy = JSON.parse(ty);
@@ -502,6 +459,7 @@ function masked(text, tokens) {
       compared++;
       // the headers too: every one but those that differ per run, and on the app shell its policy's one new directive
       const hx = Object.assign({}, x.headers), hy = Object.assign({}, y.headers);
+      for (const [h, own] of [[hx, ra.tokens.serverOrigin], [hy, rb.tokens.serverOrigin]]) for (const k of Object.keys(h)) h[k] = h[k].split(own).join('<TOKEN:serverOrigin>');
       if (MOVING_RETRY.has(y.label) && /^\d+$/.test(hx['retry-after'] || '') && /^\d+$/.test(hy['retry-after'] || '')) {
         const was = hx['retry-after'] + tx + hy['retry-after'] + ty;
         hx['retry-after'] = hy['retry-after'] = '<RETRY>';

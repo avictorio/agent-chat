@@ -1,9 +1,9 @@
 // The sign-in for known apps: an OAuth authorization server whose sign-ins
 // are identities of the agent key's kind (room/agent.ts SigninMethods), and
 // whose tokens open them (lib/oauth.ts holds the forms, the known apps and
-// the checks). Claude's apps (claude.ai, desktop, mobile) and Claude Code
-// connect to /api/mcp/signin (routes/agent.ts signinMcpRoute), meet its 401,
-// find these documents, and send their person here:
+// the checks). Claude's apps (claude.ai, desktop, mobile), Claude Code and
+// Muse connect to /api/mcp/signin (routes/agent.ts signinMcpRoute), meet its
+// 401, find these documents, and send their person here:
 //   GET  /.well-known/oauth-protected-resource[/api/mcp/signin]  the documents
 //   GET  /.well-known/oauth-authorization-server
 //   GET  /oauth/authorize       the request checked, then the app shell's
@@ -152,14 +152,18 @@ async function checkAuthorize(env: Env, query: string, origin: string): Promise<
   return { ok: true, req: { app, redirect, state, challenge, resources: resources.length ? resources : [origin + "/api/mcp/signin", origin], jkt } };
 }
 
-/** The two fixed pages: plain HTML that echoes nothing from the request and loads nothing. */
+/** The two fixed pages: plain HTML that echoes nothing from the request and
+ *  loads nothing. They follow the reader's light or dark setting
+ *  (color-scheme light dark, in the browser's own Canvas and CanvasText),
+ *  so a phone in dark mode does not show them black on white; with no
+ *  script and no outside file, as the rest of the page. */
 function fixedPage(which: "unknown" | "wrong"): Response {
   const title = which === "unknown" ? "Agent Chat: app not known" : "Agent Chat: sign-in stopped";
   const text = which === "unknown"
     ? "This app isn't known to Agent Chat yet, so it can't connect here. Nothing was shared. If you run this site, SIGNING IN at chat.victorio.cloud/api says how an app is added."
     : "This sign-in link doesn't match the app it names, so it was stopped. Nothing was shared. Start again from the app.";
-  const body = "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + title +
-    "</title></head><body style=\"font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em\"><p>" + text + "</p></body></html>\n";
+  const body = "<!doctype html>\n<html lang=\"en\" style=\"color-scheme:light dark\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>" + title +
+    "</title></head><body style=\"background:Canvas;color:CanvasText;font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em\"><p>" + text + "</p></body></html>\n";
   return new Response(body, { status: 400, headers: { "Content-Type": "text/html; charset=utf-8", ...AUTHORIZE_HEADERS } });
 }
 
@@ -520,8 +524,9 @@ function oauthError(error: string, status = 400, description?: string, headers?:
 }
 /** 401 invalid_client, with WWW-Authenticate naming the scheme of the
  *  Authorization header the request sent (Basic when it is not a plain
- *  token), and none when it sent none (RFC 6749 5.2). The header itself is
- *  never read as a client credential. */
+ *  token), and none when it sent none (RFC 6749 5.2). The header is never
+ *  read as a client credential: a Basic one only names a public client
+ *  (clientOf). */
 function invalidClient(request: Request): Response {
   const auth = request.headers.get("Authorization");
   if (auth === null) return oauthError("invalid_client", 401);
@@ -551,13 +556,81 @@ async function failCaps(request: Request, app: KnownApp) {
   return [{ k: "net:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))) + ":" + app.key, max: OAUTH_AUTH_FAILS_PER_IP, per: OAUTH_AUTH_FAILS_WINDOW_S }];
 }
 
+/** What an Authorization: Basic header says (RFC 6749 2.3.1: the id and the
+ *  password each form-encoded, joined by a colon, in base64): null for no
+ *  header or another scheme, which these endpoints do not read; bad for one
+ *  that does not decode. */
+function basicOf(request: Request): { id: string, password: string } | "bad" | null {
+  const auth = request.headers.get("Authorization");
+  const m = auth === null ? null : /^Basic(?:\s+(.*))?$/i.exec(auth.trim());
+  if (!m) return null;
+  const b64 = (m[1] || "").trim();
+  if (!b64 || b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return "bad";
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    const at = text.indexOf(":");
+    if (at < 0) return "bad";
+    const unform = (x: string) => decodeURIComponent(x.replace(/\+/g, " "));
+    return { id: unform(text.slice(0, at)), password: unform(text.slice(at + 1)) };
+  } catch { return "bad"; /* not base64, not UTF-8, or a broken escape: no id can be read from it */ }
+}
+
 /** The app a token or revocation request names: its client_id, or without
- *  one the client assertion's sub; null when no known app is named. A
- *  lookup and nothing more, so a request naming none is refused before any
- *  proof or signature is checked. */
-async function clientOf(env: Env, form: URLSearchParams): Promise<KnownApp | null> {
+ *  one the client assertion's sub; or, for a public app, the id of an
+ *  Authorization: Basic header with an empty password, since some client
+ *  libraries put a public client's id only there. That header names the
+ *  client and authenticates nothing, so it must agree with the form: a
+ *  password, a header that does not decode, or an id other than the form's
+ *  is refused, as a public app's client_secret is. For an app that signs its
+ *  requests the header is not read. null: no known app is named. A lookup
+ *  and nothing more, so a request naming none, or refused here, is answered
+ *  before any proof or signature is checked. */
+async function clientOf(env: Env, request: Request, form: URLSearchParams): Promise<KnownApp | "refused" | null> {
   const assertion = form.get("client_assertion");
-  return knownApp(env, form.get("client_id") || (assertion !== null ? assertionSubject(assertion) : null) || "");
+  const id = form.get("client_id");
+  const named = await knownApp(env, id || (assertion !== null ? assertionSubject(assertion) : null) || "");
+  const basic = basicOf(request);
+  if (basic === null || (named && named.kind !== "public")) return named;
+  let app = named;
+  if (!app && id === null && basic !== "bad") {
+    const b = await knownApp(env, basic.id);
+    app = b && b.kind === "public" ? b : null;
+  }
+  if (!app) return null;
+  if (basic === "bad" || basic.password !== "" || (id !== null && basic.id !== id)) return "refused";
+  return app;
+}
+
+/** The counts-only line of a token or revocation request that names no
+ *  known app: how it tried to name one, never what it named. */
+function unknownClient(request: Request, form: URLSearchParams): void {
+  const auth = request.headers.get("Authorization");
+  warn("oauth.token_unknown", null, { has_client_id: form.has("client_id"), has_basic: auth !== null && /^Basic(?:\s|$)/i.test(auth.trim()), has_assertion: form.has("client_assertion") });
+}
+
+/** How a refresh token presented by a watched app stood: the live one, a
+ *  repeat within OAUTH_REFRESH_GRACE_S, one spent before that (a reuse,
+ *  which ends the sign-in), or none such. */
+type RefreshStanding = "fresh" | "grace" | "spent" | "unknown";
+
+/** A watched app's counts-only line at the token endpoint (oauth.token_watch):
+ *  what it sent, names and booleans only, and for a refresh how the token
+ *  it presented stood, once the grant has read it. Said at most once. */
+function watchLine(request: Request, form: URLSearchParams, app: KnownApp, grant: string | null): (refresh?: RefreshStanding) => void {
+  let said = false;
+  return (refresh) => {
+    if (!app.watch || said) return;
+    said = true;
+    const assertion = form.get("client_assertion");
+    const j = assertion !== null ? parseJws(assertion) : null;
+    const head: Record<string, unknown> | null = assertion === null ? null : j ? j.header : {};
+    warn("oauth.token_watch", null, {
+      app: app.key, grant_type: grant === "authorization_code" || grant === "refresh_token" ? grant : "other",
+      alg: head && (head.alg === "ES256" || head.alg === "PS384") ? String(head.alg) : head ? "other" : null,
+      has_kid: !!(head && typeof head.kid === "string"), has_client_id: form.has("client_id"), has_resource: form.has("resource"), has_dpop: request.headers.has("DPoP"),
+      ...(refresh ? { refresh } : {}),
+    });
+  };
 }
 
 /** The authentication of a token or revocation request's client, a known
@@ -581,20 +654,11 @@ async function clientOf(env: Env, form: URLSearchParams): Promise<KnownApp | nul
  *  outlives a requester that hangs up. dpopJti: the proof's jti to record
  *  (null: none). */
 type Authed = { ok: true, app: KnownApp, alg: string | null, hasKid: boolean, dpopFresh: boolean } | { ok: false, response: Response };
-async function authenticate(env: Env, request: Request, form: URLSearchParams, origin: string, app: KnownApp, dpopJti: string | null, grant: string | null, waitUntil: (p: Promise<unknown>) => void): Promise<Authed> {
+async function authenticate(env: Env, request: Request, form: URLSearchParams, origin: string, app: KnownApp, dpopJti: string | null, waitUntil: (p: Promise<unknown>) => void): Promise<Authed> {
   const refuse = (): Authed => ({ ok: false, response: invalidClient(request) });
   const assertion = form.get("client_assertion");
   const nowS = Math.floor(Date.now() / 1000);
   const store = appStore(env, await appStoreName(app));
-  if (app.watch && grant !== null) {
-    const j = assertion !== null ? parseJws(assertion) : null;
-    const head: Record<string, unknown> | null = assertion === null ? null : j ? j.header : {};
-    warn("oauth.token_watch", null, {
-      app: app.key, grant_type: grant === "authorization_code" || grant === "refresh_token" ? grant : "other",
-      alg: head && (head.alg === "ES256" || head.alg === "PS384") ? String(head.alg) : head ? "other" : null,
-      has_kid: !!(head && typeof head.kid === "string"), has_client_id: form.has("client_id"), has_resource: form.has("resource"), has_dpop: request.headers.has("DPoP"),
-    });
-  }
   if (app.kind === "public") {
     if (assertion !== null || form.has("client_secret")) return refuse();
     if (dpopJti === null) return { ok: true, app, alg: null, hasKid: false, dpopFresh: true };
@@ -648,8 +712,11 @@ async function preparePair(id: string, dk: Uint8Array<ArrayBuffer>, wk: Uint8Arr
 
 // POST /api/oauth/token, a form of at most OAUTH_FORM_MAX: in order, the
 // method; the form's size and a parameter sent twice (400 invalid_request);
-// the client, from client_id or, without it, the assertion's sub, a known
-// app (401 invalid_client, before any proof is looked at); a DPoP header
+// the client, from client_id or, without it, the assertion's sub, or a
+// public app's id in a Basic header with an empty password, a known app (401
+// invalid_client, before any proof is looked at: clientOf; a request naming
+// none is logged oauth.token_unknown); a watched app's counts-only line
+// (watchLine, a refresh's once its grant has read the token); a DPoP header
 // checked when sent; the client's authentication by kind (401
 // invalid_client; a signed assertion's claims are judged as presented, then
 // its key and its signature, with this app's counter of failed signature
@@ -671,20 +738,29 @@ export async function tokenRoute(rc: RouteContext): Promise<Response> {
   if ("tooLarge" in f) return oauthError("invalid_request", 413);
   if ("repeated" in f) return oauthError("invalid_request", 400, "A parameter was sent more than once.");
   const form = f.form;
-  const named = await clientOf(env, form);
-  if (!named) return invalidClient(request);
-  const nowS = Math.floor(Date.now() / 1000);
-  const dpop = await checkDpop(request, signinOrigin(env) + "/api/oauth/token", nowS);
+  const named = await clientOf(env, request, form);
+  if (named === "refused") return invalidClient(request);
+  if (!named) { unknownClient(request, form); return invalidClient(request); }
   const grant = form.get("grant_type");
-  const auth = await authenticate(env, request, form, signinOrigin(env), named, dpop.kind === "ok" ? dpop.jti : null, grant, (p) => rc.ctx.waitUntil(p));
-  if (!auth.ok) return auth.response;
-  const app = auth.app;
-  if (dpop.kind === "bad" || (dpop.kind === "ok" && !auth.dpopFresh)) return oauthError("invalid_dpop_proof");
-  if (dpop.kind === "none" && app.dpop_always) return oauthError("invalid_dpop_proof");
-  const proof = dpop.kind === "ok" ? dpop.jkt : null;
-  if (grant === "authorization_code") return codeGrant(rc, app, form, proof);
-  if (grant === "refresh_token") return refreshGrant(rc, app, form, proof);
-  return oauthError(grant === null ? "invalid_request" : "unsupported_grant_type");
+  // a refresh's line waits for the grant to read the token it presents; any other is said now
+  const watch = watchLine(request, form, named, grant);
+  if (grant !== "refresh_token") watch();
+  try {
+    const nowS = Math.floor(Date.now() / 1000);
+    const dpop = await checkDpop(request, signinOrigin(env) + "/api/oauth/token", nowS);
+    const auth = await authenticate(env, request, form, signinOrigin(env), named, dpop.kind === "ok" ? dpop.jti : null, (p) => rc.ctx.waitUntil(p));
+    if (!auth.ok) return auth.response;
+    const app = auth.app;
+    if (dpop.kind === "bad" || (dpop.kind === "ok" && !auth.dpopFresh)) return oauthError("invalid_dpop_proof");
+    if (dpop.kind === "none" && app.dpop_always) return oauthError("invalid_dpop_proof");
+    const proof = dpop.kind === "ok" ? dpop.jkt : null;
+    if (grant === "authorization_code") return await codeGrant(rc, app, form, proof);
+    if (grant === "refresh_token") return await refreshGrant(rc, app, form, proof, watch);
+    return oauthError(grant === null ? "invalid_request" : "unsupported_grant_type");
+  } finally {
+    // a refresh refused before its grant read the token: the line without how it stood
+    watch();
+  }
 }
 
 /** grant_type=authorization_code: the code's slot (live, or redeemed
@@ -741,17 +817,22 @@ async function codeGrant(rc: RouteContext, app: KnownApp, form: URLSearchParams,
  *  resource; then the identity, in one step: a fresh rotation, the same pair
  *  within the grace (to a proof of the key the new refresh token carries),
  *  or a reuse, which ends the sign-in. */
-async function refreshGrant(rc: RouteContext, app: KnownApp, form: URLSearchParams, proof: string | null): Promise<Response> {
+async function refreshGrant(rc: RouteContext, app: KnownApp, form: URLSearchParams, proof: string | null, watch: (refresh: RefreshStanding) => void): Promise<Response> {
   const { env } = rc;
   const t = parseSigninToken(form.get("refresh_token") || "");
-  if (!t || t.kind !== "refresh") return oauthError("invalid_grant");
+  if (!t || t.kind !== "refresh") { watch("unknown"); return oauthError("invalid_grant"); }
   const s = await heldOf(env, t);
   const o = await s.stub.signinOpen(s.slot, s.verifier, ["refresh"], { spent: true });
   if (!o.ok) {
+    watch("unknown");
     if (o.cut && o.client === app.client_id) await outlive(rc, () => signinDisconnect(env, t));
     return oauthError("invalid_grant");
   }
-  if (o.bind.client !== app.client_id) return oauthError("invalid_grant");
+  if (o.bind.client !== app.client_id) { watch("unknown"); return oauthError("invalid_grant"); }
+  // a spent token's standing, the grace's pair or a reuse, read now (a read only: a spent slot is not written),
+  // so a watched app's line says it whichever check below refuses the request
+  const spentRead = o.spent ? await s.stub.signinRefresh(s.slot, s.verifier, null, null, null) : null;
+  watch(spentRead === null ? "fresh" : spentRead.ok ? "grace" : spentRead.reuse ? "spent" : "unknown");
   if (o.idle) {
     await outlive(rc, () => signinDisconnect(env, t));
     warn("oauth.idle_end", null, {});
@@ -765,7 +846,7 @@ async function refreshGrant(rc: RouteContext, app: KnownApp, form: URLSearchPara
   if (!resource) return oauthError("invalid_target");
   let r: Awaited<ReturnType<DurableObjectStub["signinRefresh"]>>;
   let fresh: { access: string, refresh: string } | null = null;
-  if (o.spent) r = await s.stub.signinRefresh(s.slot, s.verifier, null, null, null);
+  if (spentRead !== null) r = spentRead;
   else {
     const dk = await slotUnwrap(s.id, s.slot, "refresh", s.secret, o.wrapped);
     const wk = await slotUnwrap(s.id, s.slot, "refresh", s.secret, o.wk);
@@ -795,8 +876,9 @@ async function refreshGrant(rc: RouteContext, app: KnownApp, form: URLSearchPara
 }
 
 // POST /api/oauth/revoke {token, token_type_hint?} (RFC 7009), a form of at
-// most OAUTH_FORM_MAX: the method, the form, the client (a known app, else
-// 401 invalid_client) and its authentication by kind (401 invalid_client, or
+// most OAUTH_FORM_MAX: the method, the form, the client (a known app named
+// as at the token endpoint, clientOf, else 401 invalid_client, logged
+// oauth.token_unknown) and its authentication by kind (401 invalid_client, or
 // 429 slow_down as at the token endpoint), then by the token's form: a
 // refresh token, live or spent, issued to this client ends its sign-in
 // (signinDisconnect, under waitUntil); an access token issued to it ends
@@ -814,9 +896,10 @@ export async function revokeRoute(rc: RouteContext): Promise<Response> {
   if ("tooLarge" in f) return oauthError("invalid_request", 413);
   if ("repeated" in f) return oauthError("invalid_request", 400, "A parameter was sent more than once.");
   const form = f.form;
-  const named = await clientOf(env, form);
-  if (!named) return invalidClient(request);
-  const auth = await authenticate(env, request, form, signinOrigin(env), named, null, null, (p) => rc.ctx.waitUntil(p));
+  const named = await clientOf(env, request, form);
+  if (named === "refused") return invalidClient(request);
+  if (!named) { unknownClient(request, form); return invalidClient(request); }
+  const auth = await authenticate(env, request, form, signinOrigin(env), named, null, (p) => rc.ctx.waitUntil(p));
   if (!auth.ok) return auth.response;
   const t = parseSigninToken(form.get("token") || "");
   if (t && t.kind === "refresh") {

@@ -129,9 +129,12 @@ Playwright); `tests/fixtures/` holds the files they share.
   test hook puts them, and the OAuth client's side done by hand (PKCE,
   ES256 and PS384 client assertions, DPoP proofs, every key made in the
   test with Web Crypto). The documents (`oauth-metadata`), the authorize
-  page's checks in order, its fixed pages and headers (`oauth-authorize`,
-  with RFC 6749 3.1's empty parameters and an exact HTTPS redirect's near
-  misses, and a parameter sent twice with one value empty), the approval
+  page's checks in order, its fixed pages, their bytes and headers, and
+  their light or dark (`oauth-authorize`, with RFC 6749 3.1's empty
+  parameters and an exact HTTPS redirect's near misses, a parameter sent
+  twice with one value empty, and Muse's own request as it sent it on a
+  live server with nothing fetched, its address's and Client ID's near
+  misses, its redirects' `state` and `iss`), the approval
   (`oauth-decide`), the token endpoint (`oauth-token`: each assertion
   refusal, the claims judged before any key or signature, the key set
   per isolate and `jwks_uri` against a stand-in key-set host in place of
@@ -152,7 +155,12 @@ Playwright); `tests/fixtures/` holds the files they share.
   failed-authentication limit one per network and app, filled only by a
   signature that matched no key, with the quota object's calls and the
   signature checks counted per case, and refusing before any fetch or
-  signature, an unknown client refused before its DPoP proof, the code
+  signature, an unknown client refused before its DPoP proof and logged
+  `oauth.token_unknown`, a public app named only in a Basic header with
+  an empty password (and refused with a password, an undecodable header
+  or another id; an app that signs its requests unchanged by it), Muse's
+  code exchange and its code refused to Claude's client and the reverse,
+  a watched app's refresh line for each standing of its token, the code
   exchange and a redeemed code's copy, the refresh's rotation, grace and
   reuse, idle, DPoP and `jwkThumbprint` against RFC 9449's and RFC 7638's
   published values),
@@ -160,12 +168,19 @@ Playwright); `tests/fixtures/` holds the files they share.
   sign-in's credentials opening no room list), the disconnect-only code
   (`oauth-disconnect`), the sign-in address (`signin-mcp`), the identity
   object and an app's store (`signin-object`), and the page's pinned copy
-  (`signin-page`). A test server compares no pinned app's document:
+  and each page kind's warning (`signin-page`). A test server compares no
+  pinned app's document:
   `compareDocument` runs only without `TEST_HOOKS` (its own test runs
   with `TEST_HOOKS` removed and `fetch` replaced), so nothing asks an
   outside host. On a local server the issuer is `TEST_SIGNIN_ORIGIN`
   (`AGENTS.md` section 2), its own address. The API suite's
-  `tests/api/signin.js` runs two stand-in apps against a real local
+  `tests/api/signin.js` runs Muse first, the pinned app, with plain
+  requests as its connector sends them (the authorize page, the approval,
+  the code exchange, a tool call, a refresh, a revoke; then a sign-in
+  refreshed twice, once naming the client only in a Basic header, whose
+  first refresh token presented again after `OAUTH_REFRESH_GRACE_S` ends
+  it, checked at the end of the file so the wait overlaps the rest), and
+  two stand-in apps against a real local
   Worker, registered with `POST /api/test-hooks/oauth-app` (a public one
   with a loopback redirect, a poppy one with its key set inline): the
   authorize page, the approval with a person's invites, the code
@@ -185,7 +200,10 @@ Playwright); `tests/fixtures/` holds the files they share.
   connections section on a fake API of its own that answers every
   request of the browser (the apps' callbacks are stand-ins, anything
   else is refused), with the authorize page served with the Worker's own
-  `AUTHORIZE_HEADERS`; at the end of every scenario it requires the
+  `AUTHORIZE_HEADERS`: each app's page (Claude's, Claude Code's, Muse's)
+  with its screenshots, and the Worker's two fixed pages as its own
+  `authorizeRoute` serves them (`signin-fixed-*`), in light and dark; at
+  the end of every scenario it requires the
   site's `localStorage` as seeded but for an expected connection record,
   no cookie, and in every tab, at its last address on the site (a tab
   that left the site is taken back to that entry, one never on it to a

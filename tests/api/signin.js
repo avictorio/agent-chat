@@ -1,5 +1,12 @@
 // The sign-in for known apps against a real local Worker
 // (worker/routes/oauth.ts, the sign-in address in worker/routes/agent.ts):
+// first Muse, a pinned public client whose Client ID the person types
+// (muse), with plain requests as its connector sends them: the authorize
+// page, the approval, the code exchange, a tool call, a refresh and a
+// revoke; then a second sign-in refreshed twice (the second naming the
+// client only in a Basic header) whose first refresh token, presented again
+// once OAUTH_REFRESH_GRACE_S has passed (checked at the end, so the wait
+// overlaps the rest), ends it. Then
 // two stand-in apps put on this local server by its test hook (TEST_HOOKS
 // only), a public one with a loopback redirect and a poppy one with its key
 // set inline (ES256 and PS384), the second once with DPoP proofs and once
@@ -98,6 +105,51 @@ async function signinApi(ctx) {
   }
 
   try {
+    // ---- Muse: a pinned public client, its Client ID typed by the person; plain requests, as its connector sends them ----
+    const MUSE_CB = 'https://agent.meta.ai/api/hatch/oauth/callback';
+    const M = await room('muse');
+    const patM = await invite(M, 'Pat', 'human');
+    await join(M, patM);
+    /** Muse's authorize request and the approval: the code, the verifier and the redirect it came back on */
+    const museApprove = async (name) => {
+      const { verifier, challenge } = await pkce();
+      const q = new URLSearchParams({ response_type: 'code', client_id: 'muse', redirect_uri: MUSE_CB, scope: 'rooms', resource: ADDRESS, state: 'ms-' + SUF, code_challenge: challenge, code_challenge_method: 'S256' });
+      const page = await req('GET', '/oauth/authorize?' + q.toString());
+      const d = await req('POST', '/api/oauth/decide', { json: { params: q.toString(), approve: true, name, rooms: [{ room: M, inviter_token: patM, reuse: 'any' }] }, headers: Object.assign({ 'CF-Connecting-IP': ip() }, same) });
+      const back = d.status === 200 && d.json.redirect ? new URL(d.json.redirect) : null;
+      return { page, decide: d, back, verifier };
+    };
+    const museExchange = (a, extra, headers) => form('/api/oauth/token', { grant_type: 'authorization_code', code: a.back.searchParams.get('code'), code_verifier: a.verifier, redirect_uri: MUSE_CB, resource: ADDRESS, ...(extra || { client_id: 'muse' }) }, headers);
+    const museRefresh = (rt, extra, headers) => form('/api/oauth/token', { grant_type: 'refresh_token', refresh_token: rt, resource: ADDRESS, ...(extra || { client_id: 'muse' }) }, headers);
+    let museReuse = null;
+    {
+      const a = await museApprove('Muse');
+      check('signin (Muse): its authorize request is the approval page', a.page.status === 200 && /<div id="root">/.test(a.page.text), a.page.status + ' ' + a.page.text.slice(0, 80));
+      check('signin (Muse): the approval redirects to its own address with the code, the state and iss', !!a.back && a.back.origin + a.back.pathname === MUSE_CB && JSON.stringify([...a.back.searchParams.keys()]) === '["code","state","iss"]' && a.back.searchParams.get('state') === 'ms-' + SUF && a.back.searchParams.get('iss') === ORIGIN, a.decide.status + ' ' + a.decide.text.slice(0, 160));
+      const t = a.back ? await museExchange(a) : { status: 0, json: {}, text: '' };
+      check('signin (Muse): the code exchange as a public client, client_id in the form and nothing else', t.status === 200 && t.json.token_type === 'Bearer' && t.json.scope === 'rooms', t.text.slice(0, 120));
+      if (t.status === 200) {
+        const p = await tool(t.json.access_token, 'post_message', { room: M, text: 'hello from Muse' });
+        check('signin (Muse): a tool call, a post in the room', !!p.result && !p.result.isError, JSON.stringify(p).slice(0, 160));
+        const r = await museRefresh(t.json.refresh_token);
+        check('signin (Muse): a refresh rotates the pair', r.status === 200 && r.json.refresh_token !== t.json.refresh_token, r.text.slice(0, 120));
+        const rv = await form('/api/oauth/revoke', { token: r.json.refresh_token, client_id: 'muse' });
+        const after = await rpc(r.json.access_token, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+        check('signin (Muse): the revoke answers 200 {}, and its access token is refused after it', rv.status === 200 && rv.text === '{}' && after.status === 401, rv.status + ' ' + after.status);
+      }
+      // a second sign-in: refreshed twice, the second time naming the client only in Authorization: Basic with no password
+      const b = await museApprove('Muse');
+      const t2 = b.back ? await museExchange(b, {}, { Authorization: 'Basic ' + Buffer.from('muse:').toString('base64') }) : { status: 0, json: {} };
+      check('signin (Muse): a code exchange naming the client only in a Basic header with no password', t2.status === 200, t2.status + ' ' + JSON.stringify(t2.json).slice(0, 100));
+      if (t2.status === 200) {
+        const r1 = await museRefresh(t2.json.refresh_token);
+        const r1At = Date.now();
+        const r2 = await museRefresh(r1.json.refresh_token, {}, { Authorization: 'Basic ' + Buffer.from('muse:').toString('base64') });
+        check('signin (Muse): a second refresh, the client in a Basic header', r1.status === 200 && r2.status === 200 && r2.json.refresh_token !== r1.json.refresh_token, r1.status + ' ' + r2.status);
+        museReuse = { first: t2.json.refresh_token, access: r2.json.access_token, at: r1At };
+      }
+    }
+
     const A = await room('a'), B = await room('b');
     const patA = await invite(A, 'Pat', 'human'), patB = await invite(B, 'Pat', 'human');
     await join(A, patA);
@@ -270,6 +322,15 @@ async function signinApi(ctx) {
       } finally {
         await new Promise((r) => keyHost.close(r));
       }
+    }
+
+    // ---- Muse's first refresh token again, once the grace after its use has passed: a reuse, which ends the sign-in ----
+    if (museReuse) {
+      await sleep(Math.max(0, museReuse.at + (LIM.OAUTH_REFRESH_GRACE_S + 2) * 1000 - Date.now()));
+      const again = await museRefresh(museReuse.first);
+      let after = null;
+      for (let i = 0; i < 20; i++) { after = await rpc(museReuse.access, { jsonrpc: '2.0', id: 1, method: 'tools/list' }); if (after.status === 401) break; await sleep(100); }
+      check('signin (Muse): the first refresh token presented again after the grace is invalid_grant, and the sign-in has ended (its latest access token refused)', again.status === 400 && again.json.error === 'invalid_grant' && after.status === 401, again.status + ' ' + again.text.slice(0, 80) + ' ' + after.status);
     }
   } finally {
     await req('POST', '/api/test-hooks/oauth-app', { owner: true, json: { clear: true } });

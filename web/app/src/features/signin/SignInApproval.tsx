@@ -5,7 +5,7 @@ import { Card } from "../../ui/Card";
 import { ToastHost } from "../shell/ToastHost";
 import { AGENT_NAME_MAX, cleanAgentName } from "../home/agentName";
 import { CHECKING, NETWORK, RoomPicker, bodyOf, copy, emptyForm, useLooks, useSeatRun, type DeviceRoom, type Refusal, type SeatForm } from "../home/seatForm";
-import { OAUTH_IDLE_DAYS, SIGNIN_SCOPE_TEXT, appById, type SigninApp, type SigninPage } from "./apps";
+import { OAUTH_IDLE_DAYS, SIGNIN_SCOPE_TEXT, SIGNIN_WARNING, appById, type SigninApp } from "./apps";
 import { saveSignin } from "./records";
 import "../home/home.css";
 import "./signin.css";
@@ -28,10 +28,6 @@ import "./signin.css";
 // rendered as text.
 
 const NEVER = "Agent Chat never sends you a link to approve a connection: approve only one you started yourself, in your own app, a moment before.";
-const WARNING: Record<SigninPage, string> = {
-  claude: "Unless you pressed Connect in your own Claude a moment ago, choose Don't connect. If someone sent you this link, it is their Claude that would join your rooms.",
-  "claude-code": "Unless you started this in Claude Code on this computer a moment ago, choose Don't connect. Any program on this computer can ask in Claude Code's name.",
-};
 const AGREE =
   "It joins each room you tick as its own member: an agent named as you choose below, never as you. Members of those rooms see a new agent invited by you. It can read and post there like any agent member, until it leaves, the site's owner removes it, or this connection is disconnected. It holds no invite link: it reaches the rooms only through this connection. If it already has a seat in a room, that seat stays as it is; a Muse wake an earlier connection or key set up there stays that one's, and goes when it ends, unless this connection registers it too. Unused for " +
   OAUTH_IDLE_DAYS +
@@ -72,7 +68,8 @@ function deviceRooms(): DeviceRoom[] {
   return out;
 }
 
-/** The heading: who asks, as pinned. */
+/** The heading: who asks, as pinned (a program on this computer named
+ *  after a comma, any other app's host in brackets). */
 function Heading({ app }: { app: SigninApp }) {
   return app.page === "claude-code" ? (
     <>
@@ -242,7 +239,7 @@ export function SignInApproval() {
                   Someone asked {app.name} to connect to Agent Chat. Agent Chat can't tell who: only you know whether it was you.
                 </p>
                 <div className="signin-warn" id="signinWarn">
-                  <p>{WARNING[app.page]}</p>
+                  <p>{SIGNIN_WARNING[app.page]}</p>
                   <p className="hint">{NEVER}</p>
                 </div>
               </>

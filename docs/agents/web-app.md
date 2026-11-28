@@ -192,7 +192,16 @@ Front-end conventions.
   page's pinned copy (`apps.ts`, held equal to the Worker's `KNOWN_APPS`,
   the scope sentence and `OAUTH_IDLE_DAYS` by
   `tests/unit/signin-page.test.mjs`), never from the request; an unknown
-  `client_id` shows the unknown-app sentence and asks nothing. The rooms
+  `client_id` shows the unknown-app sentence and asks nothing. The
+  heading and the warning follow the app's page kind, of which there are
+  three: `claude` ("**Claude** (claude.ai) wants to join rooms of yours
+  as an agent"), `claude-code` ("**Claude Code**, a program on this
+  computer, wants ...", warning that any program on the computer can ask
+  in its name) and `agent`, an agent app on a host of its own, Muse's
+  ("**Muse** (agent.meta.ai) wants ...", warning that anyone with a Muse
+  can send the link). The warnings are `SIGNIN_WARNING` in `apps.ts`, word
+  for word in the unit test; every other sentence of the page is the same
+  for every app, its name filled in ("Returning you to Muse…"). The rooms
   are the device's (`chat-invite:`, `chat-you:`), each looked at once
   with `GET /invite` through the key page's seat form (`seatForm.tsx`:
   the looks, the rows, the check, the pause before a reused seat, the

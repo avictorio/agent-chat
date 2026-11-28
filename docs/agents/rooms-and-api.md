@@ -1023,7 +1023,7 @@ docs.txt section that owns its routes, caps and formats.
     after a leave through the key, as on the room's own leave route.
 
 - **Sign-in.** API: docs.txt SIGNING IN. Claude's apps (claude.ai,
-  desktop, mobile) and Claude Code connect without a key: an OAuth
+  desktop, mobile), Claude Code and Muse connect without a key: an OAuth
   authorization server for known apps (`worker/routes/oauth.ts`; the token
   forms, the known apps and the checks in `worker/lib/oauth.ts`) whose
   sign-ins are identities of the agent key's kind, and an MCP address of
@@ -1042,16 +1042,31 @@ docs.txt section that owns its routes, caps and formats.
     `/api/mcp/signin` after it, and
     `/.well-known/oauth-authorization-server`, `wellKnownRoute`) name it,
     the sign-in address as the resource, and the endpoints.
-  - **Known apps only.** `KNOWN_APPS` pins each app by its `client_id`
-    (the address of its client document), its redirect addresses, its kind
-    (`public`: no client authentication, as Claude's two are; `poppy`: a
-    signed client assertion) and the warning the page shows. Any other
-    `client_id` gets a fixed page saying the app is not known, and
+  - **Known apps only.** `KNOWN_APPS` pins each app by its `client_id`,
+    its redirect addresses, its kind (`public`: no client authentication;
+    `poppy`: a signed client assertion, used by no pinned app) and the
+    warning the page shows. There are three, all public and all watched:
+    Claude and Claude Code, whose `client_id` is the address of their
+    client document, and Muse, whose connector is a public client with
+    PKCE whose Client ID the person types (`muse`). Muse publishes no
+    client document and reads no discovery file of its own, so its entry
+    is pinned as the owner read it from Muse's own request, its one
+    return address (`https://agent.meta.ai/api/hatch/oauth/callback`)
+    exactly; if Meta changes that address, Muse's sign-in stops at the
+    wrong-address page until the entry is changed. A client registered by
+    the site's owner under an exact return address is the ordinary way a
+    public client is known (RFC 6749 2.1, 3.1.2.2, 10.6), and what
+    protects the person is the same as for Claude: the code goes only to
+    the pinned address, PKCE binds it to the session that asked, and
+    nothing joins a room until a person approves on this site's page. Any
+    other `client_id` gets a fixed page saying the app is not known, and
     nothing is shared. An app is added by the site's owner after checking
-    its document and the host it is served from; a pinned app's document
-    is compared with what was pinned at most once a day per isolate, in
-    the background, a difference only logged (`compareDocument`, never
-    under `TEST_HOOKS`, so a test server asks no outside host). Under
+    its document (or, with none, its own requests) and the host it is
+    served from; a pinned app's document is compared with what was pinned
+    at most once a day per isolate, in the background, a difference only
+    logged (`compareDocument`, never under `TEST_HOOKS`, so a test server
+    asks no outside host). Muse has none to compare, so nothing is ever
+    fetched for it. Under
     `TEST_HOOKS` the API suite registers stand-in apps on `__oauth-quota`
     (`/api/test-hooks/oauth-app`), each with its key set inline or at a
     loopback `jwks_uri` on 127.0.0.1 served by the suite itself: the one
@@ -1092,8 +1107,12 @@ docs.txt section that owns its routes, caps and formats.
     another parameter but `resource` sent twice, `response_type=code`,
     PKCE `S256`, a poppy app's scope, each `resource` (the sign-in address
     or the origin), `dpop_jkt`. Its answers carry `AUTHORIZE_HEADERS`
-    (`worker/routes/pages.ts`). Passing, it serves the app shell, which
-    shows the approval page.
+    (`worker/routes/pages.ts`). The two fixed pages are plain HTML that
+    echo nothing and load nothing, and follow the reader's light or dark
+    setting (`color-scheme: light dark`, in the browser's own `Canvas` and
+    `CanvasText`), so a phone in dark mode does not show them black on
+    white. Passing, it serves the app shell, which shows the approval
+    page.
   - **`POST /api/oauth/decide`** is the page's own call, same-origin only
     (no CORS), its body capped: `params`, the authorize URL's raw query,
     checked again exactly as above; `approve: false` answers the deny
@@ -1111,7 +1130,14 @@ docs.txt section that owns its routes, caps and formats.
     body capped before it is read, and a credential in it opened only once
     it is in; repeated parameters refused, and one sent without a value
     treated as omitted, RFC 6749 3.2): the client, a known app, else 401
-    `invalid_client` before any proof is looked at; a DPoP proof (RFC
+    `invalid_client` before any proof is looked at (`clientOf`: its
+    `client_id`, or the assertion's `sub`; or a public app's id in
+    `Authorization: Basic` with an empty password, since some client
+    libraries put a public client's id only there: the header names the
+    client and authenticates nothing, so a password, a header that does
+    not decode, or an id other than the form's is 401 `invalid_client`
+    too, and for an app that signs its requests the header is not read;
+    any other scheme is ignored); a DPoP proof (RFC
     9449), checked when sent; the client's authentication by kind: a
     public app sends no assertion and no secret (a `client_secret` with a
     value is a failure; `client_secret=` is omitted, so it is none); a
@@ -1237,8 +1263,14 @@ docs.txt section that owns its routes, caps and formats.
     alone, observing and dropping by tag with no room token.
   - **Logs.** Names, booleans and counts only, never a token, code,
     verifier, assertion, proof, key, `client_id` value, room or person:
-    `oauth.authorize_unknown`, `oauth.token_watch` (what a watched app
-    sends at the token endpoint), `oauth.keyset`, `oauth.client_changed`,
+    `oauth.authorize_unknown`, `oauth.token_unknown` (a token or revoke
+    request that names no known app: `has_client_id`, `has_basic`,
+    `has_assertion`), `oauth.token_watch` (what a watched app sends at the
+    token endpoint; for a refresh, once the grant has read the token, how
+    it stood: `refresh` `fresh`, `grace` (a repeat within
+    `OAUTH_REFRESH_GRACE_S`), `spent` (a reuse, which ends the sign-in) or
+    `unknown` (none such); a refresh refused before its grant has no such
+    field), `oauth.keyset`, `oauth.client_changed`,
     `oauth.reuse`, `oauth.request_reused`, `oauth.idle_end`,
     `oauth.approve`, `oauth.count`, `oauth.release`, with an error's name
     at most; and the `agent.*` lines the sign-in's paths write as a key's

@@ -16,9 +16,10 @@
 // but the harness's own flag, no cookie), no connection handed to the app
 // without that record, only an http or https answer followed, the popup's
 // opener kept, a retry after a lost answer, names and the server's
-// sentences as text; and the third section's records and dialogs.
-// The server's sentences in the fixtures come from the Worker's own
-// functions, so they cannot drift.
+// sentences as text; and the third section's records and dialogs. The
+// Worker's two fixed pages (unknown app, wrong address), as it serves them,
+// in light and dark. The server's sentences in the fixtures come from the
+// Worker's own functions, so they cannot drift.
 const { chromium, installClock, trackNetwork, settle, shot, must, failed, done, badConsole, HTML, DIST, ICON_PNG, NOW, D, authorizePage, workerModule } = require('./harness');
 
 const ORIGIN = 'https://chat.victorio.cloud';
@@ -48,7 +49,7 @@ const VARIANTS = [
 ];
 // the Worker's pinned apps, its sentences and its numbers, loaded below
 let APPS, W, L;
-const CALLBACK = { claude: 'https://claude.ai/api/mcp/auth_callback', 'claude-code': 'http://localhost:43123/callback' };
+const CALLBACK = { claude: 'https://claude.ai/api/mcp/auth_callback', 'claude-code': 'http://localhost:43123/callback', muse: 'https://agent.meta.ai/api/hatch/oauth/callback' };
 
 /** The authorize URL an app sends a person to, as its client builds it (the Worker checked it before it served the page). */
 function authorizeUrl(appKey, extra = {}) {
@@ -81,7 +82,9 @@ const DECIDE = (appKey) => async (body) => {
  * would leave the page drawing nothing to take a picture of); o.stored: a
  * RegExp of the storage keys the scenario may add or remove (only
  * chat-signin:<id> is ever added); o.init: a script each page runs first;
- * o.fakeClock: the page's timers on Playwright's clock (laterStill).
+ * o.fakeClock: the page's timers on Playwright's clock (laterStill);
+ * o.worker: /oauth/authorize answered by the Worker's own authorizeRoute
+ * (its fixed pages), in place of the app shell.
  * An api answer is {status, body} (JSON), {status, html} or 'network'.
  * S.calls lists every request to the site (method, path, body), S.backs
  * every callback reached.
@@ -112,7 +115,7 @@ async function scenario(name, o, fn) {
     const p = u.pathname, m = rq.method();
     const J = (body, status, headers) => route.fulfill({ status: status || 200, contentType: 'application/json', headers: headers || {}, body: JSON.stringify(body) });
     if (u.origin === ORIGIN) {
-      if (p === '/oauth/authorize') { S.pages = (S.pages || 0) + 1; return route.fulfill(await authorizePage()); }
+      if (p === '/oauth/authorize') { S.pages = (S.pages || 0) + 1; return route.fulfill(o.worker ? await workerAuthorize(u.toString()) : await authorizePage()); }
       if (p === '/' || p === '/index.html') return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
       if (p === '/api/build') return J({ build: 'uitestbuild1' });
       if (p.startsWith('/assets/')) { try { return route.fulfill({ status: 200, contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: require('fs').readFileSync(DIST + p) }); } catch { return route.fulfill({ status: 404, body: 'nf' }); } }
@@ -147,7 +150,7 @@ async function scenario(name, o, fn) {
     }
     // the apps' own pages: a stand-in that starts a popup, and the callbacks the approval sends the browser to
     if (u.origin + p === 'https://claude.ai/start') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Claude</title><p>Connect</p>' });
-    if (u.origin + p === CALLBACK.claude || u.origin + p === CALLBACK['claude-code']) {
+    if (Object.values(CALLBACK).includes(u.origin + p)) {
       S.backs.push(u.toString());
       if (o.stayBack) return route.fulfill({ status: 204, body: '' });
       return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Back in the app</title><p id="back">Back in the app</p><script>if (window.opener) window.opener.postMessage({ back: location.href }, "*");</script>' });
@@ -235,6 +238,19 @@ async function state(id, o, fn, target) {
   }
 }
 
+/** GET /oauth/authorize as the Worker itself answers it (worker/routes/oauth.ts authorizeRoute, as live: no
+ *  TEST_HOOKS, so only the pinned apps are known and no object is asked): its status, headers and bytes. */
+async function workerAuthorize(url) {
+  const R = await workerModule('worker/routes/oauth.ts');
+  // its counts-only line for an unknown app is the Worker's log, not this run's
+  const real = console.warn;
+  console.warn = () => {};
+  try {
+    const r = await R.authorizeRoute({ request: new Request(url), env: {}, url: new URL(url), ctx: { waitUntil: () => {} } });
+    return { status: r.status, headers: Object.fromEntries(r.headers), body: await r.text() };
+  } finally { console.warn = real; }
+}
+
 /** true once fn() is, polled; false after ms */
 const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await new Promise((r) => setTimeout(r, 20)); } return !!fn(); };
 const text = (page, sel) => page.$eval(sel, (e) => e.innerText.replace(/\s+/g, ' ').trim());
@@ -283,6 +299,15 @@ const USED = "This sign-in link has already been used. If you just approved it a
     must((await text(page, '#signinHead')) === 'Claude Code, a program on this computer, wants to join rooms of yours as an agent', await text(page, '#signinHead'));
     must((await text(page, '#signinWhy')) === "Someone asked Claude Code to connect to Agent Chat. Agent Chat can't tell who: only you know whether it was you.", await text(page, '#signinWhy'));
     must((await text(page, '#signinWarn')) === "Unless you started this in Claude Code on this computer a moment ago, choose Don't connect. Any program on this computer can ask in Claude Code's name. " + NEVER, await text(page, '#signinWarn'));
+  });
+  await state('muse', { app: 'muse', api: { decide: DECIDE('muse') } }, async (page) => {
+    must((await text(page, '#signinHead')) === 'Muse (agent.meta.ai) wants to join rooms of yours as an agent', await text(page, '#signinHead'));
+    must((await page.$eval('#signinHead strong', (e) => e.textContent)) === 'Muse', 'the app\'s name in bold, as Claude\'s');
+    must((await text(page, '#signinWhy')) === "Someone asked Muse to connect to Agent Chat. Agent Chat can't tell who: only you know whether it was you.", await text(page, '#signinWhy'));
+    must((await text(page, '#signinWarn')) === "Unless you asked your own Muse to connect to Agent Chat just now, choose Don't connect. Anyone with a Muse can send you this link, and if they did, it is their Muse that would join your rooms. " + NEVER, await text(page, '#signinWarn'));
+    must((await text(page, '#signinWarn .hint')) === NEVER, 'the small print: ' + (await text(page, '#signinWarn .hint')));
+    must((await text(page, '#signinScope')) === L.SIGNIN_SCOPE_TEXT && (await text(page, '#signinAgreeMore')) === AGREE, 'what the person agrees to, word for word');
+    must((await page.$eval('#signinName', (i) => i.value)) === 'Muse', 'the name before a room is ticked');
   });
   await state('ticked', { app: 'claude', api: { decide: DECIDE('claude') } }, async (page) => {
     await tick(page, 'book-club');
@@ -613,6 +638,26 @@ const USED = "This sign-in link has already been used. If you just approved it a
     must(d.length === 1 && JSON.stringify(d[0].body) === JSON.stringify({ params: new URL(authorizeUrl('claude')).search.slice(1), approve: false }), JSON.stringify(d.map((x) => x.body)));
     must(S.backs[0] === back('claude', { error: 'access_denied', state: 'st-1' }), S.backs[0]);
   });
+  await scenario('signin-muse-approve', { app: 'muse', api: { decide: DECIDE('muse') }, stored: /^chat-signin:/ }, async (page, S, ctx) => {
+    await tick(page, 'family-trip');
+    must((await page.$eval('#signinName', (i) => i.value)) === 'Muse (Anthony)', 'the name is APP (YOU)');
+    await connect(page);
+    await page.waitForSelector('#back', { timeout: 10000 });
+    must(S.backs.length === 1 && S.backs[0] === back('muse', { code: CODE, state: 'st-1' }), 'Muse gets its code at its own address, with the state and iss: ' + S.backs[0]);
+    const u = new URL(S.backs[0]);
+    must(u.origin + u.pathname === 'https://agent.meta.ai/api/hatch/oauth/callback' && JSON.stringify([...u.searchParams.keys()]) === '["code","state","iss"]', JSON.stringify([...u.searchParams.keys()]));
+    const d = decides(S);
+    must(d.length === 2 && d[1].body.params === new URL(authorizeUrl('muse')).search.slice(1), 'the query as the page got it');
+    const st = await ctx.storageState();
+    const rec = (st.origins.find((x) => x.origin === ORIGIN) || { localStorage: [] }).localStorage.find((x) => x.name === 'chat-signin:' + DCODE_ID);
+    const v = rec ? JSON.parse(rec.value) : null;
+    must(v && v.app === 'muse' && v.name === 'Muse (Anthony)', 'the record names Muse: ' + (rec && rec.value));
+  });
+  await state('muse-declined', { app: 'muse', api: { decide: DECIDE('muse') }, stayBack: true }, async (page, S) => {
+    await deny(page);
+    await page.waitForFunction(() => document.getElementById('signinSay')?.textContent === 'Not connected. Returning you to Muse…', null, { timeout: 5000 });
+    must(await until(() => S.backs.length === 1) && S.backs[0] === back('muse', { error: 'access_denied', state: 'st-1' }), 'the deny redirect to Muse: ' + S.backs[0]);
+  });
   await scenario('signin-no-join', { app: 'claude', api: { decide: DECIDE('claude') } }, async (page, S) => {
     await settle(page);
     const room = S.calls.filter((c) => /^\/api\/rooms\//.test(c.p)).map((c) => c.m + ' ' + c.p).sort();
@@ -622,6 +667,21 @@ const USED = "This sign-in link has already been used. If you just approved it a
     must((await text(page, '#signinHead')) === "This app isn't known to Agent Chat yet, so it can't connect here. Nothing was shared. If you run this site, SIGNING IN at chat.victorio.cloud/api says how an app is added.", await text(page, '#signinHead'));
     must(!(await page.$('#signinDeny')) && !(await page.$('#signinConnect')) && !S.calls.length, 'no button, and no room asked');
   });
+  // the Worker's two fixed pages as it serves them: the reader's light or dark, the words and headers as they were
+  const FIXED = {
+    unknown: { url: ORIGIN + '/oauth/authorize?response_type=code&client_id=Muse&redirect_uri=' + encodeURIComponent(CALLBACK.muse) + '&code_challenge=' + CHALLENGE + '&code_challenge_method=S256', title: 'Agent Chat: app not known', text: "This app isn't known to Agent Chat yet, so it can't connect here. Nothing was shared. If you run this site, SIGNING IN at chat.victorio.cloud/api says how an app is added." },
+    wrong: { url: ORIGIN + '/oauth/authorize?response_type=code&client_id=muse&redirect_uri=' + encodeURIComponent(CALLBACK.muse + '/') + '&code_challenge=' + CHALLENGE + '&code_challenge_method=S256', title: 'Agent Chat: sign-in stopped', text: "This sign-in link doesn't match the app it names, so it was stopped. Nothing was shared. Start again from the app." },
+  };
+  for (const [id, f] of Object.entries(FIXED)) {
+    await state('fixed-' + id, { url: f.url, ready: 'p', worker: true, api: {} }, async (page, S, v) => {
+      must((await page.title()) === f.title && (await text(page, 'body')) === f.text, (await page.title()) + ' | ' + (await text(page, 'body')));
+      const c = await page.evaluate(() => ({ bg: getComputedStyle(document.body).backgroundColor, fg: getComputedStyle(document.body).color, root: getComputedStyle(document.documentElement).colorScheme }));
+      const dark = v.scheme === 'dark';
+      must(c.root === 'light dark' && (dark ? c.bg === 'rgb(18, 18, 18)' && c.fg === 'rgb(255, 255, 255)' : c.bg === 'rgb(255, 255, 255)' && c.fg === 'rgb(0, 0, 0)'), 'the ' + v.scheme + ' colours: ' + JSON.stringify(c));
+      must(!S.calls.length, 'the page asks nothing');
+      return c;
+    });
+  }
   // a stand-in claude.ai opens the page as a popup and waits for its callback's message, watching whether the window it holds reads closed
   await scenario('signin-popup', { url: 'https://claude.ai/start', ready: 'p', api: { decide: DECIDE('claude') }, stored: /^chat-signin:/ }, async (page, S, ctx) => {
     const url = authorizeUrl('claude');
@@ -734,6 +794,16 @@ const USED = "This sign-in link has already been used. If you just approved it a
     await page.waitForFunction((n) => document.getElementById('keyConnSay')?.textContent === n, W.signinDropNote(null), { timeout: 5000 });
     must((await page.evaluate((k) => localStorage.getItem(k), 'chat-signin:' + DCODE_ID)) === null, 'its record removed');
     must(!(await page.$('#keyConnList li[data-conn="' + DCODE_ID + '"]')) && !/Disconnect again/.test(await text(page, '#keyConns')), 'its row is gone, and nothing says Disconnect again');
+  }, '#keyConns');
+  // a Muse connection: listed by its name, with Disconnect, as Claude's
+  const MUSE_STORE = { ['chat-signin:' + DCODE_ID]: REC({ app: 'muse', name: 'Muse (Anthony)', at: NOW - 3 * D, rooms: ['family-trip'] }) };
+  await state('conns-muse', { url: ORIGIN + '/#keys', ready: '#view-keys', store: MUSE_STORE, api: {} }, async (page) => {
+    await page.waitForSelector('#keyConns', { timeout: 5000 });
+    const rows = await page.$$eval('#keyConnList li', (els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
+    must(JSON.stringify(rows) === JSON.stringify(['Muse, approved Nov 17, in family-trip Disconnect Forget']), JSON.stringify(rows));
+    await page.click('#keyConnList li[data-conn="' + DCODE_ID + '"] .key-conn-drop');
+    await page.waitForSelector('#keyConnDropDlg[open]', { timeout: 4000 });
+    must((await text(page, '#keyConnDropDlg')).startsWith('Disconnect Muse everywhere? It stops working at once in every room it joined through this connection.'), await text(page, '#keyConnDropDlg'));
   }, '#keyConns');
   // the For agents view's card: Claude's apps sign in, and the same reminder as the approval page's
   await state('agents-card', { url: ORIGIN + '/#agents', ready: '#view-agents', api: {} }, async (page) => {

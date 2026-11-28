@@ -299,3 +299,93 @@ test("the stand-in apps and the local origin only under TEST_HOOKS: a stand-in s
   assert.equal((await document(odd, "/.well-known/oauth-authorization-server")).json.issuer, SITE_ORIGIN);
   assert.equal((await document(makeSigninWorld(), "/.well-known/oauth-authorization-server")).json.issuer, ORIGIN);
 });
+
+// Muse's connector: a public client with PKCE whose Client ID, muse, the
+// person types; pinned with the one return address its own request named,
+// and no document to fetch.
+const MUSE = KNOWN_APPS.find((a) => a.key === "muse");
+const CLAUDE = KNOWN_APPS.find((a) => a.key === "claude");
+const MUSE_CB = "https://agent.meta.ai/api/hatch/oauth/callback";
+/** Muse's request as it sent it, its state and challenge its own */
+const museQuery = (challenge, state, extra = {}) => {
+  const p = new URLSearchParams();
+  const base = { response_type: "code", client_id: "muse", redirect_uri: MUSE_CB, scope: "rooms", resource: SITE_ORIGIN + "/api/mcp/signin", state, code_challenge: challenge, code_challenge_method: "S256", ...extra };
+  for (const [k, v] of Object.entries(base)) if (v !== null) p.append(k, v);
+  return p.toString();
+};
+
+test("Muse's own request, as it sent it, on a live server: every check passes and the page is served; nothing is fetched for it, now or in the background", async () => {
+  assert.deepEqual(MUSE, { key: "muse", client_id: "muse", kind: "public", name: "Muse", host: "agent.meta.ai", redirect_uris: [MUSE_CB], loopback: false, watch: true, page: "agent" });
+  const w = makeSigninWorld([], { env: { TEST_HOOKS: undefined } });
+  const { challenge } = await pkce();
+  let r;
+  const calls = await fetched(async () => {
+    r = await authorize(w, museQuery(challenge, "m-Zx9_state"));
+    await Promise.all(w.pending);
+  });
+  assert.equal(r.status, 200, r.text);
+  assert.ok(r.text.includes("<div id=\"root\">"), "the app shell");
+  headersOk(r, "Muse's page");
+  assert.deepEqual(calls, [], "no document fetched for Muse");
+});
+
+test("Muse: its return address exactly (each near miss the wrong-address page); its Client ID exactly (Muse, muse with a space, muse2: the unknown-app page); and Claude's address with Muse's id, or Muse's with Claude's, the wrong-address page", async () => {
+  const w = makeSigninWorld([]);
+  const { challenge } = await pkce();
+  const q = (extra) => authzQuery(MUSE, challenge, { resource: ADDRESS, ...extra });
+  assert.equal((await authorize(w, q({}))).status, 200);
+  for (const near of [MUSE_CB + "/", MUSE_CB + "?x=1", MUSE_CB + "#f", MUSE_CB.replace("https:", "http:"), "https://agent.meta.ai.example/api/hatch/oauth/callback", "https://agent.meta.ai/api/hatch/oauth/callbacks", "https://agent.meta.ai/api/hatch/oauth/calback", CLAUDE.redirect_uris[0]]) {
+    const r = await authorize(w, q({ redirect_uri: near }));
+    assert.deepEqual([r.status, r.headers.get("Location"), r.text.includes("<title>Agent Chat: sign-in stopped</title>")], [400, null, true], near);
+  }
+  const claudeWithMuse = await authorize(w, authzQuery(CLAUDE, challenge, { redirect_uri: MUSE_CB }));
+  assert.deepEqual([claudeWithMuse.status, claudeWithMuse.text.includes("<title>Agent Chat: sign-in stopped</title>")], [400, true], "Claude's id with Muse's address");
+  for (const id of ["Muse", "muse ", "muse2", " muse", "MUSE"]) {
+    const r = await authorize(w, q({ client_id: id }));
+    assert.deepEqual([r.status, r.headers.get("Location"), r.text.includes("<title>Agent Chat: app not known</title>")], [400, null, true], JSON.stringify(id));
+  }
+});
+
+test("Muse: PKCE S256 is required (none, or plain, is invalid_request by redirect); dpop_jkt as for any public app; scope absent or rooms; resource absent, the sign-in address, or another (invalid_target); every redirect carries iss character for character and the state sent", async () => {
+  const w = makeSigninWorld([], { env: { TEST_HOOKS: undefined } });
+  const { challenge } = await pkce();
+  const state = "Zx9-_.~ a+b/c=";
+  const back = (r) => { const loc = r.headers.get("Location"); assert.ok(loc && loc.startsWith(MUSE_CB + "?"), String(loc)); return loc; };
+  for (const [extra, error] of [[{ code_challenge: null }, "invalid_request"], [{ code_challenge_method: "plain" }, "invalid_request"], [{ code_challenge_method: null }, "invalid_request"], [{ dpop_jkt: "x" }, "invalid_request"], [{ resource: "https://chat.victorio.cloud/api/mcp" }, "invalid_target"], [{ resource: "https://evil.example/api/mcp/signin" }, "invalid_target"], [{ response_type: "token" }, "unsupported_response_type"]]) {
+    const r = await authorize(w, museQuery(challenge, state, extra));
+    assert.equal(r.status, 302, JSON.stringify(extra));
+    const loc = back(r);
+    assert.deepEqual(params(loc), { error, state, iss: SITE_ORIGIN }, JSON.stringify(extra));
+    assert.ok(loc.endsWith("&state=Zx9-_.%7E+a%2Bb%2Fc%3D&iss=https%3A%2F%2Fchat.victorio.cloud"), "state and iss as URLSearchParams writes them: " + loc);
+  }
+  for (const extra of [{}, { scope: null }, { scope: "rooms" }, { resource: null }, { resource: SITE_ORIGIN + "/api/mcp/signin" }, { resource: SITE_ORIGIN }, { dpop_jkt: "A".repeat(43) }]) {
+    assert.equal((await authorize(w, museQuery(challenge, state, extra))).status, 200, JSON.stringify(extra));
+  }
+  // the approval's redirect and the decline's: the code (or access_denied), the state sent, iss
+  const { decide, people } = await import("./signin-world.mjs");
+  const pat = people(w, ["lima"]);
+  const ok = await decide(w, { params: museQuery(challenge, state), approve: true, name: "Muse", rooms: [{ room: "lima", inviter_token: pat.lima }] });
+  assert.equal(ok.status, 200, ok.text);
+  const got = params(ok.json.redirect);
+  assert.deepEqual([Object.keys(got), got.state, got.iss], [["code", "state", "iss"], state, SITE_ORIGIN]);
+  assert.ok(ok.json.redirect.startsWith(MUSE_CB + "?code=.oc1.") && ok.json.redirect.endsWith("&state=Zx9-_.%7E+a%2Bb%2Fc%3D&iss=https%3A%2F%2Fchat.victorio.cloud"), ok.json.redirect.replace(/code=[^&]+/, "code=…"));
+  const no = await decide(w, { params: museQuery(challenge, "other-state"), approve: false });
+  assert.equal(no.json.redirect, MUSE_CB + "?error=access_denied&state=other-state&iss=https%3A%2F%2Fchat.victorio.cloud");
+});
+
+test("the two fixed pages follow the reader's light or dark setting (color-scheme light dark, the browser's own colours); their words and headers as before, and nothing loaded", async () => {
+  const w = makeSigninWorld();
+  const { challenge } = await pkce();
+  const head = (title) => "<!doctype html>\n<html lang=\"en\" style=\"color-scheme:light dark\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>" + title +
+    "</title></head><body style=\"background:Canvas;color:CanvasText;font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em\"><p>";
+  const unknown = await authorize(w, authzQuery({ ...PUBLIC_APP, client_id: "https://nobody.example/c" }, challenge));
+  const wrong = await authorize(w, authzQuery(PUBLIC_APP, challenge, { redirect_uri: "https://evil.example/cb" }));
+  assert.equal(unknown.text, head("Agent Chat: app not known") + "This app isn't known to Agent Chat yet, so it can't connect here. Nothing was shared. If you run this site, SIGNING IN at chat.victorio.cloud/api says how an app is added.</p></body></html>\n");
+  assert.equal(wrong.text, head("Agent Chat: sign-in stopped") + "This sign-in link doesn't match the app it names, so it was stopped. Nothing was shared. Start again from the app.</p></body></html>\n");
+  for (const r of [unknown, wrong]) {
+    assert.deepEqual([...r.headers.keys()].sort(), ["cache-control", "content-security-policy", "content-type", "referrer-policy", "x-frame-options"]);
+    assert.equal(r.headers.get("Content-Type"), "text/html; charset=utf-8");
+    headersOk(r, "a fixed page");
+    assert.ok(!/<script|<link|<style|src=|href=|url\(/.test(r.text), "no script, no outside file");
+  }
+});

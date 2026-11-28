@@ -11,10 +11,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   makeSigninWorld, people, signIn, token, clientAuth, assertion, dpopProof, keyPair, poppyApp, pkce, authzQuery, decide, jws, newJti,
-  PUBLIC_APP, ORIGIN, ADDRESS, signins, signin, toolCall,
+  PUBLIC_APP, ORIGIN, ADDRESS, signins, signin, toolCall, revoke,
 } from "./signin-world.mjs";
 import { OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_CLIENT_PREFIX, OAUTH_CODE_TTL_S, OAUTH_FETCH_TIMEOUT_MS, OAUTH_IDLE_DAYS, OAUTH_KEYSET_MAX_BYTES, OAUTH_KEYSET_REFETCH_S, OAUTH_KEYSET_TTL_MAX_S, OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
-import { forgetKeySets, jwkThumbprint } from "../../worker/lib/oauth.ts";
+import { KNOWN_APPS, forgetKeySets, jwkThumbprint } from "../../worker/lib/oauth.ts";
 import { resetWarnings } from "../../worker/lib/log.ts";
 
 const URN = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -40,6 +40,8 @@ async function poppyCode(opts = {}) {
 const exchange = (c, auth, extra = {}, headers = {}) => token(c.w, { grant_type: "authorization_code", code: c.code, code_verifier: c.verifier, redirect_uri: c.redirect, resource: ADDRESS, ...auth, ...extra }, headers);
 const asserted = async (c, pair, claims, header, opts) => ({ client_assertion_type: URN, client_assertion: await assertion(c.app, pair, claims, header, opts) });
 const refreshOf = (w, app, rt, auth, extra = {}, headers = {}) => token(w, { grant_type: "refresh_token", refresh_token: rt, resource: ADDRESS, ...auth, ...extra }, headers);
+/** Authorization: Basic for id and password, each form-encoded first (RFC 6749 2.3.1) */
+const basic = (id, password) => "Basic " + Buffer.from(encodeURIComponent(id) + ":" + encodeURIComponent(password)).toString("base64");
 /** f run with the clock (Date.now) moved ms ahead, as every object and route reads it */
 async function later(ms, f) {
   const real = Date.now;
@@ -63,9 +65,9 @@ test("every answer: CORS_OAUTH, no-store and Pragma: no-cache; a 401 invalid_cli
     assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], String(auth));
     assert.equal(r.headers.get("WWW-Authenticate"), want, String(auth));
   }
-  // a public client's good request that also carries Authorization: Basic is answered as if it had none
+  // a public client's good request that also names it in Authorization: Basic, with no password, is answered as if it had none
   const s2 = await signIn(w, PUBLIC_APP, pat, { name: "Scout2" });
-  const r = await refreshOf(w, PUBLIC_APP, s2.refresh, { client_id: PUBLIC_APP.client_id }, {}, { Authorization: "Basic Zm9vOmJhcg==" });
+  const r = await refreshOf(w, PUBLIC_APP, s2.refresh, { client_id: PUBLIC_APP.client_id }, {}, { Authorization: basic(PUBLIC_APP.client_id, "") });
   assert.equal(r.status, 200, r.text);
   assert.equal(r.headers.get("WWW-Authenticate"), null);
 });
@@ -980,4 +982,131 @@ test("the counts-only line of a watched app: what it sent, names and booleans on
   const watch = lines.filter((l) => l.warn === "oauth.token_watch");
   assert.deepEqual(watch, [{ warn: "oauth.token_watch", error: null, app: "watched", grant_type: "authorization_code", alg: null, has_kid: false, has_client_id: true, has_resource: true, has_dpop: true }]);
   for (const l of lines) assert.ok(!JSON.stringify(l).includes(watched.client_id) && !/\.o[ca]1\.|\.ar1\./.test(JSON.stringify(l)), "no client_id value, no token: " + JSON.stringify(l));
+});
+
+// Muse: a pinned public client (client_id muse), as Claude's two are.
+const MUSE = KNOWN_APPS.find((a) => a.key === "muse");
+const CLAUDE = KNOWN_APPS.find((a) => a.key === "claude");
+const watchLines = (lines) => lines.filter((l) => l.warn === "oauth.token_watch");
+
+test("Muse's code exchange as a public client: client_id in the form, no secret, no assertion: 200; with a client_secret: 401; its code presented by Claude's client, or Claude's by Muse's, is invalid_grant and ends nothing; one counts-only line, app muse", async () => {
+  const w = makeSigninWorld([]);
+  const pat = people(w, ["lima", "oslo"]);
+  let s;
+  const lines = await logged(async () => { s = await signIn(w, MUSE, pat, { rooms: ["lima"], name: "Muse" }); });
+  assert.equal(s.token.status, 200, s.token.text);
+  assert.deepEqual([s.token.json.token_type, s.token.json.scope, s.token.json.expires_in], ["Bearer", "rooms", OAUTH_ACCESS_TTL_S]);
+  assert.deepEqual(watchLines(lines), [{ warn: "oauth.token_watch", error: null, app: "muse", grant_type: "authorization_code", alg: null, has_kid: false, has_client_id: true, has_resource: true, has_dpop: false }]);
+  for (const l of lines) assert.ok(!/\.o[ca]1\.|\.ar1\.|lima|Muse/.test(JSON.stringify(l)), "names and booleans only: " + JSON.stringify(l));
+  assert.equal((await signin(w, s.access, toolCall("list_rooms"))).status, 200, "its access token works at the sign-in address");
+  // a client_secret: refused, as for any public app
+  const withSecret = await refreshOf(w, MUSE, s.refresh, { client_id: "muse", client_secret: "x" });
+  assert.deepEqual([withSecret.status, withSecret.json.error], [401, "invalid_client"]);
+  // Muse's code by Claude's client, and Claude's by Muse's: invalid_grant, and each code still works for its own client
+  for (const [own, other] of [[MUSE, CLAUDE], [CLAUDE, MUSE]]) {
+    const { verifier, challenge } = await pkce();
+    const query = authzQuery(own, challenge, { resource: ADDRESS });
+    const d = await decide(w, { params: query, approve: true, name: own.name + " 2", rooms: [{ room: "oslo", inviter_token: pat.oslo }] });
+    const code = new URL(d.json.redirect).searchParams.get("code");
+    const ex = (app) => token(w, { grant_type: "authorization_code", code, code_verifier: verifier, redirect_uri: own.redirect_uris[0], resource: ADDRESS, client_id: app.client_id });
+    const cross = await ex(other);
+    assert.deepEqual([cross.status, cross.json.error], [400, "invalid_grant"], own.key + "'s code by " + other.key);
+    assert.equal((await ex(own)).status, 200, own.key + "'s code still works for it: nothing ended");
+  }
+  assert.equal((await signin(w, s.access, toolCall("list_rooms"))).status, 200, "nor the first sign-in");
+});
+
+test("a public app may name itself only in Authorization: Basic with an empty password (the code exchange, a refresh and a revoke: 200); a password, a header that does not decode or another id than the form's is 401 invalid_client; for an app that signs its requests the header changes nothing", async () => {
+  const w = makeSigninWorld([]);
+  const pat = people(w, ["lima"]);
+  const { verifier, challenge } = await pkce();
+  const query = authzQuery(MUSE, challenge, { resource: ADDRESS });
+  const d = await decide(w, { params: query, approve: true, name: "Muse", rooms: [{ room: "lima", inviter_token: pat.lima }] });
+  const code = new URL(d.json.redirect).searchParams.get("code");
+  const exchangeAs = (headers, extra = {}) => token(w, { grant_type: "authorization_code", code, code_verifier: verifier, redirect_uri: MUSE.redirect_uris[0], resource: ADDRESS, ...extra }, headers);
+  const refusedClient = (r, what) => { assert.deepEqual([r.status, r.json, r.headers.get("WWW-Authenticate")], [401, { error: "invalid_client" }, "Basic"], what); };
+  // refused, each before the code is looked at: the code still works after them
+  for (const [what, header, extra] of [
+    ["a password", basic("muse", "secret"), {}],
+    ["a password, with client_id in the form", basic("muse", "secret"), { client_id: "muse" }],
+    ["another id than the form's", basic("muse", ""), { client_id: CLAUDE.client_id }],
+    ["the form's id another than the header's", basic(CLAUDE.client_id, ""), { client_id: "muse" }],
+    ["no colon", "Basic " + Buffer.from("muse").toString("base64"), {}],
+    ["not base64", "Basic m*se", {}],
+    ["no credentials at all", "Basic", {}],
+    ["two words", basic("muse", "") + " x", {}],
+    ["a broken escape", "Basic " + Buffer.from("mu%e:").toString("base64"), { client_id: "muse" }],
+  ]) refusedClient(await exchangeAs({ Authorization: header }, extra), what);
+  const ex = await exchangeAs({ Authorization: basic("muse", "") });
+  assert.equal(ex.status, 200, "the id only in the header, with no password: " + ex.text);
+  const r1 = await token(w, { grant_type: "refresh_token", refresh_token: ex.json.refresh_token, resource: ADDRESS }, { Authorization: basic("muse", "") });
+  assert.equal(r1.status, 200, "a refresh: " + r1.text);
+  const r2 = await token(w, { grant_type: "refresh_token", refresh_token: r1.json.refresh_token, resource: ADDRESS, client_id: "muse" }, { Authorization: "basic " + Buffer.from("muse:").toString("base64") });
+  assert.equal(r2.status, 200, "the scheme in any case, and the form's client_id the same: " + r2.text);
+  refusedClient(await revoke(w, { token: r2.json.refresh_token }, { Authorization: basic("muse", "x") }), "a revoke with a password");
+  assert.equal((await signin(w, r2.json.access_token, toolCall("list_rooms"))).status, 200, "nothing revoked by a refused request");
+  const rv = await revoke(w, { token: r2.json.refresh_token }, { Authorization: basic("muse", "") });
+  assert.deepEqual([rv.status, rv.json], [200, {}], "a revoke");
+  assert.equal((await signin(w, r2.json.access_token, toolCall("list_rooms"))).status, 401, "revoked");
+  // an app that signs its requests: the header is not read, whatever it says
+  const P = await poppyApp();
+  const pw = makeSigninWorld([P.app]);
+  const ppat = people(pw, ["lima"]);
+  const ps = await signIn(pw, P.app, ppat, { pair: P.es });
+  let rt = ps.refresh;
+  for (const header of [basic(P.app.client_id, ""), basic(P.app.client_id, "secret"), basic("muse", ""), "Basic m*se"]) {
+    const r = await token(pw, { grant_type: "refresh_token", refresh_token: rt, resource: ADDRESS, ...(await clientAuth(P.app, P.es)) }, { Authorization: header });
+    assert.equal(r.status, 200, header + ": " + r.text);
+    rt = r.json.refresh_token;
+  }
+  // its id in the header alone names nothing: its requests are named by their assertion
+  const alone = await token(pw, { grant_type: "refresh_token", refresh_token: rt }, { Authorization: basic(P.app.client_id, "") });
+  assert.deepEqual([alone.status, alone.json.error], [401, "invalid_client"]);
+});
+
+test("a token or revoke request that names no known app: 401 and one counts-only line, oauth.token_unknown, saying only how it tried to name one", async () => {
+  const w = makeSigninWorld([]);
+  const P = await poppyApp({ client_id: "https://nobody.example/signs" });
+  const cases = [
+    [{ client_id: "https://nobody.example/c" }, {}, { has_client_id: true, has_basic: false, has_assertion: false }],
+    [{}, { Authorization: basic("nobody", "") }, { has_client_id: false, has_basic: true, has_assertion: false }],
+    [{ client_assertion_type: URN, client_assertion: await assertion(P.app, P.es) }, { Authorization: "Basic m*se" }, { has_client_id: false, has_basic: true, has_assertion: true }],
+    [{}, {}, { has_client_id: false, has_basic: false, has_assertion: false }],
+  ];
+  for (const [fields, headers, want] of cases) {
+    for (const call of [(f, h) => token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", ...f }, h), (f, h) => revoke(w, { token: ".ar1.x", ...f }, h)]) {
+      let r;
+      const lines = await logged(async () => { r = await call(fields, headers); });
+      assert.deepEqual([r.status, r.json.error], [401, "invalid_client"]);
+      assert.deepEqual(lines, [{ warn: "oauth.token_unknown", error: null, ...want }], JSON.stringify(want));
+    }
+  }
+  // a known app refused by its Basic header is not this line
+  const lines = await logged(async () => { await token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x" }, { Authorization: basic("muse", "x") }); });
+  assert.deepEqual(lines.filter((l) => l.warn === "oauth.token_unknown"), []);
+});
+
+test("a watched app's refresh line says how the refresh token it presented stood: fresh, grace (a repeat within OAUTH_REFRESH_GRACE_S), spent (after it: a reuse, which ends the sign-in) or unknown; a refresh refused before its grant has no such field", async () => {
+  const w = makeSigninWorld([]);
+  const pat = people(w, ["lima"]);
+  const s = await signIn(w, MUSE, pat, { rooms: ["lima"], name: "Muse" });
+  const refresh = (rt, extra = {}) => token(w, { grant_type: "refresh_token", refresh_token: rt, client_id: "muse", resource: ADDRESS, ...extra });
+  const standing = async (f) => { let r; const lines = await logged(async () => { r = await f(); }); const ws = watchLines(lines); assert.equal(ws.length, 1, JSON.stringify(lines)); return [r, ws[0]]; };
+  const base = { warn: "oauth.token_watch", error: null, app: "muse", grant_type: "refresh_token", alg: null, has_kid: false, has_client_id: true, has_resource: true, has_dpop: false };
+  let [r, line] = await standing(() => refresh(s.refresh));
+  assert.equal(r.status, 200);
+  assert.deepEqual(line, { ...base, refresh: "fresh" });
+  [r, line] = await standing(() => refresh(s.refresh));
+  assert.equal(r.status, 200, "within the grace: the same pair");
+  assert.deepEqual(line, { ...base, refresh: "grace" });
+  [r, line] = await standing(() => refresh(".ar1." + "A".repeat(22) + "." + "A".repeat(11) + "." + "A".repeat(43)));
+  assert.deepEqual([r.status, r.json.error, line], [400, "invalid_grant", { ...base, refresh: "unknown" }]);
+  [r, line] = await standing(() => refresh(s.refresh, { client_secret: "x" }));
+  assert.deepEqual([r.status, line], [401, base], "refused before the grant: no refresh field");
+  await later((OAUTH_REFRESH_GRACE_S + 1) * 1000, async () => {
+    [r, line] = await standing(() => refresh(s.refresh));
+    assert.deepEqual([r.status, r.json.error, line], [400, "invalid_grant", { ...base, refresh: "spent" }]);
+    await Promise.all(w.pending);
+    assert.equal((await signin(w, s.access, toolCall("list_rooms"))).status, 401, "the reuse ended the sign-in");
+  });
 });
