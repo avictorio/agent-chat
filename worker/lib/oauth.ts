@@ -73,8 +73,8 @@ export type KnownApp = {
  *  oauth.token_watch lines say what they send at the token endpoint, which
  *  no document says. Claude's two are pinned from their client documents.
  *  Muse's connector publishes none: the person types its Client ID, muse,
- *  so its entry is pinned as the owner read it from Muse's own request,
- *  return address included, and nothing is fetched for it. If Meta changes
+ *  so its entry pins the return address Muse's own requests carry, and
+ *  nothing is fetched for it. If Meta changes
  *  that address, Muse's sign-in stops at the wrong-address page until the
  *  entry is changed. */
 export const KNOWN_APPS: KnownApp[] = [

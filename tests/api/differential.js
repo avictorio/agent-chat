@@ -56,9 +56,12 @@ const CHANGED_SECTIONS = [];
 /** The edits this checkout makes to /api and /llms.txt, taken out of its
  *  copy before the compare: [the text this checkout serves, the text the
  *  other serves], filled with the origin and the limits as served (fill).
- *  Against fc84da6: none (what says Muse can sign in waits for its own
- *  change). */
-const EXPECTED_DOC_EDITS = [];
+ *  Against fc84da6: SIGNING IN's sentence on how an app is added, which
+ *  now covers an app that publishes no client document (docs.txt). */
+const EXPECTED_DOC_EDITS = [
+  ["  site's owner after checking its client document and the host it is served from, or, for an app\n  that publishes none, its own requests and the address it returns to. Agent keys keep\n",
+    "  site's owner after checking its client document and the host it is served from. Agent keys keep\n"],
+];
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as
@@ -103,11 +106,6 @@ const SIGNIN_PATHS = [
  *  sent to both, the other's answer checked to be that 404, not compared.
  *  Against fc84da6: none (its sign-in paths are compared). */
 const NEW_PATHS = new Set([]);
-/** Of NEW_PATHS, the one that must stay a 404 on this checkout too: no
- *  document names the key's address as a resource (a document there would
- *  make an MCP client sign in at an address that takes no sign-in). This
- *  checkout's answer there is the documents' own 404, {"error":"not found"}. */
-const STAYS_404 = new Set(['GET /.well-known/oauth-protected-resource/api/mcp']);
 /** The preflights this checkout answers with their own CORS, which the
  *  other answered as every path's: sent to both, the other's answer checked
  *  to be the generic preflight (PREFLIGHT_GENERIC's), not compared. Against
@@ -406,7 +404,6 @@ function masked(text, tokens) {
         // a path the other checkout did not serve: it answered the unknown path's 404
         compared++;
         if (x.status !== 404 || x.text !== 'Not found') { diffs++; console.log('FAIL ' + x.label + ': the earlier checkout answered ' + x.status + ' ' + JSON.stringify(x.text.slice(0, 60)) + ', not the unknown path\'s 404'); }
-        if (STAYS_404.has(y.label) && (y.status !== 404 || y.text !== '{"error":"not found"}')) { diffs++; console.log('FAIL ' + y.label + ': this checkout answered ' + y.status + ' ' + JSON.stringify(y.text.slice(0, 60)) + ', not a 404'); }
         continue;
       }
       if (PREFLIGHT_CHANGED.has(y.label)) {

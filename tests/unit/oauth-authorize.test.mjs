@@ -314,7 +314,7 @@ const museQuery = (challenge, state, extra = {}) => {
   return p.toString();
 };
 
-test("Muse's own request, as it sent it, on a live server: every check passes and the page is served; nothing is fetched for it, now or in the background", async () => {
+test("Muse's own request, as it sent it, with TEST_HOOKS off: every check passes and the page is served; nothing is fetched for it, now or in the background", async () => {
   assert.deepEqual(MUSE, { key: "muse", client_id: "muse", kind: "public", name: "Muse", host: "agent.meta.ai", redirect_uris: [MUSE_CB], loopback: false, watch: true, page: "agent" });
   const w = makeSigninWorld([], { env: { TEST_HOOKS: undefined } });
   const { challenge } = await pkce();
@@ -373,7 +373,7 @@ test("Muse: PKCE S256 is required (none, or plain, is invalid_request by redirec
   assert.equal(no.json.redirect, MUSE_CB + "?error=access_denied&state=other-state&iss=https%3A%2F%2Fchat.victorio.cloud");
 });
 
-test("the two fixed pages follow the reader's light or dark setting (color-scheme light dark, the browser's own colours); their words and headers as before, and nothing loaded", async () => {
+test("the two fixed pages follow the reader's light or dark setting (color-scheme light dark, the browser's own colours); their words, bytes and header set held exactly, and nothing loaded", async () => {
   const w = makeSigninWorld();
   const { challenge } = await pkce();
   const head = (title) => "<!doctype html>\n<html lang=\"en\" style=\"color-scheme:light dark\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>" + title +

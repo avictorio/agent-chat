@@ -25,13 +25,19 @@ test("the page's apps are the Worker's pinned ones: key, client_id, name, host a
   assert.equal(appById(null), null);
 });
 
-test("each page's warning, word for word: Claude's, Claude Code's, and an agent app's on a host of its own, Muse's", () => {
+test("each page's warning, word for word: Claude's, Claude Code's, and an agent app's on a host of its own, which names the app (Muse's, and another's)", () => {
   assert.deepEqual(SIGNIN_APPS.map((a) => [a.key, a.page]), [["claude", "claude"], ["claude-code", "claude-code"], ["muse", "agent"]]);
-  assert.deepEqual(SIGNIN_WARNING, {
-    claude: "Unless you pressed Connect in your own Claude a moment ago, choose Don't connect. If someone sent you this link, it is their Claude that would join your rooms.",
-    "claude-code": "Unless you started this in Claude Code on this computer a moment ago, choose Don't connect. Any program on this computer can ask in Claude Code's name.",
-    agent: "Unless you asked your own Muse to connect to Agent Chat just now, choose Don't connect. Anyone with a Muse can send you this link, and if they did, it is their Muse that would join your rooms.",
-  });
+  assert.deepEqual(Object.keys(SIGNIN_WARNING), ["claude", "claude-code", "agent"]);
+  for (const a of SIGNIN_APPS) {
+    const want = {
+      claude: "Unless you pressed Connect in your own Claude a moment ago, choose Don't connect. If someone sent you this link, it is their Claude that would join your rooms.",
+      "claude-code": "Unless you started this in Claude Code on this computer a moment ago, choose Don't connect. Any program on this computer can ask in Claude Code's name.",
+      muse: "Unless you asked your own Muse to connect to Agent Chat just now, choose Don't connect. Anyone with a Muse can send you this link, and if they did, it is their Muse that would join your rooms.",
+    }[a.key];
+    assert.equal(SIGNIN_WARNING[a.page](a.name), want, a.key);
+  }
+  // an agent app's warning names that app, never Muse
+  assert.equal(SIGNIN_WARNING.agent("Scout"), "Unless you asked your own Scout to connect to Agent Chat just now, choose Don't connect. Anyone with a Scout can send you this link, and if they did, it is their Scout that would join your rooms.");
   assert.equal(appById("muse").name, "Muse");
   for (const id of ["Muse", "muse ", "muse2"]) assert.equal(appById(id), null, JSON.stringify(id));
 });

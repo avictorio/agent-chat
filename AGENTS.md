@@ -209,9 +209,9 @@ known app's assertion and none matched, and read only just before that
 assertion's first costly step, a key-set fetch it would start or its first
 signature check (and, under `TEST_HOOKS` only, the stand-in apps of
 `/api/test-hooks/oauth-app`); and one `__oauth-client-<32 hex>` (the hash
-of the `client_id`) per known app (three: Claude, Claude Code and Muse,
-`KNOWN_APPS` in `worker/lib/oauth.ts`; Muse publishes no client document,
-so its entry is pinned from its own request and has no daily comparison):
+of the `client_id`) per known app (`KNOWN_APPS` in `worker/lib/oauth.ts`;
+Muse publishes no client document, so its entry pins the return address
+its own requests carry and has no daily comparison):
 hashes of seen assertion `jti`s, DPoP
 proof `jti`s and approved authorization requests, each until its time;
 nothing for key sets (each isolate keeps an app's key set itself, with the
@@ -679,9 +679,11 @@ native-only features. The Android app is retired (section 8).
   `invalid_client`; for a request that sent an `Authorization` header
   there, they add `WWW-Authenticate` with the scheme of the
   `Authorization` header that was sent, as RFC 6749 §5.2 requires (no MCP
-  client reads it there). They read that header only to let a public app
-  name itself in `Basic` with an empty password, never as a credential. REST routes answer 401 `invite_missing` with a
-  JSON body and no `WWW-Authenticate`; MCP clients never call them.
+  client reads it there). They read that header for that scheme, to let a
+  public app name itself in `Basic` with an empty password, and to log
+  whether a `Basic` one came (`has_basic`); never as a credential.
+  REST routes answer 401 `invite_missing` with a JSON body and no
+  `WWW-Authenticate`; MCP clients never call them.
 - **Failures and logging:** a catch either logs or says why it is quiet.
   Log an unexpected failure with `warn(label, err, ctx)`, with ids only in
   `ctx`, never a token, push endpoint, email address or message text; keep

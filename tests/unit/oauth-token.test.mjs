@@ -269,7 +269,7 @@ test("a parameter sent without a value is treated as omitted (RFC 6749 3.1): an 
   const w = makeSigninWorld([PUBLIC_APP, P.app]);
   const pat = people(w, ["lima"]);
   const s = await signIn(w, PUBLIC_APP, pat, { resource: null, tokenResource: "" });
-  assert.equal(s.token.status, 200, "resource= at the exchange is no resource: the default token, for a request that named none: " + s.token.text);
+  assert.equal(s.token.status, 200, "resource= at the exchange is no resource: the grant's own: " + s.token.text);
   let r = await refreshOf(w, PUBLIC_APP, s.refresh, { client_id: PUBLIC_APP.client_id }, { scope: "", resource: null });
   assert.equal(r.status, 200, "scope= is no scope: " + r.text);
   for (let i = 0; i <= OAUTH_AUTH_FAILS_PER_IP; i++) {
@@ -754,7 +754,7 @@ test("a key's thumbprint (RFC 7638), as dpop_jkt names it: the members in their 
   assert.equal(await jwkThumbprint({ kty: "RSA", n, e: "AQAB", alg: "RS256", kid: "2011-04-29" }), "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs", "RFC 7638 3.1's key");
 });
 
-test("the code exchange: PKCE, the redirect, the resource (the default token only where the request named the domain or none), a code once; tokens with the scope always stated", async () => {
+test("the code exchange: PKCE, the redirect, the resource (none named: the grant's own; the domain's token only for a grant of the domain), a code once; tokens with the scope always stated", async () => {
   const w = makeSigninWorld();
   w.harness("__agent-quota").room.setTestAgentLimits({ per_ip: 1000, per_room: 1000, per_day: 1000 });
   const pat = people(w, ["lima", "oslo"]);
@@ -776,13 +776,13 @@ test("the code exchange: PKCE, the redirect, the resource (the default token onl
   assert.deepEqual((await run({ resource: ADDRESS }, { code_verifier: undefined })).json, { error: "invalid_grant" }, "no verifier");
   assert.deepEqual((await run({ resource: ADDRESS }, { redirect_uri: "http://127.0.0.1:9/callback" })).json, { error: "invalid_grant" }, "another port: the redirect exactly as sent");
   assert.deepEqual((await run({ resource: ADDRESS }, { redirect_uri: undefined })).json, { error: "invalid_grant" }, "no redirect_uri: the one the request named is required");
-  assert.deepEqual((await run({ resource: ADDRESS }, {})).json, { error: "invalid_target" }, "no resource: the default token, which a request that named only the address cannot get");
-  assert.equal((await run({ resource: ORIGIN }, {})).status, 200, "the default token, for a request that named the domain");
-  assert.equal((await run({}, {})).status, 200, "the default token, for a request that named none");
+  assert.equal((await run({ resource: ADDRESS }, {})).status, 200, "no resource: the grant's own, the sign-in address");
+  assert.equal((await run({ resource: ORIGIN }, {})).status, 200, "no resource: the grant's own, the domain");
+  assert.equal((await run({}, {})).status, 200, "no resource, on a grant of both: the sign-in address, for a public app");
   assert.deepEqual((await run({ resource: ORIGIN }, { resource: ADDRESS })).json, { error: "invalid_target" }, "a resource the request did not name");
   assert.equal((await run({}, { resource: "HTTP://LOCALHOST/api/mcp/signin/" })).status, 200, "normalised as authorize normalises it");
-  // the default token does not sign in at the sign-in address
-  const d = await run({}, {});
+  // the default token, the domain's, does not sign in at the sign-in address
+  const d = await run({}, { resource: ORIGIN });
   assert.equal((await signin(w, d.json.access_token, toolCall("list_rooms"))).status, 401);
   assert.deepEqual((await token(w, { grant_type: "authorization_code", code: ".oc1.x", client_id: PUBLIC_APP.client_id })).json, { error: "invalid_grant" });
 });
@@ -980,7 +980,7 @@ test("the counts-only line of a watched app: what it sent, names and booleans on
   const pat = people(w, ["lima"]);
   const lines = await logged(async () => { await signIn(w, watched, pat, { proof: await keyPair("ES256") }); });
   const watch = lines.filter((l) => l.warn === "oauth.token_watch");
-  assert.deepEqual(watch, [{ warn: "oauth.token_watch", error: null, app: "watched", grant_type: "authorization_code", alg: null, has_kid: false, has_client_id: true, has_resource: true, has_dpop: true }]);
+  assert.deepEqual(watch, [{ warn: "oauth.token_watch", error: null, app: "watched", grant_type: "authorization_code", alg: null, has_kid: false, has_client_id: true, has_basic: false, has_resource: true, has_dpop: true }]);
   for (const l of lines) assert.ok(!JSON.stringify(l).includes(watched.client_id) && !/\.o[ca]1\.|\.ar1\./.test(JSON.stringify(l)), "no client_id value, no token: " + JSON.stringify(l));
 });
 
@@ -996,7 +996,7 @@ test("Muse's code exchange as a public client: client_id in the form, no secret,
   const lines = await logged(async () => { s = await signIn(w, MUSE, pat, { rooms: ["lima"], name: "Muse" }); });
   assert.equal(s.token.status, 200, s.token.text);
   assert.deepEqual([s.token.json.token_type, s.token.json.scope, s.token.json.expires_in], ["Bearer", "rooms", OAUTH_ACCESS_TTL_S]);
-  assert.deepEqual(watchLines(lines), [{ warn: "oauth.token_watch", error: null, app: "muse", grant_type: "authorization_code", alg: null, has_kid: false, has_client_id: true, has_resource: true, has_dpop: false }]);
+  assert.deepEqual(watchLines(lines), [{ warn: "oauth.token_watch", error: null, app: "muse", grant_type: "authorization_code", alg: null, has_kid: false, has_client_id: true, has_basic: false, has_resource: true, has_dpop: false }]);
   for (const l of lines) assert.ok(!/\.o[ca]1\.|\.ar1\.|lima|Muse/.test(JSON.stringify(l)), "names and booleans only: " + JSON.stringify(l));
   assert.equal((await signin(w, s.access, toolCall("list_rooms"))).status, 200, "its access token works at the sign-in address");
   // a client_secret: refused, as for any public app
@@ -1092,7 +1092,7 @@ test("a watched app's refresh line says how the refresh token it presented stood
   const s = await signIn(w, MUSE, pat, { rooms: ["lima"], name: "Muse" });
   const refresh = (rt, extra = {}) => token(w, { grant_type: "refresh_token", refresh_token: rt, client_id: "muse", resource: ADDRESS, ...extra });
   const standing = async (f) => { let r; const lines = await logged(async () => { r = await f(); }); const ws = watchLines(lines); assert.equal(ws.length, 1, JSON.stringify(lines)); return [r, ws[0]]; };
-  const base = { warn: "oauth.token_watch", error: null, app: "muse", grant_type: "refresh_token", alg: null, has_kid: false, has_client_id: true, has_resource: true, has_dpop: false };
+  const base = { warn: "oauth.token_watch", error: null, app: "muse", grant_type: "refresh_token", alg: null, has_kid: false, has_client_id: true, has_basic: false, has_resource: true, has_dpop: false };
   let [r, line] = await standing(() => refresh(s.refresh));
   assert.equal(r.status, 200);
   assert.deepEqual(line, { ...base, refresh: "fresh" });
@@ -1109,4 +1109,83 @@ test("a watched app's refresh line says how the refresh token it presented stood
     await Promise.all(w.pending);
     assert.equal((await signin(w, s.access, toolCall("list_rooms"))).status, 401, "the reuse ended the sign-in");
   });
+});
+
+// A token request that names no resource gets the grant's own: one resource, that one; both, the sign-in address for a
+// public app and the domain's default token for an app that signs its requests. Each case: the exchange and a refresh.
+for (const [what, kind, granted, want] of [
+  ["a public app's grant of the sign-in address alone: that address, and the token works there", "public", ADDRESS, ADDRESS],
+  ["a public app's grant of both: the sign-in address, and the token works there", "public", null, ADDRESS],
+  ["the signing stand-in's grant of both: the domain's default token", "poppy", null, ORIGIN],
+  ["a public app's grant of the domain alone: the domain's token", "public", ORIGIN, ORIGIN],
+]) {
+  test("a token request that names no resource, at the exchange and a refresh: " + what, async () => {
+    const P = await poppyApp();
+    const w = makeSigninWorld([P.app]);
+    const pat = people(w, ["lima"]);
+    const app = kind === "public" ? MUSE : P.app;
+    /** the resource an access token was issued for, as its slot holds it */
+    const resourceOf = (access) => {
+      const [, , id, slot] = access.split(".");
+      return JSON.parse(w.harness(signins(w).find((n) => n.endsWith(id))).one("SELECT bind FROM aks WHERE slot = ?", slot).bind).resource;
+    };
+    const works = async (access) => (await signin(w, access, toolCall("list_rooms"))).status === 200;
+    const s = await signIn(w, app, pat, { rooms: ["lima"], pair: P.es, resource: granted, tokenResource: null });
+    assert.equal(s.token.status, 200, "the exchange: " + s.token.text);
+    assert.deepEqual([resourceOf(s.access), await works(s.access)], [want, want === ADDRESS], "the exchange");
+    const r = await token(w, { grant_type: "refresh_token", refresh_token: s.refresh, ...(await clientAuth(app, P.es)) });
+    assert.equal(r.status, 200, "the refresh: " + r.text);
+    assert.deepEqual([resourceOf(r.json.access_token), await works(r.json.access_token)], [want, want === ADDRESS], "the refresh");
+  });
+}
+
+// A lax client's Basic header, for the app its form names, still works as it did while the header was not read: base64
+// without its padding, and the form's client_id unencoded with one colon (Claude's URL id, colons and all; muse, which
+// form-encoding leaves as it is). A password, a second colon, or a header that still does not decode: 401.
+for (const key of ["claude", "muse"]) {
+  test("a lax client's Basic header, for the app its form names (" + key + "): base64 without padding, and the client_id unencoded with one colon, taken; a password, a second colon, or no base64 length: 401", async () => {
+    const app = key === "claude" ? CLAUDE : MUSE;
+    const w = makeSigninWorld([]);
+    const pat = people(w, ["lima"]);
+    const padded = (text) => "Basic " + Buffer.from(text).toString("base64");
+    const unpadded = (text) => padded(text).replace(/=+$/, "");
+    /** base64 of text without padding, then characters added until one is left past a whole group: no length base64 has */
+    const overlong = (text) => { const b = unpadded(text); return b + "A".repeat((5 - ((b.length - 6) % 4)) % 4 || 4); };
+    const s = await signIn(w, app, pat, { rooms: ["lima"], name: app.name + " lax" });
+    let rt = s.refresh;
+    const refresh = (header, form = { client_id: app.client_id }) => token(w, { grant_type: "refresh_token", refresh_token: rt, resource: ADDRESS, ...form }, { Authorization: header });
+    for (const [what, header, form] of [
+      ["form-encoded, without padding", unpadded(encodeURIComponent(app.client_id) + ":"), undefined],
+      ["form-encoded, without padding, the form naming none", unpadded(encodeURIComponent(app.client_id) + ":"), {}],
+      ["the form's id unencoded and one colon", padded(app.client_id + ":"), undefined],
+      ["the same without padding", unpadded(app.client_id + ":"), undefined],
+    ]) {
+      const r = await refresh(header, form);
+      assert.equal(r.status, 200, what + ": " + r.text);
+      rt = r.json.refresh_token;
+    }
+    for (const [what, header, form] of [
+      ["the form's id unencoded with a password", padded(app.client_id + ":secret"), undefined],
+      ["the form's id unencoded and two colons", padded(app.client_id + "::"), undefined],
+      ["base64 one character past a whole group", overlong(app.client_id + ":"), undefined],
+      ...(app === CLAUDE ? [["the URL id unencoded, the form naming none", padded(app.client_id + ":"), {}]] : []),
+    ]) {
+      const r = await refresh(header, form);
+      assert.deepEqual([r.status, r.json.error], [401, "invalid_client"], what);
+    }
+    assert.equal((await refresh(padded(encodeURIComponent(app.client_id) + ":"))).status, 200, "the refresh token still works after the refusals");
+  });
+}
+
+test("a watched app's line says whether a Basic header came (has_basic); a request refused for its header, before anything is read, writes none", async () => {
+  const w = makeSigninWorld([]);
+  const pat = people(w, ["lima"]);
+  const s = await signIn(w, MUSE, pat, { rooms: ["lima"], name: "Muse" });
+  const lineOf = async (fields, headers) => { const lines = await logged(async () => { await token(w, fields, headers); }); return watchLines(lines); };
+  const named = await lineOf({ grant_type: "refresh_token", refresh_token: s.refresh, resource: ADDRESS }, { Authorization: basic("muse", "") });
+  assert.deepEqual(named.map((l) => [l.has_basic, l.has_client_id, l.refresh]), [[true, false, "fresh"]]);
+  const none = await lineOf({ grant_type: "authorization_code", code: ".oc1.x", client_id: "muse" }, {});
+  assert.deepEqual(none.map((l) => l.has_basic), [false]);
+  // refused for its header before anything is read: no line (it names the app, and is refused as a client_secret is)
+  assert.deepEqual(await lineOf({ grant_type: "authorization_code", code: ".oc1.x", client_id: "muse" }, { Authorization: basic("muse", "x") }), []);
 });

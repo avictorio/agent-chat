@@ -1044,16 +1044,18 @@ docs.txt section that owns its routes, caps and formats.
     the sign-in address as the resource, and the endpoints.
   - **Known apps only.** `KNOWN_APPS` pins each app by its `client_id`,
     its redirect addresses, its kind (`public`: no client authentication;
-    `poppy`: a signed client assertion, used by no pinned app) and the
-    warning the page shows. There are three, all public and all watched:
-    Claude and Claude Code, whose `client_id` is the address of their
-    client document, and Muse, whose connector is a public client with
-    PKCE whose Client ID the person types (`muse`). Muse publishes no
-    client document and reads no discovery file of its own, so its entry
-    is pinned as the owner read it from Muse's own request, its one
-    return address (`https://agent.meta.ai/api/hatch/oauth/callback`)
-    exactly; if Meta changes that address, Muse's sign-in stops at the
-    wrong-address page until the entry is changed. A client registered by
+    `poppy`: a signed client assertion, used by no pinned app) and its
+    page kind, which sets the heading and the warning the approval page
+    shows (their words are in the web app's `apps.ts`, `SIGNIN_WARNING`):
+    `claude`, `claude-code` or `agent`, an agent app on a host of its own.
+    There are three apps, all public and all watched: Claude and Claude
+    Code, whose `client_id` is the address of their client document, and
+    Muse (page kind `agent`), whose connector is a public client with PKCE
+    whose Client ID the person types (`muse`). Muse publishes no client
+    document, so its entry pins the one return address its own requests
+    carry (`https://agent.meta.ai/api/hatch/oauth/callback`), exactly; if
+    Meta changes that address, Muse's sign-in stops at the wrong-address
+    page until the entry is changed. A client registered by
     the site's owner under an exact return address is the ordinary way a
     public client is known (RFC 6749 2.1, 3.1.2.2, 10.6), and what
     protects the person is the same as for Claude: the code goes only to
@@ -1137,7 +1139,12 @@ docs.txt section that owns its routes, caps and formats.
     client and authenticates nothing, so a password, a header that does
     not decode, or an id other than the form's is 401 `invalid_client`
     too, and for an app that signs its requests the header is not read;
-    any other scheme is ignored); a DPoP proof (RFC
+    any other scheme is ignored. It is read as kindly as is safe, since
+    before it was not read at all and a lax client worked: base64 without
+    its padding as if padded, and a text that is exactly the form's
+    `client_id` and one colon as that client with no password, even an
+    id with colons of its own, such as Claude's URL sent without the
+    form-encoding RFC 6749 2.3.1 asks for); a DPoP proof (RFC
     9449), checked when sent; the client's authentication by kind: a
     public app sends no assertion and no secret (a `client_secret` with a
     value is a failure; `client_secret=` is omitted, so it is none); a
@@ -1206,7 +1213,16 @@ docs.txt section that owns its routes, caps and formats.
     `OAUTH_KEYSET_REFETCH_S` says why). Then the proof's verdict: a family is bound
     to the proof's key when its code exchange carries one (a public family
     also by its first refresh with one) and then needs it. No `grant_type` is 400 `invalid_request`, another than
-    the two `unsupported_grant_type`. The code grant checks, in order, the
+    the two `unsupported_grant_type`. A token's resource, at the exchange
+    and at a refresh, is the one the request names, if the grant holds it
+    (else `invalid_target`); a request that names none gets the grant's
+    own (`tokenResource`): a grant of one resource, that one; a grant of
+    both, the sign-in address for a public app (the only place it can use
+    a token) and the domain's default token for an app that signs its
+    requests. So a client that named its resource when it asked for the
+    grant and leaves it out afterwards still gets a token it can use, and
+    no token is ever for a resource the person did not grant. The code
+    grant checks, in order, the
     code's client, the `redirect_uri` (required, the same as the
     request's) and the PKCE verifier, and only then treats a code redeemed
     within its minute as reused, which ends the sign-in: a bare copy of a
@@ -1266,8 +1282,8 @@ docs.txt section that owns its routes, caps and formats.
     `oauth.authorize_unknown`, `oauth.token_unknown` (a token or revoke
     request that names no known app: `has_client_id`, `has_basic`,
     `has_assertion`), `oauth.token_watch` (what a watched app sends at the
-    token endpoint; for a refresh, once the grant has read the token, how
-    it stood: `refresh` `fresh`, `grace` (a repeat within
+    token endpoint, `has_basic` among it; for a refresh, once the grant
+    has read the token, how it stood: `refresh` `fresh`, `grace` (a repeat within
     `OAUTH_REFRESH_GRACE_S`), `spent` (a reuse, which ends the sign-in) or
     `unknown` (none such); a refresh refused before its grant has no such
     field), `oauth.keyset`, `oauth.client_changed`,

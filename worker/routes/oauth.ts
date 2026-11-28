@@ -556,23 +556,40 @@ async function failCaps(request: Request, app: KnownApp) {
   return [{ k: "net:" + (await hashKey(networkKey(request.headers.get("CF-Connecting-IP")))) + ":" + app.key, max: OAUTH_AUTH_FAILS_PER_IP, per: OAUTH_AUTH_FAILS_WINDOW_S }];
 }
 
-/** What an Authorization: Basic header says (RFC 6749 2.3.1: the id and the
- *  password each form-encoded, joined by a colon, in base64): null for no
- *  header or another scheme, which these endpoints do not read; bad for one
- *  that does not decode. */
-function basicOf(request: Request): { id: string, password: string } | "bad" | null {
+/** Whether the request sent an Authorization header of the Basic scheme. */
+function hasBasic(request: Request): boolean {
+  const auth = request.headers.get("Authorization");
+  return auth !== null && /^Basic(?:\s|$)/i.test(auth.trim());
+}
+
+/** An Authorization: Basic header's text, decoded: null for no header or
+ *  another scheme, which these endpoints do not read; bad for one that is
+ *  not base64 of UTF-8. Base64 without its padding is read as if padded,
+ *  since a lax client may leave it out (RFC 7617 asks for it), and the
+ *  header was never read before, so such a client worked. */
+function basicText(request: Request): string | "bad" | null {
   const auth = request.headers.get("Authorization");
   const m = auth === null ? null : /^Basic(?:\s+(.*))?$/i.exec(auth.trim());
   if (!m) return null;
-  const b64 = (m[1] || "").trim();
-  if (!b64 || b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return "bad";
+  let b64 = (m[1] || "").trim();
+  if (!b64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return "bad";
+  if (!b64.includes("=") && b64.length % 4 !== 1) b64 += "=".repeat((4 - (b64.length % 4)) % 4);
+  if (b64.length % 4 !== 0) return "bad";
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
-    const at = text.indexOf(":");
-    if (at < 0) return "bad";
+    return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+  } catch { return "bad"; /* not base64, or not UTF-8: no id can be read from it */ }
+}
+
+/** A Basic header's id and password as RFC 6749 2.3.1 writes them: each
+ *  form-encoded, joined by the first colon. null: no colon, or a broken
+ *  escape. */
+function basicPair(text: string): { id: string, password: string } | null {
+  const at = text.indexOf(":");
+  if (at < 0) return null;
+  try {
     const unform = (x: string) => decodeURIComponent(x.replace(/\+/g, " "));
     return { id: unform(text.slice(0, at)), password: unform(text.slice(at + 1)) };
-  } catch { return "bad"; /* not base64, not UTF-8, or a broken escape: no id can be read from it */ }
+  } catch { return null; /* a broken escape: no id can be read from it */ }
 }
 
 /** The app a token or revocation request names: its client_id, or without
@@ -589,23 +606,26 @@ async function clientOf(env: Env, request: Request, form: URLSearchParams): Prom
   const assertion = form.get("client_assertion");
   const id = form.get("client_id");
   const named = await knownApp(env, id || (assertion !== null ? assertionSubject(assertion) : null) || "");
-  const basic = basicOf(request);
-  if (basic === null || (named && named.kind !== "public")) return named;
+  const text = basicText(request);
+  if (text === null || (named && named.kind !== "public")) return named;
+  // exactly the form's client_id and one colon names that client with no password, even an id with colons of its
+  // own: a lax client sends a URL id without the form-encoding RFC 6749 2.3.1 asks for, and worked while the
+  // header was not read
+  const basic = text === "bad" ? null : id !== null && text === id + ":" ? { id, password: "" } : basicPair(text);
   let app = named;
-  if (!app && id === null && basic !== "bad") {
+  if (!app && id === null && basic) {
     const b = await knownApp(env, basic.id);
     app = b && b.kind === "public" ? b : null;
   }
   if (!app) return null;
-  if (basic === "bad" || basic.password !== "" || (id !== null && basic.id !== id)) return "refused";
+  if (!basic || basic.password !== "" || (id !== null && basic.id !== id)) return "refused";
   return app;
 }
 
 /** The counts-only line of a token or revocation request that names no
  *  known app: how it tried to name one, never what it named. */
 function unknownClient(request: Request, form: URLSearchParams): void {
-  const auth = request.headers.get("Authorization");
-  warn("oauth.token_unknown", null, { has_client_id: form.has("client_id"), has_basic: auth !== null && /^Basic(?:\s|$)/i.test(auth.trim()), has_assertion: form.has("client_assertion") });
+  warn("oauth.token_unknown", null, { has_client_id: form.has("client_id"), has_basic: hasBasic(request), has_assertion: form.has("client_assertion") });
 }
 
 /** How a refresh token presented by a watched app stood: the live one, a
@@ -627,8 +647,8 @@ function watchLine(request: Request, form: URLSearchParams, app: KnownApp, grant
     warn("oauth.token_watch", null, {
       app: app.key, grant_type: grant === "authorization_code" || grant === "refresh_token" ? grant : "other",
       alg: head && (head.alg === "ES256" || head.alg === "PS384") ? String(head.alg) : head ? "other" : null,
-      has_kid: !!(head && typeof head.kid === "string"), has_client_id: form.has("client_id"), has_resource: form.has("resource"), has_dpop: request.headers.has("DPoP"),
-      ...(refresh ? { refresh } : {}),
+      has_kid: !!(head && typeof head.kid === "string"), has_client_id: form.has("client_id"), has_basic: hasBasic(request), has_resource: form.has("resource"),
+      has_dpop: request.headers.has("DPoP"), ...(refresh ? { refresh } : {}),
     });
   };
 }
@@ -691,13 +711,24 @@ function tokensAnswer(access: string, refresh: string, expiresIn: number): Respo
   return oauthJson({ access_token: access, token_type: "Bearer", expires_in: expiresIn, refresh_token: refresh, scope: SIGNIN_SCOPE });
 }
 
-/** A resource asked for at the token endpoint, against the resources the
- *  code or refresh token was bound to: none sent is the default token (the
- *  domain), which only a request that named the domain (or none) may get. */
-function tokenResource(form: URLSearchParams, origin: string, bound: unknown): string | null {
+/** The resource of a token, against the resources the code or refresh
+ *  token was bound to: the one the request names, if granted. A request
+ *  that names none gets the grant's own, so a client that named its
+ *  resource when it asked for the grant and leaves it out afterwards still
+ *  gets a token it can use, and never one for a resource the person did not
+ *  grant: a grant of one resource, that one; a grant of both, the sign-in
+ *  address for a public app (the only place it can use a token) and the
+ *  domain's default token for an app that signs its requests. */
+function tokenResource(form: URLSearchParams, origin: string, bound: unknown, app: KnownApp): string | null {
   const list = Array.isArray(bound) ? bound.map(String) : [];
+  const address = origin + "/api/mcp/signin";
   const v = form.get("resource");
-  const r = v === null ? origin : canonicalResource(v, origin);
+  if (v === null) {
+    if (list.length === 1) return list[0] === address || list[0] === origin ? list[0] : null;
+    if (app.kind === "public" && list.includes(address)) return address;
+    return list.includes(origin) ? origin : null;
+  }
+  const r = canonicalResource(v, origin);
   return r !== null && list.includes(r) ? r : null;
 }
 
@@ -790,7 +821,7 @@ async function codeGrant(rc: RouteContext, app: KnownApp, form: URLSearchParams,
     warn("oauth.reuse", null, { kind: "code" });
     return oauthError("invalid_grant");
   }
-  const resource = tokenResource(form, signinOrigin(env), o.bind.resources);
+  const resource = tokenResource(form, signinOrigin(env), o.bind.resources, app);
   if (!resource) return oauthError("invalid_target");
   if (typeof o.bind.jkt === "string" && proof !== o.bind.jkt) return oauthError("invalid_grant");
   const dk = await slotUnwrap(s.id, s.slot, "code", s.secret, o.wrapped);
@@ -842,7 +873,7 @@ async function refreshGrant(rc: RouteContext, app: KnownApp, form: URLSearchPara
   if (bound !== null && proof !== bound) return oauthError("invalid_grant");
   const scope = form.get("scope");
   if (scope !== null && scope !== SIGNIN_SCOPE) return oauthError("invalid_scope");
-  const resource = tokenResource(form, signinOrigin(env), o.bind.resources);
+  const resource = tokenResource(form, signinOrigin(env), o.bind.resources, app);
   if (!resource) return oauthError("invalid_target");
   let r: Awaited<ReturnType<DurableObjectStub["signinRefresh"]>>;
   let fresh: { access: string, refresh: string } | null = null;

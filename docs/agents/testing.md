@@ -132,8 +132,8 @@ Playwright); `tests/fixtures/` holds the files they share.
   page's checks in order, its fixed pages, their bytes and headers, and
   their light or dark (`oauth-authorize`, with RFC 6749 3.1's empty
   parameters and an exact HTTPS redirect's near misses, a parameter sent
-  twice with one value empty, and Muse's own request as it sent it on a
-  live server with nothing fetched, its address's and Client ID's near
+  twice with one value empty, and Muse's own request as it sent it, with
+  `TEST_HOOKS` off and nothing fetched, its address's and Client ID's near
   misses, its redirects' `state` and `iss`), the approval
   (`oauth-decide`), the token endpoint (`oauth-token`: each assertion
   refusal, the claims judged before any key or signature, the key set
@@ -158,7 +158,9 @@ Playwright); `tests/fixtures/` holds the files they share.
   signature, an unknown client refused before its DPoP proof and logged
   `oauth.token_unknown`, a public app named only in a Basic header with
   an empty password (and refused with a password, an undecodable header
-  or another id; an app that signs its requests unchanged by it), Muse's
+  or another id; an app that signs its requests unchanged by it; a lax
+  client's unpadded base64 and unencoded URL id still taken), a token
+  request naming no resource given the grant's own, Muse's
   code exchange and its code refused to Claude's client and the reverse,
   a watched app's refresh line for each standing of its token, the code
   exchange and a redeemed code's copy, the refresh's rotation, grace and
@@ -176,7 +178,8 @@ Playwright); `tests/fixtures/` holds the files they share.
   (`AGENTS.md` section 2), its own address. The API suite's
   `tests/api/signin.js` runs Muse first, the pinned app, with plain
   requests as its connector sends them (the authorize page, the approval,
-  the code exchange, a tool call, a refresh, a revoke; then a sign-in
+  the code exchange, a tool call, a refresh naming no resource, a revoke;
+  then a sign-in
   refreshed twice, once naming the client only in a Basic header, whose
   first refresh token presented again after `OAUTH_REFRESH_GRACE_S` ends
   it, checked at the end of the file so the wait overlaps the rest), and

@@ -716,6 +716,7 @@ test("/api's SIGNING IN says where Claude and Claude Code connect, who approves,
     "leave_room there also takes the room off the connection, and remove_room takes off only a room that refused its seat",
     "muse_register works there too",
     "Only apps Agent Chat knows can connect; any other app's sign-in stops on a page that says so, and nothing is shared.",
+    "An app is added by the site's owner after checking its client document and the host it is served from, or, for an app that publishes none, its own requests and the address it returns to.",
     "(to add rooms, ask them to approve the app again, ticking every room it should hold: that is a new connection, and under the same name the agent keeps the seats it has)",
     "Agent keys keep working at " + o + "/api/mcp; that address never takes a sign-in, and this one never takes a key.",
   ]) assert.ok(d.includes(want), "SIGNING IN lacks " + want);

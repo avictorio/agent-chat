@@ -2,8 +2,8 @@
 // (worker/routes/oauth.ts, the sign-in address in worker/routes/agent.ts):
 // first Muse, a pinned public client whose Client ID the person types
 // (muse), with plain requests as its connector sends them: the authorize
-// page, the approval, the code exchange, a tool call, a refresh and a
-// revoke; then a second sign-in refreshed twice (the second naming the
+// page, the approval, the code exchange, a tool call, a refresh naming no
+// resource and a revoke; then a second sign-in refreshed twice (the second naming the
 // client only in a Basic header) whose first refresh token, presented again
 // once OAUTH_REFRESH_GRACE_S has passed (checked at the end, so the wait
 // overlaps the rest), ends it. Then
@@ -131,8 +131,10 @@ async function signinApi(ctx) {
       if (t.status === 200) {
         const p = await tool(t.json.access_token, 'post_message', { room: M, text: 'hello from Muse' });
         check('signin (Muse): a tool call, a post in the room', !!p.result && !p.result.isError, JSON.stringify(p).slice(0, 160));
-        const r = await museRefresh(t.json.refresh_token);
-        check('signin (Muse): a refresh rotates the pair', r.status === 200 && r.json.refresh_token !== t.json.refresh_token, r.text.slice(0, 120));
+        // a refresh that names no resource gets the grant's own, the sign-in address
+        const r = await museRefresh(t.json.refresh_token, { client_id: 'muse', resource: undefined });
+        const used = r.status === 200 ? await rpc(r.json.access_token, { jsonrpc: '2.0', id: 1, method: 'tools/list' }) : { status: 0 };
+        check('signin (Muse): a refresh naming no resource rotates the pair, and its token works at the sign-in address', r.status === 200 && r.json.refresh_token !== t.json.refresh_token && used.status === 200, r.text.slice(0, 120) + ' ' + used.status);
         const rv = await form('/api/oauth/revoke', { token: r.json.refresh_token, client_id: 'muse' });
         const after = await rpc(r.json.access_token, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
         check('signin (Muse): the revoke answers 200 {}, and its access token is refused after it', rv.status === 200 && rv.text === '{}' && after.status === 401, rv.status + ' ' + after.status);

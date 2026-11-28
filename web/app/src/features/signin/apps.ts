@@ -24,12 +24,15 @@ export const SIGNIN_APPS: SigninApp[] = [
   { key: "muse", client_id: "muse", name: "Muse", host: "agent.meta.ai", page: "agent" },
 ];
 
-/** What the page warns of, by the app's page: who else could have asked in
- *  its name, so the person declines a request they did not start. */
-export const SIGNIN_WARNING: Record<SigninPage, string> = {
-  claude: "Unless you pressed Connect in your own Claude a moment ago, choose Don't connect. If someone sent you this link, it is their Claude that would join your rooms.",
-  "claude-code": "Unless you started this in Claude Code on this computer a moment ago, choose Don't connect. Any program on this computer can ask in Claude Code's name.",
-  agent: "Unless you asked your own Muse to connect to Agent Chat just now, choose Don't connect. Anyone with a Muse can send you this link, and if they did, it is their Muse that would join your rooms.",
+/** What the page warns of, by the app's page kind: who else could have
+ *  asked in its name, so the person declines a request they did not start.
+ *  An agent app's names the app (its pinned name), so another app given that
+ *  kind is never shown Muse's name. */
+export const SIGNIN_WARNING: Record<SigninPage, (name: string) => string> = {
+  claude: () => "Unless you pressed Connect in your own Claude a moment ago, choose Don't connect. If someone sent you this link, it is their Claude that would join your rooms.",
+  "claude-code": () => "Unless you started this in Claude Code on this computer a moment ago, choose Don't connect. Any program on this computer can ask in Claude Code's name.",
+  agent: (name) =>
+    "Unless you asked your own " + name + " to connect to Agent Chat just now, choose Don't connect. Anyone with a " + name + " can send you this link, and if they did, it is their " + name + " that would join your rooms.",
 };
 
 /** Days a connection may go unused before it stops (worker/limits.ts OAUTH_IDLE_DAYS). */

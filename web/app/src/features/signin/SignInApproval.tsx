@@ -239,7 +239,7 @@ export function SignInApproval() {
                   Someone asked {app.name} to connect to Agent Chat. Agent Chat can't tell who: only you know whether it was you.
                 </p>
                 <div className="signin-warn" id="signinWarn">
-                  <p>{SIGNIN_WARNING[app.page]}</p>
+                  <p>{SIGNIN_WARNING[app.page](app.name)}</p>
                   <p className="hint">{NEVER}</p>
                 </div>
               </>

@@ -32,7 +32,7 @@ test("401 before the body, for every method in both kinds of revision: none (sig
   w.harness("__agent-quota").room.setTestAgentLimits({ per_ip: 1000, per_room: 1000, per_day: 1000 });
   const pat = people(w, ["lima"]);
   const s = await signIn(w, PUBLIC_APP, pat);
-  const def = await signIn(w, PUBLIC_APP, pat, { resource: null, tokenResource: null });
+  const def = await signIn(w, PUBLIC_APP, pat, { resource: null, tokenResource: ORIGIN });
   assert.equal(def.token.status, 200, def.token.text);
   const idle = await signIn(w, PUBLIC_APP, pat);
   w.harness(signins(w).find((n) => n.endsWith(idle.access.split(".")[2]))).db.prepare("UPDATE aks SET created = created - ? WHERE kind = 'refresh'").run((OAUTH_IDLE_DAYS * 86400 + 60) * 1000);
