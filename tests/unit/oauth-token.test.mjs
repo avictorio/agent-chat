@@ -569,6 +569,27 @@ test("a fetch rejected for a reason other than the timeout is fetched once more,
   assert.deepEqual(lines.filter((l) => l.warn === "oauth.keyset"), [], "not failed: nothing logged");
 });
 
+test("a first attempt whose body breaks off mid-stream is fetched once more, at once, within the same try: the second answering whole, its set is kept and taken, nothing is logged, and no other fetch within OAUTH_KEYSET_REFETCH_S", async () => {
+  const { w, apps: [A] } = await remoteApps("broken-body");
+  const whole = JSON.stringify(setOf(A.es));
+  let calls = 0, broke = false;
+  // a 200 answer whose body gives its first half, then breaks off before it is whole
+  const breaking = () => new Response(new ReadableStream({
+    start(c) { c.enqueue(new TextEncoder().encode(whole.slice(0, whole.length >> 1))); },
+    pull(c) { broke = true; c.error(lost()); },
+  }), { status: 200, headers: { "Cache-Control": "max-age=600" } });
+  const lines = await logged(() => withKeys(async () => { calls++; return calls === 1 ? breaking() : served(setOf(A.es), 600); }, async (host) => {
+    const before = w.pending.length;
+    assert.ok(taken(await tryKey(w, A.app, A.es)), "taken with the second attempt's set");
+    assert.ok(broke, "the first body broke off mid-stream");
+    assert.deepEqual([host.count(), w.pending.length - before], [2, 1], "two fetches in one handed-over promise");
+    assert.ok(refused(await tryKey(w, A.app, await keyPair("ES256", "es-9"))), "an unknown kid within the window");
+    assert.ok(taken(await tryKey(w, A.app, A.es)), "the set kept");
+    assert.equal(host.count(), 2, "one try: no other fetch within the window");
+  }));
+  assert.deepEqual(lines.filter((l) => l.warn === "oauth.keyset"), [], "not failed: nothing logged");
+});
+
 test("a first attempt the app's host failed (a status, a redirect, the size cap, a body that does not parse, the timeout) marks the try failed with no second: one fetch, the last set serves, logged with the status", async () => {
   const kinds = [
     ["status", () => new Response("down", { status: 503 }), 503],

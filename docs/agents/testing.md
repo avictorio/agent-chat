@@ -144,10 +144,11 @@ Playwright); `tests/fixtures/` holds the files they share.
   copy by when it was fetched, and an older one never adopted over a
   newer set; a just-published key; the fetch handed to `waitUntil`, also
   with a first attempt cut off and a second that answers; a rejected
-  fetch fetched once more; each failure of the host's at a first attempt,
-  with no second; both attempts within one `OAUTH_FETCH_TIMEOUT_MS`; a
-  removed key; failed fetches (a status, a connection refused twice) and
-  the last set's bound; a fetch that never settles), the
+  fetch fetched once more, and so a first body broken off mid-stream;
+  each failure of the host's at a first attempt, with no second; both
+  attempts within one `OAUTH_FETCH_TIMEOUT_MS`; a removed key; failed
+  fetches (a status, a connection refused twice) and the last set's
+  bound; a fetch that never settles), the
   failed-authentication limit one per network and app, filled only by a
   signature that matched no key, with the quota object's calls and the
   signature checks counted per case, and refusing before any fetch or
