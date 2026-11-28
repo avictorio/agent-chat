@@ -1771,14 +1771,14 @@ test("tagsKept: an entry recording a Muse wake keeps its tag, gains none without
   assert.doesNotThrow(() => tagsKept([e({ hooks: W })], [e({ hooks: W })]), "with no tag anywhere, nothing is refused");
 });
 
-test("an entry made before tags, its link held as pre, gets a tag with pre (withTag) and is then looked at and dropped by its tag with the untagged holds (museHolderLook, museHolderDrop, its token, legacy); an entry made with its tag, by its tag alone", async () => {
+test("an entry with no tag, its link held as pre, gets a tag with pre (withTag) and is then looked at and dropped by its tag with the untagged holds (museHolderLook, museHolderDrop, its token, legacy); an entry made with its tag, by its tag alone", async () => {
   for (const pre of [false, true]) {
     const k = await museKeyed(["lima"]);
     try {
       const h = k.w.harness("lima");
       h.room.access(k.tok.lima, false);
       if (pre) {
-        // as a registration made before tags left it: no tag on the entry, the link recorded, the set held as pre
+        // an entry with no tag: the link recorded, the set held as pre
         await editStored(k.w, k.key, (rooms) => rooms.map((e) => { const x = { ...e, hooks: [{ link: k.link, recs: [] }] }; delete x.tag; return x; }));
         assert.ok(h.room.museSetHookLook(k.tok.lima, k.link, "agent-chat", "lima", Date.now() + 3600000).ok);
         assert.deepEqual(holdersIn(k.w, "lima"), ["pre"], "set with no tag: held by pre");
@@ -1899,7 +1899,7 @@ test("every write of a key's or a sign-in's list that keepsWakes checks goes thr
   }
 });
 
-// ---- Holders between identities on one seat (section 14.8 of the sign-in) ----
+// ---- Holders between identities on one seat ----
 // Every entry is tagged, so each identity's take-off or disconnect lets go of
 // its own hold: the hook goes with its last holder, and an answer says "off"
 // only where the room says it went. A sign-in (routes/oauth.ts) holds a seat
@@ -2039,7 +2039,7 @@ test("a re-approval that reuses the seats: both connections register the same Mu
   }
 });
 
-test("a self registration on a link a key also recorded stays through the key's disconnect (LEGACY_HOLDS is pre alone); an untagged entry's hold beside it, made before tags, goes", async () => {
+test("a self registration on a link a tagged key also recorded stays through the key's disconnect (LEGACY_HOLDS is pre alone)", async () => {
   const k = await museKeyed(["lima"]);
   try {
     k.w.harness("lima").room.access(k.tok.lima, false);
@@ -2055,7 +2055,73 @@ test("a self registration on a link a key also recorded stays through the key's 
   }
 });
 
-test("an entry made before tags (no tag, its link held as pre): its next registration's recording write gives it a tag with pre, and the write that settles its last link drops pre", async () => {
+// A key with an entry that has no tag (its link recorded, the room's hook held by pre), as every key that registered
+// before holders were tagged, with and without the member's own registration (self) on the same link: without self
+// every answer is what it always was; with it the hook stays, and the answers say the key let go and nothing more.
+/** such a key on lima, with self beside it when asked; every recording's deadline past by the room's clock */
+async function untaggedKey(withSelf) {
+  const k = await museKeyed(["lima"]);
+  const h = k.w.harness("lima");
+  h.room.access(k.tok.lima, false);
+  await editStored(k.w, k.key, (rooms) => rooms.map((e) => { const x = { ...e, hooks: [{ link: k.link, recs: [] }] }; delete x.tag; return x; }));
+  assert.ok(h.room.museSetHookLook(k.tok.lima, k.link, "agent-chat", "lima", Date.now() + 3600000).ok);
+  if (withSelf) assert.ok(h.room.museSetHook(k.tok.lima, k.link, "main", "lima").ok);
+  assert.deepEqual(holdersIn(k.w, "lima"), withSelf ? ["pre", "self"] : ["pre"]);
+  pastDeadlines(k.w, "lima");
+  return k;
+}
+for (const withSelf of [false, true]) {
+  const beside = withSelf ? "with self on the same link: kept, the hook stays" : "alone: off, the hook goes";
+  test("an untagged key's remove_room, " + beside, async () => {
+    const k = await untaggedKey(withSelf);
+    try {
+      const r = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
+      assert.equal(r.status, 200, r.text);
+      if (withSelf) {
+        assert.deepEqual(r.json, { room: "lima", removed: true, note: removedHeldNote("lima", "kept") });
+        assert.deepEqual([hookIn(k.w, "lima").link, holdersIn(k.w, "lima")], [k.link, ["self"]]);
+      } else {
+        assert.deepEqual(r.json, { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", "off") });
+        assert.deepEqual([hookIn(k.w, "lima"), holdersIn(k.w, "lima")], [null, []]);
+      }
+    } finally {
+      k.b.restore();
+    }
+  });
+  test("an untagged key's DELETE /api/agent, " + beside, async () => {
+    const k = await untaggedKey(withSelf);
+    try {
+      const r = await read(agentRoute(k.w.rc("DELETE", "/api/agent", { headers: auth(k.key) })));
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual([r.json.muse_wakes_removed, r.json.muse_wakes_left, r.json.note], [withSelf ? [] : ["lima"], [], dropNote([])]);
+      assert.deepEqual(hookIn(k.w, "lima") && hookIn(k.w, "lima").link, withSelf ? k.link : null);
+      assert.equal(await storedOf(k.w, k.key), null, "the record is gone");
+    } finally {
+      k.b.restore();
+    }
+  });
+  test("an untagged key registers the same Muse again (tagged, with pre), then takes the room off, " + beside, async () => {
+    const k = await untaggedKey(withSelf);
+    try {
+      clockBy(k.w, "lima", 0);
+      const again = await k.b.connect({ n: 1 });
+      assert.equal(again.link, k.link, "the same gadget, the same link");
+      const res = result(await mcp(k.w, call("muse_register", { code: again.code }), auth(k.key))).structuredContent.results[0];
+      assert.equal(res.ok, true, JSON.stringify(res));
+      const e = (await storedOf(k.w, k.key)).rooms[0];
+      assert.deepEqual([typeof e.tag, e.pre], ["string", true], "tagged with pre in the recording write");
+      pastDeadlines(k.w, "lima");
+      const r = await read(agentRemoveRoute(k.w.rc("POST", "/api/agent/rooms/remove", { json: { room: "lima" }, headers: auth(k.key) })));
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual(r.json, withSelf ? { room: "lima", removed: true, note: removedHeldNote("lima", "kept") } : { room: "lima", removed: true, muse_wake_removed: true, note: removedHeldNote("lima", "off") });
+      assert.deepEqual(holdersIn(k.w, "lima"), withSelf ? ["self"] : []);
+    } finally {
+      k.b.restore();
+    }
+  });
+}
+
+test("an entry with no tag (its link held as pre): its next registration's recording write gives it a tag with pre, and the write that settles its last link drops pre", async () => {
   const k = await museKeyed(["lima"]);
   try {
     const h = k.w.harness("lima");

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { SignInClient, type PersonSeatEntry, type SeatCheck, type SignInApproved, type SignInRedirect } from "@chat/contract";
+import { ApiError, SignInClient, type PersonSeatEntry, type SeatCheck, type SignInApproved, type SignInRedirect } from "@chat/contract";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { ToastHost } from "../shell/ToastHost";
@@ -19,8 +19,11 @@ import "./signin.css";
 // approval, through the Agent keys view's own seat form (seatForm.tsx). The
 // app is named from the pinned list (apps.ts), never from the request. It
 // stores nothing but, after an approval that gives one, the connection's
-// disconnect-only code (records.ts). Nothing is ticked at first, focus starts
-// on the heading, and no key press chooses a button, so the page declines
+// disconnect-only code (records.ts); a connection whose record this browser
+// cannot keep is never handed to the app, since nothing here could then
+// disconnect it. It follows only an http or https address: this origin
+// holds the browser's invites. Nothing is ticked at first, focus starts on
+// the heading, and no key press chooses a button, so the page declines
 // unless the person acts. Every name and sentence from the server is
 // rendered as text.
 
@@ -37,8 +40,16 @@ const UNKNOWN = "This app isn't known to Agent Chat yet, so it can't connect her
 const WRONG = "This sign-in link doesn't match the app it names, so it was stopped. Nothing was shared. Start again from the app.";
 const USED =
   "This sign-in link has already been used. If you just approved it and the app didn't connect, start again from your own app: approving again uses the same seats. If you didn't approve it yourself, someone else may have sent you this link.";
+// the app gets a connection only by this page following decide's answer, so with that answer lost the app has nothing;
+// a request that did not approve is given back, and one that did is spent, so the next Connect's check says "already used"
 const LOST =
-  "The connection may or may not have been made. If it was, the app has it; if not, approving again uses the same seats. Approving this same link again will be refused; start again from the app.";
+  "The site's answer didn't arrive, so this page can't tell whether the connection was made. If it was, the app never received it and nothing can use it. Choose Connect to try again: if the page then says this link was already used, start again from the app. Approving again with the same name uses the same seats.";
+const UNKEPT =
+  "This browser couldn't keep the record that lets you disconnect this connection, so the page stopped before the app received it: nothing is connected. The seats made stay unused, and approving again with the same name uses them. Free up this site's storage in your browser, then start again from the app.";
+const UNFOLLOWED = "The site's answer can't be followed from this page. Start again from the app.";
+/** What a call throws when the page stopped short of an answer it will not follow (its state already says so). */
+const STOPPED_CODE = "page_stopped";
+const STOPPED = new ApiError(0, UNFOLLOWED, { code: STOPPED_CODE });
 const AGENTS_ONLY = "Your rooms in this browser are all agents' invites. Only a person's own invite can let an agent in.";
 const NO_ROOMS =
   "This browser holds none of your rooms. If this page opened inside another app (WhatsApp, Muse, a mail app), open it in the browser you use for Agent Chat: Copy link. Otherwise, open one of your invite links in this browser first, then start the connection again.";
@@ -100,8 +111,9 @@ export function SignInApproval() {
   const { looks, retry } = useLooks(rooms);
   const [form, setFormRaw] = useState<SeatForm>(() => emptyForm(app ? app.name : ""));
   const [edited, setEdited] = useState(false);
-  // the page's other states: the link spent already, the request refused as wrong, or on the way back to the app
-  const [mode, setMode] = useState<"form" | "used" | "wrong">("form");
+  // the page's other states: the link spent already, the request refused as wrong, a connection whose record
+  // this browser could not keep, an answer the page will not follow; or on the way back to the app
+  const [mode, setMode] = useState<"form" | "used" | "wrong" | "unkept" | "stopped">("form");
   const [leaving, setLeaving] = useState("");
   const [declining, setDeclining] = useState(false);
   const [declineErr, setDeclineErr] = useState("");
@@ -118,9 +130,22 @@ export function SignInApproval() {
   };
   const setForm = (f: SeatForm) => setFormRaw(edited || f.name !== form.name ? f : { ...f, name: nameFor(f) });
 
-  const leave = (to: string, said: string) => {
+  /** Goes to the site's answer, when it is an http or https address (a loopback callback is http); false, and the page stops, otherwise. */
+  const leave = (to: string, said: string): boolean => {
+    let ok = false;
+    try {
+      const u = new URL(to);
+      ok = u.protocol === "https:" || u.protocol === "http:";
+    } catch {
+      // not an address
+    }
+    if (!ok) {
+      setMode("stopped");
+      return false;
+    }
     setLeaving(said);
     location.assign(to);
+    return true;
   };
   const run = useSeatRun<SignInApproved>({
     noun: "connection",
@@ -132,11 +157,16 @@ export function SignInApproval() {
       const r: SeatCheck | SignInApproved | SignInRedirect = check ? await c.decide(params, true, name, entries, true) : await c.decide(params, true, name, entries);
       if ("rooms" in r) return r;
       // the site sends the request back to the app with its error: the page goes with it
-      leave(r.redirect, "Returning you to " + (app ? app.name : "the app") + "…");
+      if (!leave(r.redirect, "Returning you to " + (app ? app.name : "the app") + "…")) throw STOPPED;
       return new Promise<never>(() => {});
     },
     done: (r) => {
-      if (r.disconnect_code && app) saveSignin(app.key, cleanAgentName(form.name), r.rooms.map((x) => x.room), r.disconnect_code);
+      if (r.disconnect_code && app && !saveSignin(app.key, cleanAgentName(form.name), r.rooms.map((x) => x.room), r.disconnect_code)) {
+        // the app never receives this connection, so it can never be used: it is disconnected once, as best it can be, and the code is not kept
+        void new SignInClient().disconnect(r.disconnect_code).catch(() => undefined);
+        setMode("unkept");
+        return;
+      }
       leave(r.redirect, "Returning you to " + (app ? app.name : "the app") + "…");
     },
     making: "Connecting…",
@@ -145,6 +175,7 @@ export function SignInApproval() {
     unmade,
     button: "Connect",
     taken: (b) => {
+      if (b.code === STOPPED_CODE) return true;
       if (b.code === "request_used") setMode("used");
       else if (b.status === 400 && b.code === "invalid_request" && !b.room) setMode("wrong");
       else return false;
@@ -157,7 +188,7 @@ export function SignInApproval() {
     setDeclineErr("");
     try {
       const r = await new SignInClient().decide(params, false);
-      leave(r.redirect, "Not connected. Returning you to " + (app ? app.name : "the app") + "…");
+      if (!leave(r.redirect, "Not connected. Returning you to " + (app ? app.name : "the app") + "…")) setDeclining(false);
     } catch (e) {
       const b = bodyOf(e);
       if (b && b.status === 400 && b.code === "invalid_request") setMode("wrong");
@@ -187,7 +218,8 @@ export function SignInApproval() {
 
   const settled = rooms.length > 0 && rooms.every((r) => (looks[r.room] || CHECKING).state !== "checking");
   const person = rooms.some((r) => (looks[r.room] || CHECKING).state === "person");
-  const agentsOnly = settled && !person && rooms.some((r) => (looks[r.room] || CHECKING).state === "agent");
+  // said only when every room's invite is an agent's: any other mix shows the form, whose rows say why each one can't be ticked
+  const agentsOnly = settled && !person && rooms.every((r) => (looks[r.room] || CHECKING).state === "agent");
   const busy = run.busy || declining || !!leaving;
   const showForm = !!app && mode === "form" && rooms.length > 0 && !agentsOnly;
   const canDecline = !!app && mode !== "wrong";
@@ -223,6 +255,11 @@ export function SignInApproval() {
             {app && mode === "used" ? (
               <p className="hint bad signin-state" id="signinUsed" role="alert">
                 {USED}
+              </p>
+            ) : null}
+            {app && mode === "unkept" ? (
+              <p className="hint bad signin-state" id="signinUnkept" role="alert">
+                {UNKEPT}
               </p>
             ) : null}
             {app && mode === "form" && rooms.length === 0 ? (
@@ -297,6 +334,11 @@ export function SignInApproval() {
               <p className="hint signin-say" id="signinSay" aria-live="polite">
                 {leaving || run.say}
               </p>
+              {mode === "stopped" ? (
+                <p className="hint bad" id="signinStopped" role="alert">
+                  {UNFOLLOWED}
+                </p>
+              ) : null}
               {declineErr ? (
                 <p className="hint bad" id="signinDeclineErr" role="alert">
                   {declineErr}

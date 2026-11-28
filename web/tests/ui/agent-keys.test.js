@@ -59,7 +59,8 @@ const VARIANTS = [
  * One scenario on a page of its own, through the fake API.
  * o.rooms: the rooms this browser holds (room -> token); o.api: the route
  * answers ({invite(body, ctx), info(ctx), add(body, ctx), remove(body, ctx),
- * leave(body, ctx), drop(ctx), looks}); fn(page, S) runs it. S.calls lists every API request
+ * leave(body, ctx), drop(ctx), looks}, each answering {status, body} (JSON),
+ * {status, html} or 'network'); fn(page, S) runs it. S.calls lists every API request
  * (method, path, the credential headers), S.store the device's storage keys
  * before the view ran.
  */
@@ -102,6 +103,7 @@ async function scenario(name, o, fn) {
       if (!f) { S.unhandled.push(m + ' ' + p); return J({ error: 'not stubbed' }, 500); }
       const out = await f(...a, S);
       if (out === 'network') return route.abort('failed');
+      if (out.html !== undefined) return route.fulfill({ status: out.status || 200, contentType: 'text/html', body: out.html });
       return J(out.body, out.status, out.headers);
     };
     if (p === '/api/agents/invite' && m === 'POST') return call('invite', body);
@@ -450,6 +452,39 @@ async function worker() {
     await page.waitForSelector('#keyErr', { timeout: 5000 });
     must((await text(page, '#keyErr')) === "Couldn't reach the site, so this page can't tell whether the key was made. If it was, it is lost: nobody can see it again. Making the key again with the same name uses the same seats.", await text(page, '#keyErr'));
   }, '#keyRooms');
+  // the platform's own page in place of the Worker's answer: what was made is not known, so each form says its lost sentence
+  const PLATFORM_502 = { status: 502, html: '<!doctype html><title>502 Bad Gateway</title><h1>Bad gateway</h1>' };
+  await state('platform-lost', { rooms: MINE, api: { invite: async (body) => (body.check ? { body: newSeats(body) } : PLATFORM_502) } }, async (page) => {
+    await page.fill('#keyName', 'Scout');
+    await tick(page, 'keyRooms', 'family-trip');
+    await page.click('#keyGo');
+    await page.waitForSelector('#keyErr', { timeout: 5000 });
+    must((await text(page, '#keyErr')) === "Couldn't reach the site, so this page can't tell whether the key was made. If it was, it is lost: nobody can see it again. Making the key again with the same name uses the same seats.", await text(page, '#keyErr'));
+  }, '#keyRooms');
+  // the Worker's own 500 says what it kept: a refusal, said as before
+  await scenario('keys-worker-500', { rooms: MINE, api: { invite: async (body) => (body.check ? { body: newSeats(body) } : { status: 500, body: { error: 'The key could not be made. Try again.', left_unused: ['family-trip'], note: W.unusedNote(['family-trip']) } }) } }, async (page) => {
+    await page.fill('#keyName', 'Scout');
+    await tick(page, 'keyRooms', 'family-trip');
+    await page.click('#keyGo');
+    await page.waitForSelector('#keyErr', { timeout: 5000 });
+    must((await text(page, '#keyErr')) === 'The key could not be made. Try again. No key was made. ' + W.unusedNote(['family-trip']), await text(page, '#keyErr'));
+  });
+  await state('add-platform-lost', { rooms: { ...MINE, 'trip-two': 'tok_two' }, api: { ...OPEN, looks: { tok_two: PERSON() }, add: async (body) => (body.check ? { body: newSeats(body) } : PLATFORM_502) } }, async (page) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyAddRooms', { timeout: 5000 });
+    await tick(page, 'keyAddRooms', 'trip-two');
+    await page.click('#keyAdd');
+    await page.waitForSelector('#keyAddErr', { timeout: 5000 });
+    must((await text(page, '#keyAddErr')) === "Couldn't reach the site, so this page can't tell whether the rooms were added. Open the key again to see; adding them again with the same name uses the same seats.", await text(page, '#keyAddErr'));
+  }, '#keyAddRooms');
+  await scenario('keys-add-worker-500', { rooms: { ...MINE, 'trip-two': 'tok_two' }, api: { ...OPEN, looks: { tok_two: PERSON() }, add: async (body) => (body.check ? { body: newSeats(body) } : { status: 500, body: { error: 'The rooms could not be added. Try again.', left_unused: ['trip-two'], note: W.unusedNote(['trip-two']) } }) } }, async (page) => {
+    await paste(page, KEY);
+    await page.waitForSelector('#keyAddRooms', { timeout: 5000 });
+    await tick(page, 'keyAddRooms', 'trip-two');
+    await page.click('#keyAdd');
+    await page.waitForSelector('#keyAddErr', { timeout: 5000 });
+    must((await text(page, '#keyAddErr')) === 'The rooms could not be added. Try again. No room was added. ' + W.unusedNote(['trip-two']), await text(page, '#keyAddErr'));
+  });
 
   // ---- section 2: a key you hold ----
   await state('paste-error', { rooms: MINE, api: {} }, async (page, S) => {

@@ -800,9 +800,11 @@ function HeldKey(props: { rooms: DeviceRoom[]; looks: Record<string, Look>; retr
 
 /** Section 3: the connections the approval page approved in this browser
  *  (features/signin/records.ts), shown while any is recorded: each one
- *  disconnected with its disconnect-only code, its record removed only once
- *  no room is left to confirm its wakes (so Disconnect again can finish
- *  them), or its record forgotten here. No Leave: the code opens no invite,
+ *  disconnected with its disconnect-only code, its record removed once no
+ *  room is left to confirm its wakes, or once the site could not read them
+ *  (it ended the connection all the same, so nothing is left to finish);
+ *  kept while rooms are left, so Disconnect again can finish them; or its
+ *  record forgotten here. No Leave: the code opens no invite,
  *  so only the agent itself leaves a room, with leave_room. */
 function Connections() {
   const [list, setList] = useState<SigninRecord[]>(() => signinRecords());
@@ -833,8 +835,9 @@ function Connections() {
         setSay("This connection had already ended.");
       } else {
         setSay(d.note);
-        if (d.wakes_left && d.wakes_left.length === 0) dropSignin(r.id);
-        setAgain((a) => (d.wakes_left && d.wakes_left.length === 0 ? a.filter((x) => x !== r.id) : a.includes(r.id) ? a : a.concat([r.id])));
+        const left = !!d.wakes_left && d.wakes_left.length > 0;
+        if (!left) dropSignin(r.id);
+        setAgain((a) => (!left ? a.filter((x) => x !== r.id) : a.includes(r.id) ? a : a.concat([r.id])));
       }
       setList(signinRecords());
     } catch (e) {
@@ -902,8 +905,9 @@ function Connections() {
       >
         <h3 id="keyConnDropTitle">Disconnect {asked ? appName(asked) : ""} everywhere?</h3>
         <p>
-          It stops working at once in every room it joined through this connection. It stays a member of those rooms until it leaves or the site's owner removes it. It lets go
-          of the Muse wakes it set up: each one goes, unless another key or connection holding the same seat, or a registration with the room's own token, also holds it.
+          It stops working at once in every room it joined through this connection. It stays a member of each of those rooms that still takes its invite, until it leaves or
+          the site's owner removes it. It lets go of the Muse wakes it set up: each one goes, unless another key or connection holding the same seat, or a registration with
+          the room's own token, also holds it.
         </p>
         {dlgErr ? (
           <p className="forget-err" role="alert">

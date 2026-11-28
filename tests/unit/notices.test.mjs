@@ -29,12 +29,14 @@ test("a notice shows through its until day and drops out after", () => {
 });
 
 // The feed lists the newest day first, and a new notice goes above its
-// day's earlier ones (the three newest days are held to it here). The room
+// day's earlier ones (the four newest days are held to it here). The room
 // page's "What's new" strip (NoticeStrip in the web app) shows the newest
 // notice by date, the first listed on a tie, whoever it is written for.
 test("the feed lists the newest day first, and the newest days' later notices above their earlier ones", () => {
   for (let i = 1; i < NOTICES.length; i++) assert.ok(NOTICES[i - 1].date >= NOTICES[i].date, NOTICES[i - 1].id + " is listed above a newer " + NOTICES[i].id);
   const ids = NOTICES.map((n) => n.id);
+  // the day of the sign-in
+  assert.deepEqual(ids.filter((id) => id.startsWith("2026-11-28-")), ["2026-11-28-signin"]);
   // the day of a leave through an agent key, of the agent keys a person makes, of the agent keys, then of a leave that calls off every lobby the leaver created or holds a seat in
   assert.deepEqual(ids.filter((id) => id.startsWith("2026-11-27-")), ["2026-11-27-agent-keys-leave", "2026-11-27-agent-keys-page", "2026-11-27-agent-keys", "2026-11-27-leave-lobbies"]);
   // the day of the start page: MCP's revision 2026-07-28, the leave call, the watcher's one file, the preview and the names, MCP's revisions, the invite note's three, then the start page's two, then the cursor's two
@@ -67,7 +69,7 @@ import { ESCAPED_SET } from "./start-views.mjs";
 test("the preview-and-names notice says what changed and what stays as it was", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-preview-and-names");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[7].id, n.id, "listed eighth, below the agent keys' three, the leave's lobbies', MCP 2026-07-28's, the leave call's and the watcher's");
+  assert.equal(NOTICES[8].id, n.id, "listed ninth, below the sign-in's, the agent keys' three, the leave's lobbies', MCP 2026-07-28's, the leave call's and the watcher's");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -97,10 +99,10 @@ test("the preview-and-names notice says what changed and what stays as it was", 
 // running an older copy has to hear that its copy keeps working and what
 // the new one needs: a notice of its own, within the length limit.
 import { WATCHER_VERSION } from "../../worker/agents/docs.ts";
-test("the watcher's notice is seventh and says what changed for an agent running an older copy", () => {
+test("the watcher's notice is eighth and says what changed for an agent running an older copy", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-watcher-script");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[6].id, n.id, "listed seventh, below the agent keys' three, the leave's lobbies', MCP 2026-07-28's and the leave call's");
+  assert.equal(NOTICES[7].id, n.id, "listed eighth, below the sign-in's, the agent keys' three, the leave's lobbies', MCP 2026-07-28's and the leave call's");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -245,10 +247,10 @@ test("the MCP revisions notice names the revisions initialize answers and the he
 // routes/members.ts leaveRoute): its notice says how, what it
 // deletes, the last member's second yes and the unopened invite's refusal,
 // with the codes and the catalog version as the code has them.
-test("the leave notice is sixth and names the call, its codes and the catalog it came with", () => {
+test("the leave notice is seventh and names the call, its codes and the catalog it came with", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-leave");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[5].id, n.id, "listed sixth, below the agent keys' three, the leave's lobbies' and MCP 2026-07-28's");
+  assert.equal(NOTICES[6].id, n.id, "listed seventh, below the sign-in's, the agent keys' three, the leave's lobbies' and MCP 2026-07-28's");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -263,10 +265,10 @@ test("the leave notice is sixth and names the call, its codes and the catalog it
 // unknown tool that no longer joins and the token refusal that stays. It
 // quotes the revision and the catalog version as literals: a dated notice
 // does not change when a constant moves later.
-test("the notice of revision 2026-07-28 is fifth, first of its day, and says what changed and what stays", () => {
+test("the notice of revision 2026-07-28 is sixth, first of its day, and says what changed and what stays", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-26-mcp-2026");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[4].id, n.id, "listed fifth, below the next day's four: the newest of its day");
+  assert.equal(NOTICES[5].id, n.id, "listed sixth, below the next two days' five: the newest of its day");
   assert.equal(n.date, "2026-11-26");
   assert.equal(n.until, "2026-12-26");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -278,14 +280,14 @@ test("the notice of revision 2026-07-28 is fifth, first of its day, and says wha
 
 // A leave calls off every match still in its lobby that the leaver created
 // or holds a seat in, accepted or not (room/members.ts leave, room/games.ts
-// lobbiesOf): listed fourth, below the same day's agent keys, it says so
+// lobbiesOf): listed fifth, below the next day's sign-in and the same day's agent keys, it says so
 // to an agent that read the leave call's own notice, with the Referee's
 // line, the running matches that stay, the leave's own silence and the
 // catalog version leave_room's description came with, as a literal.
-test("the leave-lobbies notice is fourth and says which lobbies a leave calls off", () => {
+test("the leave-lobbies notice is fifth and says which lobbies a leave calls off", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-27-leave-lobbies");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[3].id, n.id, "listed fourth, below the same day's three of agent keys");
+  assert.equal(NOTICES[4].id, n.id, "listed fifth, below the next day's sign-in and the same day's three of agent keys");
   assert.equal(n.date, "2026-11-27");
   assert.equal(n.until, "2026-12-27");
   assert.ok(n.date <= API_VERSION.slice(0, 10), "dated after the API version");
@@ -293,15 +295,15 @@ test("the leave-lobbies notice is fourth and says which lobbies a leave calls of
   for (const want of ["POST /api/rooms/ROOM/leave", "MCP leave_room", "now also calls off the match lobbies you created or had accepted, not only those still waiting for your accept", "the Referee posts that each is off, as after a decline", "Matches already running still play out on their clocks", "leaving itself still posts nothing", "MCP catalog 1.38.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
 });
 
-// The agent key (routes/agent.ts, docs.txt AGENT KEYS): listed third,
-// below the same day's keys a person makes and leave through a key, it says in plain words what it is, the address and
+// The agent key (routes/agent.ts, docs.txt AGENT KEYS): listed fourth,
+// below the next day's sign-in and the same day's keys a person makes and leave through a key, it says in plain words what it is, the address and
 // how the key is sent, the two tools of its own that cover every room, how
 // to make one, and that the rooms still check every call and their own
 // addresses do not change. It quotes no number.
-test("the agent keys' notice is third and says what a key is, how to make one and what stays", () => {
+test("the agent keys' notice is fourth and says what a key is, how to make one and what stays", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-27-agent-keys");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[2].id, n.id, "listed third, below the same day's newer two");
+  assert.equal(NOTICES[3].id, n.id, "listed fourth, below the next day's sign-in and the same day's newer two");
   assert.equal(n.date, "2026-11-27");
   assert.equal(n.until, "2026-12-27");
   assert.ok(n.text.length <= 500, String(n.text.length));
@@ -312,13 +314,13 @@ test("the agent keys' notice is third and says what a key is, how to make one an
 // A person can make an agent key on the home page (routes/agent.ts
 // agentInviteCreateRoute, the web app's Agent keys view), muse_register
 // registers a Muse through a key, and a disconnect turns off the wakes the
-// key set up: listed second, below the same day's leave through a key, it says so in plain words, with
+// key set up: listed third, below the next day's sign-in and the same day's leave through a key, it says so in plain words, with
 // the agent catalog's version as a literal (a dated notice does not change
 // when a constant moves later), the one it came with.
-test("the notice of the keys a person makes is second and says where, how and what a disconnect turns off", () => {
+test("the notice of the keys a person makes is third and says where, how and what a disconnect turns off", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-27-agent-keys-page");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[1].id, n.id, "listed second, below the same day's newer one");
+  assert.equal(NOTICES[2].id, n.id, "listed third, below the next day's sign-in and the same day's newer one");
   assert.equal(n.date, "2026-11-27");
   assert.equal(n.until, "2026-12-27");
   assert.ok(n.text.length <= 500, String(n.text.length));
@@ -328,18 +330,41 @@ test("the notice of the keys a person makes is second and says where, how and wh
 
 // The holder of an agent key can have the agent leave one of its rooms
 // (routes/agent.ts agentLeaveRoute, the web app's Leave this room): the
-// newest notice, listed first, says what it is, that it never deletes a
-// room, and what a later call there answers; no tool changed, so it names no
-// catalog. The API's version moves with it, the same day's fourth.
-test("the notice of a leave through an agent key is first and says what it does, that it never deletes a room, and what the key answers after", () => {
+// newest of its day, listed second, below the next day's sign-in, says what
+// it is, that it never deletes a room, and what a later call there answers;
+// no tool changed, so it names no catalog.
+test("the notice of a leave through an agent key is second and says what it does, that it never deletes a room, and what the key answers after", () => {
   const n = NOTICES.find((x) => x.id === "2026-11-27-agent-keys-leave");
   assert.ok(n, "the notice is there");
-  assert.equal(NOTICES[0].id, n.id, "listed first: the newest");
+  assert.equal(NOTICES[1].id, n.id, "listed second, below the next day's sign-in");
   assert.equal(n.date, "2026-11-27");
   assert.equal(n.until, "2026-12-27");
-  assert.equal(API_VERSION, "2026-11-27.4", "the API's version moves with it, the same day's fourth");
   assert.ok(n.text.length <= 500, String(n.text.length));
   for (const want of ["have the agent leave one of its rooms", "POST /api/agent/rooms/leave {\"room\", \"confirm\"} with the key", "Agent keys, Leave this room", "the agent's own leave, as leave_room does it", "the room then comes off the key", "It never deletes a room", "the last member is refused", "Once it is off the key, a call there through the key answers room_not_held", "No tool changed"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
   assert.ok(!/catalog/i.test(n.text), "no catalog moved");
+  assert.ok(!/user[- ]?agent/i.test(n.text) && !/[?&]invite=/.test(n.text), "no User-Agent, no token in a URL");
+});
+
+// The sign-in (routes/oauth.ts, the sign-in address /api/mcp/signin, docs.txt
+// SIGNING IN) and what a key's take-off and disconnect now do to a Muse wake
+// (a hook keeps who holds it): the newest notice, listed first. It says where
+// an app signs in and where that is written, that a person approves on the
+// site's own page with their own invite, that keys keep their address, that a
+// take-off or a disconnect lets go of the key's hold and when a wake stays,
+// the answers' words, remove_room's description, and the agent catalog's
+// version as a literal (a dated notice does not change when a constant moves
+// later). It says nothing of Muse signing in. The API's version moves with it,
+// the day's first.
+test("the sign-in's notice is first and says where an app signs in, who approves, what stays, and what a key now lets go of", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-28-signin");
+  assert.ok(n, "the notice is there");
+  assert.equal(NOTICES[0].id, n.id, "listed first: the newest");
+  assert.equal(n.date, "2026-11-28");
+  assert.equal(n.until, "2026-12-28");
+  assert.equal(API_VERSION, "2026-11-28.1", "the API's version moves with it, the day's first");
+  assert.ok(n.text.length <= 500, String(n.text.length));
+  for (const want of ["Claude and Claude Code can now sign in at /api/mcp/signin", "(SIGNING IN at /api)", "a person approves rooms on Agent Chat's own page", "the site invites the agent with their own invite", "Keys still work at /api/mcp", "Taking a room off a key or disconnecting it now lets go of its Muse wakes", "one stays on while another key or connection of the seat, or the room's token, holds it", "Answers say \"let go\", or \"off\" if the wake went", "remove_room no longer says the seat stays a member", "Agent catalog 1.2.0"]) assert.ok(n.text.includes(want), "the notice lacks " + want);
+  assert.ok(!/turns? off/.test(n.text), "a take-off or a disconnect no longer turns a wake off by itself");
+  assert.ok(!/muse[^.]*sign/i.test(n.text) && !/poppy|well-known/i.test(n.text), "nothing of Muse signing in");
   assert.ok(!/user[- ]?agent/i.test(n.text) && !/[?&]invite=/.test(n.text), "no User-Agent, no token in a URL");
 });

@@ -12,6 +12,8 @@ import { makeSigninWorld, people, signIn, revoke, token, clientAuth, poppyApp, P
 import { AGENT_SWAP_TRIES, OAUTH_QUOTA_ROOM } from "../../worker/limits.ts";
 import { signinDropNote } from "../../worker/agents/onboarding.ts";
 import { resetWarnings } from "../../worker/lib/log.ts";
+import { read } from "./agent-world.mjs";
+import { revokeRoute } from "../../worker/routes/oauth.ts";
 
 const refreshOf = (w, rt, auth, headers) => token(w, { grant_type: "refresh_token", refresh_token: rt, resource: ADDRESS, ...auth }, headers);
 
@@ -41,7 +43,7 @@ test("an access token issued to the client ends itself only; anything else, unkn
   const s = await signIn(w, PUBLIC_APP, pat);
   const auth = { client_id: PUBLIC_APP.client_id };
   const r2 = await refreshOf(w, s.refresh, auth);
-  // another known app's revoke of this sign-in's tokens: 200 {}, nothing changes (RFC 7009 2.2)
+  // another known app's revoke of this sign-in's tokens: a deliberate 200 {}, and nothing changes (its caller holds the token already)
   for (const t of [r2.json.refresh_token, r2.json.access_token]) {
     const r = await revoke(w, { token: t, ...(await clientAuth(P.app, P.es)) });
     assert.deepEqual([r.status, r.json], [200, {}]);
@@ -70,6 +72,8 @@ test("the client authenticates by kind first: an unknown client or a failed asse
     assert.equal(r.headers.get("WWW-Authenticate"), www);
   }
   assert.equal(signins(w).length, 1, "nothing revoked");
+  const get = await read(revokeRoute(w.rc("GET", "/api/oauth/revoke")));
+  assert.deepEqual([get.status, get.json.error, get.headers.get("Allow")], [405, "invalid_request", "POST"]);
   w.harness(OAUTH_QUOTA_ROOM).room.setTestAgentLimits({ per_ip: 3 });
   const full = await revoke(w, { token: s.refresh, ...(await clientAuth(P.app, P.es)) });
   assert.equal(full.status, 429, "the failures counted");
@@ -130,6 +134,45 @@ test("a remainder: the rooms that did not confirm stay on the cut sign-in's wake
       assert.deepEqual(signins(m.w), [], by + ": the sign-in gone");
     } finally {
       m.b.restore();
+    }
+  }
+});
+
+/** a sign-in's slots as its object stores them: each kind, and whether it holds a wrapped key */
+const slotsOf = (w) => { const [id] = signins(w); return w.harness(id).all("SELECT kind, wrapped FROM aks ORDER BY kind").map((r) => [r.kind, r.wrapped !== null]); };
+
+test("a cut sign-in keeps no data key: after a disconnect that leaves wakes behind, or one that ends busy, only the disconnect slot holds a wrapped key (its wake key), and the disconnect is still finished by the refresh token, an access token at revoke, or the disconnect code", async () => {
+  for (const end of ["remainder", "busy"]) {
+    for (const by of ["refresh token", "access token at revoke", "disconnect code"]) {
+      const m = await museSignIn(["lima"]);
+      try {
+        assert.deepEqual(slotsOf(m.w), [["access", true], ["code", false], ["disconnect", true], ["refresh", true]], "before: the access and refresh slots wrap the data key");
+        const back = unreachable(m.w, "lima");
+        assert.deepEqual((await disconnect(m.w, { code: m.s.disconnectCode })).json.wakes_left, ["lima"]);
+        back();
+        if (end === "busy") {
+          // a second disconnect whose every write meets a moved list ends busy
+          const [id] = signins(m.w);
+          const obj = m.w.harness(id).room, realDrop = obj.signinDrop.bind(obj);
+          const stale = async () => ({ ok: false, code: "stale" });
+          obj.signinDrop = (...a) => (a.length > 2 && a[2] !== undefined ? stale() : realDrop(...a));
+          obj.signinRemain = stale;
+          assert.deepEqual((await disconnect(m.w, { code: m.s.disconnectCode })).json.note, signinDropNote(["lima"], true));
+          delete obj.signinDrop;
+          delete obj.signinRemain;
+        }
+        assert.deepEqual(slotsOf(m.w), [["access", false], ["code", false], ["disconnect", true], ["refresh", false]], end + ": no slot opens the room list");
+        let r;
+        if (by === "refresh token") r = await refreshOf(m.w, m.s.refresh, { client_id: PUBLIC_APP.client_id });
+        else if (by === "access token at revoke") r = await revoke(m.w, { token: m.s.access, client_id: PUBLIC_APP.client_id });
+        else r = await disconnect(m.w, { code: m.s.disconnectCode });
+        await Promise.all(m.w.pending);
+        assert.ok(r.status === 200 || r.status === 400, by + ": " + r.text);
+        assert.equal(hookOf(m.w, "lima"), null, end + ", " + by + ": the remainder finished");
+        assert.deepEqual(signins(m.w), [], end + ", " + by + ": the sign-in gone");
+      } finally {
+        m.b.restore();
+      }
     }
   }
 });

@@ -48,7 +48,7 @@ test("each document exactly as published, byte for byte, cached an hour and open
     assert.deepEqual([h.status, h.text, h.headers.get("Cache-Control")], [200, "", "public, max-age=3600"], path + " HEAD");
     for (const m of ["POST", "PUT", "DELETE"]) {
       const x = await document(w, path, m);
-      assert.deepEqual([x.status, x.json], [405, { error: "Method not allowed" }], path + " " + m);
+      assert.deepEqual([x.status, x.json, x.headers.get("Allow")], [405, { error: "Method not allowed" }, "GET, HEAD"], path + " " + m);
     }
   }
   // nothing of the request reaches a document: a cookie, a credential and a query change nothing

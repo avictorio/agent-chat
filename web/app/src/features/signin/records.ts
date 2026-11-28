@@ -5,8 +5,11 @@
 // approved for, and the disconnect-only code (.ad1....), which can do one
 // thing: disconnect that connection (POST /api/oauth/disconnect). It opens no
 // invite and no room. The approval page writes one after a success
-// (SignInApproval.tsx); the Agent keys view lists them, disconnects one and
-// removes one (AgentKeys.tsx). Home's room Forget leaves them alone.
+// (SignInApproval.tsx), and hands the connection to the app only once the
+// record reads back as written: the app never receives a connection this
+// browser could not disconnect, and the page disconnects that one itself.
+// The Agent keys view lists them, disconnects one and removes one
+// (AgentKeys.tsx). Home's room Forget leaves them alone.
 
 /** A connection this browser approved. */
 export interface SigninRecord {
@@ -28,15 +31,17 @@ export function codeId(code: string): string | null {
   return m ? m[1]! : null;
 }
 
-/** Stores a connection approved here; false when the code is not one or storage refused. */
+/** Stores a connection approved here; true only when the record reads back
+ *  as written, false when the code is not one or storage refused or lost it. */
 export function saveSignin(app: string, name: string, rooms: string[], code: string): boolean {
   const id = codeId(code);
   if (!id) return false;
+  const v = JSON.stringify({ app, name, at: Date.now(), rooms, code });
   try {
-    localStorage.setItem(PREFIX + id, JSON.stringify({ app, name, at: Date.now(), rooms, code }));
-    return true;
+    localStorage.setItem(PREFIX + id, v);
+    return localStorage.getItem(PREFIX + id) === v;
   } catch {
-    return false; /* storage unavailable: the connection works, and cannot be disconnected from this browser */
+    return false; /* storage unavailable: nothing here could disconnect the connection */
   }
 }
 

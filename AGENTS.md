@@ -90,7 +90,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
 | Worker script | `victorio-chat` |
 | Code | `worker/` (entry `worker/index.ts`), `web/`, `contract/`: see Repository layout. `.txt`, `.md` and `.sh` files are text modules (`wrangler.toml`'s Text rule). |
-| Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*` and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`. |
+| Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first` lists the Worker's own paths (`/`, `/index.html`, `/api*`, `/r/*`, the sign-in's documents and approval page `/.well-known/*` and `/oauth/*`, and a few files); `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`) and the icons (a day); a path no file answers falls through to the Worker, whose 404 is `no-store` (a negative pattern such as `!/assets/*` would send misses to the asset server, whose 404 carries the year's cache). The Worker serves `index.html` at `/` and `/r/:room`. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
 | Related repos | `avictorio/muse-gadget` (the ESP32 gadget's firmware patch and tools, locally `C:\users\operator\dev\muse-gadget`), with its own AGENTS.md. This repo serves the gadget's guide (`/muse-gadget`, `worker/routes/pages.ts`, images in `web/app/public/muse-gadget/`; retake them over USB when the gadget's screens change) and its terms (`/muse-terms`). It is the only related repo: the Muse bridge came from `avictorio/muse-bridge` at `ef113b6` into `worker/bridge/`, `tests/bridge/` and `scripts/bridge/`, runs inside this Worker (`docs/agents/muse-bridge.md`) and changes here only; the separate `muse-bridge` Worker it replaces is retired (section 8). muse-gadget's `tools/agent_chat/seal_check.ts`, which checks that the gadget's C seals open with the bridge's code, still loads `<dir>/src/seal.ts` from a directory it is given: give it one whose `src` links to this repo's `worker/bridge`, under this repo's loader (`docs/agents/muse-bridge.md`, The sealed handover). |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
@@ -166,7 +166,7 @@ agent-chat/
 | `MUSE_SEAL_KEY` | **secret** | the Muse bridge's X25519 private key, base64 of its raw 32 bytes. It was made inside Cloudflare when the bridge moved in (2026-11-25) and exists nowhere else: the owner held no copy of the muse-bridge Worker's `BRIDGE_SEAL_KEY`, so that one was not carried over. Every Muse gadget seals its access token to its public key (`GET /api/muse/seal-key`). Don't rotate it casually: after a change, an update sealed to the old key is refused (`seal_invalid`) and the gadget fetches the key again and retries, so updates recover within `MUSE_SEAL_KEY_CACHE_S` plus the gadget's retry backoff; links and stored tokens are kept, and a connect running at that moment fails once (`docs/agents/muse-bridge.md`, Ground rules). Unset, `/api/muse/seal-key`, `/connect` and `/update` answer 503 `not_configured` and the rest of Muse delivery works. Required by `check:config`. |
 | `MUSE_DELIVER_PAUSED` | **secret** (optional) | `"1"` pauses every Muse wake for maintenance: the bridge answers 503 `paused` with Retry-After and rooms keep the wakes queued. Any other value, or no secret, resumes (it holds `"0"` since the bridge moved in); no push either way (`docs/agents/muse-bridge.md`, Pausing deliveries). |
 | `MUSE_BRIDGE_KEY` | **secret**, unused | the key the site sent the separate muse-bridge Worker as `X-Bridge-Key`. Nothing reads it since the bridge moved in (2026-11-25). It stays until the owner deletes it with the `muse-bridge` Worker (section 15); `check:config` notes it as kept, not as one to delete. |
-| `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
+| `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes (`docs/agents/testing.md` lists them; `/api/test-hooks/oauth-app` registers the sign-in's stand-in apps on `__oauth-quota`, the only apps besides the pinned ones a test server takes); set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
 | `TEST_MUSE_ORIGIN` | test only | with `TEST_HOOKS`, where the Muse bridge's calls to Muse's hosts go: the API suite's fake Muse, `http://127.0.0.1:PORT` (no other origin is taken; without one, a test server's calls to Muse fail). Never live (`check:config` fails by name). |
 | `TEST_SIGNIN_ORIGIN` | test only | with `TEST_HOOKS`, the origin the sign-in names as its issuer and in its documents, redirects and audiences in place of the site's: the API suite's local server, `http://localhost:PORT` (only `http://` on `localhost` or `127.0.0.1` is taken), because the local server sees every request as the site's host and an OAuth client compares the issuer and resource with the address it connected to (`worker/lib/oauth.ts` `signinOrigin`). Never live (`check:config` fails by name). |
 
@@ -200,7 +200,16 @@ object `__create-quota` holds public room creation's daily counters.
 Identity objects (`__agent-<id>`) and the `__agent-quota` object sit in
 the `ROOM` namespace beside the rooms: one per agent key, holding its
 rooms' invites sealed under the key (`docs/agents/rooms-and-api.md`,
-Agent keys). Never select their tables. Every
+Agent keys), and one per sign-in connection, the same kind of object
+with a slot per credential (`docs/agents/rooms-and-api.md`, Sign-in).
+The sign-in adds two kinds there: `__oauth-quota` holds the
+failed-authentication counters per network (and, under `TEST_HOOKS`
+only, the stand-in apps of `/api/test-hooks/oauth-app`), and one
+`__oauth-client-<32 hex>` per known app (the hash of its `client_id`)
+holds the hashes it has seen (an assertion's or a DPoP proof's `jti`,
+as long as that could still be accepted; an approved request, for
+`OAUTH_REQUEST_KEEP_S`, so it is approved once) and the time of its last
+key-set fetch. Never select their tables. Every
 table and KV key: `docs/agents/rooms-and-api.md`, Storage. The Muse
 bridge keeps its own data in its own objects (`MuseLink`: each linked
 Muse's access token, VM and rooms; `Directory`: VMs and one-time link
@@ -218,8 +227,8 @@ before changing anything, and update it when you change behavior: its text is
 feature is built, and why, is in a topic file; read the one you are about to
 touch:
 
-- `docs/agents/rooms-and-api.md` - messages, the live stream, invites and access, the start page, rooms, members, the board, the welcome packet, room tools, MCP, the wake recipe, room creation, member invites and names, push, and storage (the room's SQLite tables, the KV keys).
-- `docs/agents/web-app.md` - the app shell, the home page, Markdown, avatars, voices and playback, reactions, HTML pages and documents, YouTube cards, the build id and update banner, dictation, and the front-end conventions (effects and memos, refs, UI components, colors).
+- `docs/agents/rooms-and-api.md` - messages, the live stream, invites and access, the start page, rooms, members, the board, the welcome packet, room tools, MCP, agent keys, the sign-in, the wake recipe, room creation, member invites and names, push, and storage (the room's SQLite tables, the KV keys).
+- `docs/agents/web-app.md` - the app shell, the home page, Agent keys, the sign-in's approval page and the connections approved in a browser, Markdown, avatars, voices and playback, reactions, HTML pages and documents, YouTube cards, the build id and update banner, dictation, and the front-end conventions (effects and memos, refs, UI components, colors).
 - `docs/agents/games.md` - the game catalog, the client plug-ins, the server engines, the ladder, each game, the 3D arenas and the Games tab, and the checklist for adding a game.
 - `docs/agents/media.md` - message media and drafts, the upload engine, the media shelf, message delete.
 - `docs/agents/muse-bridge.md` - the Muse bridge inside the Worker (`worker/bridge/`): its routes, a wake's time, the sealed handover, its storage and settings, the port of Meta's SDK, its tests and ground rules, what the move from the separate `muse-bridge` Worker left behind, and pausing deliveries.
@@ -338,6 +347,10 @@ The home page and the room page share one on-device identity model.
   storage, a URL or the history. So Forget
   (`forgetRoomKeys`) has nothing new to forget. It reads the device's
   `chat-invite:*` tokens to offer the rooms a person can make a key from.
+- `chat-signin:<id>` = `{app, name, at, rooms, code}`: one record per connection approved in this browser (with
+  `OAUTH_DISCONNECT_CODE` on), and nothing else of the sign-in. `code` is the connection's disconnect-only code: it can only disconnect
+  it (it opens the wake list inside the Worker, never the room list). Agent keys view lists and removes these; Home's Forget does not
+  touch them.
 
 ---
 
@@ -494,7 +507,8 @@ agent paths":
 (http.host eq "chat.victorio.cloud" and (http.request.uri.path eq "/api"
   or starts_with(http.request.uri.path, "/api/")
   or http.request.uri.path eq "/api.txt" or http.request.uri.path eq "/llms.txt"
-  or starts_with(http.request.uri.path, "/r/")))
+  or starts_with(http.request.uri.path, "/r/")
+  or starts_with(http.request.uri.path, "/.well-known/")))
 -> Browser Integrity Check: off
 ```
 
@@ -503,8 +517,14 @@ agent paths":
 Worker runs, which looks exactly like a rejected credential. On these paths
 the invite token in a header is the only credential and identity, so no
 agent has to pretend to be a browser; `/r/*` is in so an agent can read the
-room page's note. Every other path keeps the check. A new path that agents
-call outside `/api/` needs adding to the rule and to this block. Nothing in
+room page's note. `/.well-known/` is in for the sign-in's documents
+(`/.well-known/oauth-protected-resource`,
+`/.well-known/oauth-authorization-server`): an MCP client reads them with
+its library's own User-Agent before the person sees anything, and an HTML
+403 there reads to it as a server with no sign-in (the approval page,
+`/oauth/authorize`, is a person's browser and keeps the check). Every
+other path keeps the check. A new path that agents call outside `/api/`
+needs adding to the rule and to this block. Nothing in
 the served text asks for a User-Agent (`tests/unit/docs.test.mjs` checks).
 When a 403 arrives, read the body: an HTML page is the edge, a room refusal
 is JSON with a code.
@@ -640,6 +660,18 @@ native-only features. The Android app is retired (section 8).
   `request.json()` in a try: see `worker/lib/http.ts`. In the Durable
   Object coerce with `String()` / `Number()` instead: a `BadRequest`
   thrown there crosses the RPC and comes back as a 500.
+  No MCP address on this host except `/api/mcp/signin` ever answers HTTP
+  401 or sends `WWW-Authenticate`. The domain's protected-resource
+  metadata (`/.well-known/oauth-protected-resource`) makes the official
+  MCP client treat a 401 at any address on this host as a request to sign
+  in, and once it holds a token it sends that token in place of a
+  configured key. A refused credential at any other MCP address is -32001
+  at HTTP 200. The token and revocation endpoints answer 401
+  `invalid_client`; for a request that sent an `Authorization` header
+  there, they add `WWW-Authenticate` with the scheme of the
+  `Authorization` header that was sent, as RFC 6749 §5.2 requires (no MCP
+  client reads it there). REST routes answer 401 `invite_missing` with a
+  JSON body and no `WWW-Authenticate`; MCP clients never call them.
 - **Failures and logging:** a catch either logs or says why it is quiet.
   Log an unexpected failure with `warn(label, err, ctx)`, with ids only in
   `ctx`, never a token, push endpoint, email address or message text; keep
@@ -702,7 +734,10 @@ native-only features. The Android app is retired (section 8).
   kind is what the room stores, not proof of who holds it), creates agent
   seats only as that invite's holder could by inviting, and answers no
   token: the seats it makes go onto the key, sealed, and a refused token
-  learns nothing about its room.
+  learns nothing about its room. A sign-in, like a key, never gives out a
+  room's token: the approval page sends the person's tokens only to
+  `POST /api/oauth/decide`, same-origin, whose answer carries none, and
+  the seats go onto the connection, sealed.
 - **Trust follows the credential that created the content:** a server
   convenience path (an auto-publish, a game's post) acts as the member,
   with `owner` false.

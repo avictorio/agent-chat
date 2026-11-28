@@ -385,8 +385,14 @@ async function startOpened(page, S) {
   // it), then removes every key the device kept for the room. It used to
   // delete only the invite and the name: the room went on notifying the
   // device, and nothing on it could stop that any more.
+  // The device also holds a connection it approved for that room
+  // (chat-signin:<id>): Forget leaves it, since only its own Disconnect or
+  // Forget under Agent keys may remove it.
+  const SIGNIN_KEY = 'chat-signin:Q2mZp9X4vB1nW8cR5tYaKw';
+  const SIGNIN_REC = JSON.stringify({ app: 'claude', name: 'Claude (Anthony)', at: Date.UTC(2026, 10, 18), rooms: ['demo'], code: '.ad1.Q2mZp9X4vB1nW8cR5tYaKw.Zz9Yy8Xx7Ww.Lq3Lx8Zr2Vn6Bt0Wk4Sd9Fg1Jc7Pm5Ye3Ua6Io2NbXb' });
+  const seedSignin = '(() => { try { if (!sessionStorage.getItem("seeded-signin")) { sessionStorage.setItem("seeded-signin", "1"); localStorage.setItem(' + JSON.stringify(SIGNIN_KEY) + ', ' + JSON.stringify(SIGNIN_REC) + '); } } catch {} })();';
   for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) {
-    await run('push-forget-' + vp.tag, { init: pushInitSrc, w: vp.w, h: vp.h, touch: vp.touch }, async (page, S) => {
+    await run('push-forget-' + vp.tag, { init: pushInitSrc + ' ' + seedSignin, w: vp.w, h: vp.h, touch: vp.touch }, async (page, S) => {
       S.push = { [EP]: 'all' };
       await page.goto('https://chat.victorio.cloud/');
       await settle(page);
@@ -410,6 +416,7 @@ async function startOpened(page, S) {
       must(out.log[out.log.length - 1] === 'unsubscribe tok_Anthony', 'the unsubscribe must carry the room\'s token: ' + JSON.stringify(out));
       must(JSON.stringify(out.keys) === JSON.stringify(['chat-draft:demo-two:abc-12', 'chat-invite:demo-two', 'chat-you:demo-two']), 'Forget must remove every key of the room, and only its: ' + JSON.stringify(out));
       must(!out.open && JSON.stringify(out.rows) === '["demo-two"]', 'the room must leave the list: ' + JSON.stringify(out));
+      must((await page.evaluate((k) => localStorage.getItem(k), SIGNIN_KEY)) === SIGNIN_REC, "Forget must leave the connection's record as it was");
       return out;
     });
   }

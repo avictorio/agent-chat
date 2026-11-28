@@ -127,11 +127,12 @@ export async function agentDataKey(id: string, secret: Uint8Array<ArrayBuffer>):
  *  holder its sets are held by in the room (room/muse.ts, mhh), and what its
  *  looks and drops go by (museHolderLook, museHolderDrop); pre: its looks
  *  and drops also count the room's untagged holds as its own (wakes it
- *  records may have been set without its tag). Both are only ever read here
- *  (passed on to the room, observed by, kept on every write: tagsKept), so a
- *  write keeps whatever an entry carries; an entry without a tag is looked
- *  at and dropped by the holds a set without a tag makes (the room's
- *  LEGACY_HOLDS). */
+ *  records may have been set without its tag). muse_register's recording
+ *  write gives an untagged entry its tag (withTag), and a write drops pre
+ *  once the entry records no link (clearPre); every other write keeps what
+ *  an entry carries (tagsKept), and the room is only passed them and
+ *  observed by them. An entry without a tag is looked at and dropped by the
+ *  holds a set without a tag makes (the room's LEGACY_HOLDS). */
 export type AgentEntry = { room: string, token: string, name: string, added: number, state: "held" | "refused", code?: string, at?: number, hooks?: AgentWake[], tag?: string, pre?: true };
 
 /** The check beside keepsWakes (lib/wakes.ts) on every write of a key's
@@ -321,7 +322,7 @@ export function newHolderTag(): string {
  *  tag gets a new one, with pre when it already records a link (those links
  *  were set without a tag, so the room holds them as "pre"); an entry with a
  *  tag keeps it. muse_register's recording write calls it, the only write
- *  that tags an entry made before tags were: two registrations racing on one
+ *  that tags an entry that has no tag: two registrations racing on one
  *  untagged entry each propose a tag, the compare-and-set lets one write,
  *  and the other reads the list again and keeps the tag it finds. */
 export function withTag(rooms: AgentEntry[], room: string, token: string): AgentEntry[] {

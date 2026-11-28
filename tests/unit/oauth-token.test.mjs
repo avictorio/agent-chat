@@ -13,8 +13,8 @@ import {
   makeSigninWorld, people, signIn, token, clientAuth, assertion, dpopProof, keyPair, poppyApp, pkce, authzQuery, decide, jws, newJti,
   PUBLIC_APP, ORIGIN, ADDRESS, signins, signin, toolCall,
 } from "./signin-world.mjs";
-import { OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_IDLE_DAYS, OAUTH_QUOTA_ROOM, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
-import { forgetKeySets } from "../../worker/lib/oauth.ts";
+import { OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_CODE_TTL_S, OAUTH_IDLE_DAYS, OAUTH_KEYSET_TTL_MAX_S, OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
+import { forgetKeySets, jwkThumbprint } from "../../worker/lib/oauth.ts";
 import { resetWarnings } from "../../worker/lib/log.ts";
 
 const URN = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -40,6 +40,12 @@ async function poppyCode(opts = {}) {
 const exchange = (c, auth, extra = {}, headers = {}) => token(c.w, { grant_type: "authorization_code", code: c.code, code_verifier: c.verifier, redirect_uri: c.redirect, resource: ADDRESS, ...auth, ...extra }, headers);
 const asserted = async (c, pair, claims, header, opts) => ({ client_assertion_type: URN, client_assertion: await assertion(c.app, pair, claims, header, opts) });
 const refreshOf = (w, app, rt, auth, extra = {}, headers = {}) => token(w, { grant_type: "refresh_token", refresh_token: rt, resource: ADDRESS, ...auth, ...extra }, headers);
+/** f run with the clock (Date.now) moved ms ahead, as every object and route reads it */
+async function later(ms, f) {
+  const real = Date.now;
+  Date.now = () => real() + ms;
+  try { return await f(); } finally { Date.now = real; }
+}
 
 test("every answer: CORS_OAUTH, no-store and Pragma: no-cache; a 401 invalid_client names the scheme of the Authorization header sent, and none when none was sent; the header is never read as a credential", async () => {
   const w = makeSigninWorld();
@@ -64,13 +70,14 @@ test("every answer: CORS_OAUTH, no-store and Pragma: no-cache; a 401 invalid_cli
   assert.equal(r.headers.get("WWW-Authenticate"), null);
 });
 
-test("the order of the checks: the method, the failed-authentication limit, the client, its authentication, DPoP, then the grant", async () => {
+test("the order of the checks: the method, the client, its authentication (the failed-authentication limit just before a signed assertion's check), DPoP, then the grant", async () => {
   const c = await poppyCode();
   const w = c.w;
   // a method other than POST
   const { read } = await import("./agent-world.mjs");
   const { tokenRoute } = await import("../../worker/routes/oauth.ts");
-  assert.equal((await read(tokenRoute(w.rc("GET", "/api/oauth/token")))).status, 405);
+  const get = await read(tokenRoute(w.rc("GET", "/api/oauth/token")));
+  assert.deepEqual([get.status, get.headers.get("Allow")], [405, "POST"]);
   // an unknown client beats a bad proof and an unknown grant
   let r = await token(w, { client_id: "https://nobody.example/c", grant_type: "nope" }, { DPoP: "bad" });
   assert.deepEqual([r.status, r.json.error], [401, "invalid_client"]);
@@ -82,16 +89,23 @@ test("the order of the checks: the method, the failed-authentication limit, the 
   assert.deepEqual([r.status, r.json.error], [400, "invalid_dpop_proof"]);
   r = await token(w, { grant_type: "nope", ...(await asserted(c, c.es)) });
   assert.deepEqual([r.status, r.json.error], [400, "unsupported_grant_type"]);
+  // no grant named: a missing parameter (RFC 6749 5.2)
+  r = await token(w, { ...(await asserted(c, c.es)) });
+  assert.deepEqual([r.status, r.json.error], [400, "invalid_request"]);
   // a parameter sent twice, and a body too large
   r = await token(w, { grant_type: ["authorization_code", "authorization_code"], ...(await asserted(c, c.es)) });
   assert.deepEqual([r.status, r.json.error], [400, "invalid_request"]);
   r = await token(w, { grant_type: "authorization_code", pad: "x".repeat(9000) });
   assert.deepEqual([r.status, r.json.error], [413, "invalid_request"]);
-  // the limit beats everything after the method: full, a good request is 429
+  // the limit, full, stops a signed assertion's check: a good one is 429, before its proof and its grant
   w.harness(OAUTH_QUOTA_ROOM).room.setTestAgentLimits({ per_ip: 1 });
   const net = { "CF-Connecting-IP": "10.50.0.1" };
   r = await token(w, { client_id: "https://nobody.example/c", grant_type: "authorization_code" }, net);
   assert.equal(r.status, 401, "the one failure the counter takes");
+  r = await token(w, { client_id: "https://nobody.example/c", grant_type: "authorization_code" }, net);
+  assert.deepEqual([r.status, r.json.error], [401, "invalid_client"], "an unknown client is never refused by the counter");
+  r = await token(w, { grant_type: "nope", ...(await asserted(c, c.es)) }, { DPoP: "bad", ...net });
+  assert.deepEqual([r.status, r.json.error], [429, "slow_down"], "before the proof and the grant");
   r = await exchange(c, await asserted(c, c.es), {}, net);
   assert.deepEqual([r.status, r.json], [429, { error: "slow_down", error_description: "Too many failed attempts from this network; try again later." }]);
   assert.ok(Number(r.headers.get("Retry-After")) > 0);
@@ -100,13 +114,41 @@ test("the order of the checks: the method, the failed-authentication limit, the 
   assert.equal((await exchange(c, await asserted(c, c.es), {}, net)).status, 200, "the limit cleared, the same code redeems");
 });
 
-test("the failed-authentication limit counts failures only, per network, OAUTH_AUTH_FAILS_PER_IP of them", async () => {
-  const w = makeSigninWorld();
+test("the failed-authentication limit: OAUTH_AUTH_FAILS_PER_IP failures per network, each counted; full, it refuses a signed assertion's check (429 slow_down with Retry-After) and never a public client's or an unknown client's request", async () => {
+  const P = await poppyApp();
+  const w = makeSigninWorld([PUBLIC_APP, P.app]);
   const pat = people(w, ["lima"]);
   const s = await signIn(w, PUBLIC_APP, pat);
+  const s2 = await signIn(w, PUBLIC_APP, pat, { name: "Scout2" });
   for (let i = 0; i < OAUTH_AUTH_FAILS_PER_IP; i++) assert.equal((await token(w, { client_id: "https://nobody.example/c", grant_type: "refresh_token" })).status, 401);
-  assert.equal((await refreshOf(w, PUBLIC_APP, s.refresh, { client_id: PUBLIC_APP.client_id })).status, 429);
-  assert.equal((await refreshOf(w, PUBLIC_APP, s.refresh, { client_id: PUBLIC_APP.client_id }, {}, { "CF-Connecting-IP": "10.99.0.1" })).status, 200, "another network");
+  // a public client's refresh and revoke from that network: answered
+  assert.equal((await refreshOf(w, PUBLIC_APP, s.refresh, { client_id: PUBLIC_APP.client_id })).status, 200, "a public refresh");
+  const { revoke } = await import("./signin-world.mjs");
+  const rv = await revoke(w, { token: s2.refresh, client_id: PUBLIC_APP.client_id });
+  assert.deepEqual([rv.status, rv.json], [200, {}], "a public revoke");
+  assert.deepEqual((await token(w, { client_id: "https://nobody.example/c", grant_type: "refresh_token" })).json, { error: "invalid_client" }, "an unknown client: 401, not 429");
+  // a signed assertion from it: refused before its check
+  const r = await token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", ...(await clientAuth(P.app, P.es)) });
+  assert.deepEqual([r.status, r.json.error], [429, "slow_down"]);
+  assert.ok(Number(r.headers.get("Retry-After")) > 0);
+  const other = await token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", ...(await clientAuth(P.app, P.es)) }, { "CF-Connecting-IP": "10.99.0.1" });
+  assert.deepEqual([other.status, other.json.error], [400, "invalid_grant"], "another network: the assertion checked and accepted");
+});
+
+test("a parameter sent without a value is treated as omitted (RFC 6749 3.1): an empty scope at a refresh, an empty resource at the exchange, an empty client_secret from a public client, which is no failure either", async () => {
+  const P = await poppyApp();
+  const w = makeSigninWorld([PUBLIC_APP, P.app]);
+  const pat = people(w, ["lima"]);
+  const s = await signIn(w, PUBLIC_APP, pat, { resource: null, tokenResource: "" });
+  assert.equal(s.token.status, 200, "resource= at the exchange is no resource: the default token, for a request that named none: " + s.token.text);
+  let r = await refreshOf(w, PUBLIC_APP, s.refresh, { client_id: PUBLIC_APP.client_id }, { scope: "", resource: null });
+  assert.equal(r.status, 200, "scope= is no scope: " + r.text);
+  for (let i = 0; i <= OAUTH_AUTH_FAILS_PER_IP; i++) {
+    r = await refreshOf(w, PUBLIC_APP, r.json.refresh_token, { client_id: PUBLIC_APP.client_id, client_secret: "" }, { resource: null });
+    assert.equal(r.status, 200, "client_secret= is no secret: " + r.text);
+  }
+  const a = await token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", ...(await clientAuth(P.app, P.es)) });
+  assert.deepEqual([a.status, a.json.error], [400, "invalid_grant"], "none of those counted as a failure: an assertion from that network is still checked");
 });
 
 test("a public client: neither client_assertion nor client_secret may be sent", async () => {
@@ -201,14 +243,14 @@ test("a key set: a key without a kid is skipped and logged once; the refetch gat
   const real = globalThis.fetch;
   const asked = [];
   let serve = null;
-  globalThis.fetch = async (url, init) => { asked.push([String(url), init.redirect, init.credentials]); return new Response(JSON.stringify(serve), { status: 200, headers: { "Cache-Control": "max-age=600" } }); };
+  globalThis.fetch = async (url, init) => { asked.push([String(url), init.redirect, "credentials" in init]); return new Response(JSON.stringify(serve), { status: 200, headers: { "Cache-Control": "max-age=600" } }); };
   try {
     const uri = "http://127.0.0.1:9/jwks.json";
     const c = await poppyCode({ app: { key: "remote", client_id: "https://remote.example/c", jwks: undefined, jwks_uri: uri } });
     serve = { keys: [c.es.jwk] };
     let r = await exchange(c, await asserted(c, c.es));
     assert.equal(r.status, 200, "the first fetch: granted (nothing kept yet): " + r.text);
-    assert.deepEqual(asked, [[uri, "manual", "omit"]]);
+    assert.deepEqual(asked, [[uri, "manual", false]], "no redirects followed, and no credentials field (a Worker's fetch sends no cookie)");
     const fresh = await keyPair("ES256", "es-2");
     serve = { keys: [c.es.jwk, fresh.jwk] };
     // a kid this isolate does not hold, within the window: the gate (the app's store, site-wide) is closed
@@ -229,6 +271,92 @@ test("a key set: a key without a kid is skipped and logged once; the refetch gat
     globalThis.fetch = real;
     forgetKeySets();
   }
+});
+
+test("a key set's time: once it is up the set is a miss, so a key the app removed stops working at the next fetch; the last set serves while the gate refuses or the fetch fails, never past its time plus OAUTH_KEYSET_TTL_MAX_S", async () => {
+  const real = globalThis.fetch;
+  let serve = null, fail = false, fetches = 0;
+  globalThis.fetch = async () => { fetches++; return fail ? new Response("down", { status: 500 }) : new Response(JSON.stringify(serve), { status: 200, headers: { "Cache-Control": "max-age=" + OAUTH_KEYSET_TTL_MIN_S } }); };
+  const authed = (r) => r.status === 400 && r.json.error === "invalid_grant";
+  try {
+    for (const end of ["removed", "outage"]) {
+      forgetKeySets();
+      const uri = "http://127.0.0.1:9/" + end + ".json";
+      const c = await poppyCode({ app: { key: "remote-" + end, client_id: "https://remote.example/" + end, jwks: undefined, jwks_uri: uri } });
+      const k2 = await keyPair("ES256", "es-2");
+      serve = { keys: [c.es.jwk] };
+      fail = false;
+      fetches = 0;
+      assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), end + ": the key fetched and taken");
+      const store = c.w.asked.find((x) => x.method === "clientNote").name;
+      const openGate = () => c.w.harness(store).db.prepare("UPDATE ok SET tried = tried - 31000").run();
+      if (end === "removed") {
+        // the app removes es-1; while the set's time lasts the isolate keeps it, once it is up the next fetch drops it
+        serve = { keys: [k2.jwk] };
+        assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), "within the set's time: kept");
+        await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
+          openGate();
+          const r = await exchange(c, await asserted(c, c.es), { code: "x" });
+          assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], "its time up: fetched again, and the removed key refused");
+          assert.equal(fetches, 2);
+          assert.ok(authed(await exchange(c, await asserted(c, k2), { code: "x" })), "the new key taken");
+        });
+      } else {
+        // the set cannot be fetched: the last one serves within its bound, and not past it
+        fail = true;
+        await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
+          openGate();
+          assert.ok(authed(await exchange(c, await asserted(c, c.es), { code: "x" })), "a failed fetch: the last set, within its bound");
+        });
+        await later((OAUTH_KEYSET_TTL_MIN_S + OAUTH_KEYSET_TTL_MAX_S + 1) * 1000, async () => {
+          openGate();
+          const r = await exchange(c, await asserted(c, c.es), { code: "x" });
+          assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], "an outage past the bound: no set, refused");
+        });
+      }
+    }
+  } finally {
+    globalThis.fetch = real;
+    forgetKeySets();
+  }
+});
+
+test("a code redeemed already: a bare copy (wrong verifier or redirect) ends nothing, within its minute or after; its own client with its redirect and verifier within the minute ends the sign-in; after the minute it is invalid_grant and ends nothing", async () => {
+  for (const when of ["within", "after"]) {
+    const w = makeSigninWorld();
+    const pat = people(w, ["lima"]);
+    const s = await signIn(w, PUBLIC_APP, pat);
+    const redirect = new URLSearchParams(s.query).get("redirect_uri");
+    const again = (extra) => token(w, { grant_type: "authorization_code", code: s.code, code_verifier: s.verifier, redirect_uri: redirect, resource: ADDRESS, client_id: PUBLIC_APP.client_id, ...extra });
+    const run = async (f) => (when === "within" ? f() : later((OAUTH_CODE_TTL_S + 1) * 1000, f));
+    await run(async () => {
+      for (const [what, extra] of [["a wrong verifier", { code_verifier: "v".repeat(43) }], ["a wrong redirect", { redirect_uri: "http://127.0.0.1:9/callback" }], ["no verifier", { code_verifier: undefined }]]) {
+        assert.deepEqual((await again(extra)).json, { error: "invalid_grant" }, when + ", " + what);
+        assert.equal(signins(w).length, 1, when + ", " + what + ": nothing ended");
+      }
+      const r = await again({});
+      assert.deepEqual(r.json, { error: "invalid_grant" }, when + ": its own client, redirect and verifier");
+      assert.equal(signins(w).length, when === "within" ? 0 : 1, when === "within" ? "within the minute: a reuse, the sign-in ended" : "after the minute: unknown, nothing ended");
+    });
+  }
+});
+
+test("an assertion's jti is kept for as long as the assertion is accepted: a replay just before its exp and the skew is refused", async () => {
+  const c = await poppyCode();
+  const t = nowS();
+  const a = await asserted(c, c.es, { iat: t + 29, exp: t + 29 + 300 });
+  assert.equal((await exchange(c, a, { code: "x" })).json.error, "invalid_grant", "the first use authenticates");
+  assert.equal((await exchange(c, a, { code: "x" })).status, 401, "a replay at once");
+  await later(335 * 1000, async () => {
+    const r = await exchange(c, a, { code: "x" });
+    assert.deepEqual([r.status, r.json], [401, { error: "invalid_client" }], "a replay 335 s later, the assertion still within its exp and the skew");
+  });
+});
+
+test("a key's thumbprint (RFC 7638), as dpop_jkt names it: the members in their order, on the published examples", async () => {
+  assert.equal(await jwkThumbprint({ kty: "EC", x: "l8tFrhx-34tV3hRICRDY9zCkDlpBhF42UQUfWVAWBFs", y: "9VE4jf_Ok_o64zbTTlcuNJajHmt6v9TDVrU0CdvGRDA", crv: "P-256" }), "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I", "RFC 9449's key");
+  const n = "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw";
+  assert.equal(await jwkThumbprint({ kty: "RSA", n, e: "AQAB", alg: "RS256", kid: "2011-04-29" }), "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs", "RFC 7638 3.1's key");
 });
 
 test("the code exchange: PKCE, the redirect, the resource (the default token only where the request named the domain or none), a code once; tokens with the scope always stated", async () => {
@@ -252,6 +380,7 @@ test("the code exchange: PKCE, the redirect, the resource (the default token onl
   assert.deepEqual((await run({ resource: ADDRESS }, { code_verifier: "x".repeat(43) })).json, { error: "invalid_grant" }, "PKCE");
   assert.deepEqual((await run({ resource: ADDRESS }, { code_verifier: undefined })).json, { error: "invalid_grant" }, "no verifier");
   assert.deepEqual((await run({ resource: ADDRESS }, { redirect_uri: "http://127.0.0.1:9/callback" })).json, { error: "invalid_grant" }, "another port: the redirect exactly as sent");
+  assert.deepEqual((await run({ resource: ADDRESS }, { redirect_uri: undefined })).json, { error: "invalid_grant" }, "no redirect_uri: the one the request named is required");
   assert.deepEqual((await run({ resource: ADDRESS }, {})).json, { error: "invalid_target" }, "no resource: the default token, which a request that named only the address cannot get");
   assert.equal((await run({ resource: ORIGIN }, {})).status, 200, "the default token, for a request that named the domain");
   assert.equal((await run({}, {})).status, 200, "the default token, for a request that named none");
@@ -428,7 +557,6 @@ test("DPoP: a grace repeat on a bound family gets the same pair only to a proof 
 });
 
 test("DPoP: dpop_jkt binds the code to that key (another key's proof, or none, is invalid_grant); dpop_always refuses a request with no proof; a client that never sends one signs in", async () => {
-  const { jwkThumbprint } = await import("../../worker/lib/oauth.ts");
   const key = await keyPair("ES256");
   const jkt = await jwkThumbprint(key.jwk);
   for (const [what, proof, ok] of [["the key", key, true], ["another key", await keyPair("ES256"), false], ["none", null, false]]) {

@@ -87,7 +87,7 @@ test("an agent key, a room's invite token, another dot form: 200; ping, initiali
   assert.equal(signinWrongInvite(ORIGIN), "A room's invite token works at that room's own address, " + ORIGIN + "/api/rooms/ROOM/mcp.");
   // a method other than POST, with CORS_SIGNIN
   const get = await read(signinMcpRoute(w.rc("GET", "/api/mcp/signin")));
-  assert.equal(get.status, 405);
+  assert.deepEqual([get.status, get.headers.get("Allow")], [405, "POST"]);
   assert.match(get.headers.get("Access-Control-Expose-Headers"), /WWW-Authenticate/);
 });
 

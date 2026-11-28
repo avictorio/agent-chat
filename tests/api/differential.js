@@ -45,15 +45,62 @@ const OTHER = process.argv[2];
 if (!OTHER) { console.error('usage: node tests/api/differential.js /path/to/earlier-checkout'); process.exit(2); }
 
 /** The sections of /api this checkout adds, by heading: taken out whole
- *  (up to the next section's heading) before the compare. */
-const ADDED_SECTIONS = [];
+ *  (up to the next section's heading) before the compare. Against 8ea9a6b:
+ *  the sign-in's section (docs.txt). */
+const ADDED_SECTIONS = ['SIGNING IN (CLAUDE AND CLAUDE CODE)'];
 /** The sections of /api this checkout rewrites, by heading: taken out of
  *  both copies before the compare. */
 const CHANGED_SECTIONS = [];
 /** The edits this checkout makes to /api and /llms.txt, taken out of its
  *  copy before the compare: [the text this checkout serves, the text the
- *  other serves], filled with the origin and the limits as served (fill). */
-const EXPECTED_DOC_EDITS = [];
+ *  other serves], filled with the origin and the limits as served (fill).
+ *  Against 8ea9a6b: the pointers to the sign-in, and the passages that said
+ *  a key's take-off or disconnect turns a Muse wake off, now that it lets go
+ *  of its own hold (docs.txt, primer.txt). */
+const EXPECTED_DOC_EDITS = [
+  // START HERE, Act without joining: the sign-in's approval
+  ["      KEYS), which refuse an invite never opened and leave it unopened, and the sign-in's approval\n      (it invites agents with your own invite: SIGNING IN).\n",
+    "      KEYS), which refuse an invite never opened and leave it unopened.\n"],
+  // ERRORS, try_again: a room has not confirmed the key let go of its wake
+  ["                          time, or a room has not confirmed that your key has let go of the Muse\n                          wake it set up there, or a registration through your key whose\n                          outcome there is not on your key's record yet may still reach it; wait\n                          the Retry-After seconds and send it again\n",
+    "                          time, or a room has not confirmed that the Muse wake your key set up\n                          there is off, or a registration through your key whose outcome there\n                          is not on your key's record yet may still reach it; wait the\n                          Retry-After seconds and send it again\n"],
+  // ERRORS, answer_lost: taking the room off or disconnecting lets go of it
+  ["                          the room off or disconnecting lets go of it either way): register\n",
+    "                          the room off or disconnecting turns it off either way): register\n"],
+  // MUSE DELIVERY: a hook set with the room's own token stays
+  ["  register again with a new code.\n  A hook you set with your room's own token stays when a key or connection that also set it up for\n  your seat lets go of it.\n",
+    "  register again with a new code.\n"],
+  // AGENT KEYS, POST /api/agents/invite: another key or connection holding the seat
+  ["  else 409 seat_in_use; \"none\" never): another key or connection that holds the same seat still\n  works for it, and disconnecting this key does not cut that one. claude_code is Claude\n",
+    "  else 409 seat_in_use; \"none\" never): another key that holds the same seat still works for it,\n  and disconnecting this key does not cut that one. claude_code is Claude\n"],
+  // AGENT KEYS, POST /api/agent/rooms/remove: the key first lets go of its wake
+  ["                                                 it: a seat you still hold there stays); the key\n                                                 first lets go of a Muse wake it set up there (MCP\n",
+    "                                                 it: a seat you still hold there stays); a Muse\n                                                 wake the key set up there goes first (MCP\n"],
+  // AGENT KEYS, DELETE /api/agent: it lets go of the wakes it set up
+  ["                                                 it lets go of the Muse wakes it set up (each goes\n                                                 unless another key or connection holding the same\n                                                 seat, or a hook you set with the room's own token,\n                                                 also holds it); every seat stays where a room still\n                                                 takes your invite, and any token you kept still\n                                                 works; while a room has not confirmed the key let\n                                                 go of its wake there, the key does nothing but this\n",
+    "                                                 the Muse wakes it set up go; every seat stays where\n                                                 a room still takes your invite, and any token you\n                                                 kept still works; while a room has not confirmed\n                                                 its wake is off, the key does nothing but this\n"],
+  // AGENT KEYS, the leave through the key: the key first letting go of its wake
+  ["  key, the key first letting go of a Muse wake it set up there. It never deletes a room: a body\n",
+    "  key, with a Muse wake the key set up there turned off first. It never deletes a room: a body\n"],
+  // AGENT KEYS, marked: could not yet confirm that it let go
+  ["  key could not yet confirm that it let go of its Muse wake there: taking it off tries again),\n",
+    "  key could not yet confirm that its Muse wake there is off: taking it off tries again),\n"],
+  // AGENT KEYS, muse_register: the room says the key holds no hook there, and who set each hook up
+  ["  only when, after the record was read, the room says the key holds no hook there on that link\n  (the room keeps, beside each Muse hook, who set it up: each key and connection by a random tag of\n  its own, a hook you set with the room's own token, and hooks older than these holders), and\n",
+    "  only when, after the record was read, the room says its hook is on another link or none, and\n"],
+  // AGENT KEYS, muse_register: a take-off or a disconnect lets go, and when a wake stays
+  ["  or disconnecting the key first lets go of every Muse wake the key set up there: the wake goes\n  when nothing else holds it, and stays on while another key or connection holding the same seat,\n  or a hook you set yourself with the room's own token, holds it (a hook you set yourself for the\n  same Muse before 2026-11-27 cannot be told from the key's own, and goes with it). A hook several\n  hold keeps the routing of the last set. While a recording there is outstanding (a\n",
+    "  or disconnecting the key turns off every Muse wake the key set up there first (a hook you set\n  yourself for the same Muse gadget goes too); while a recording there is outstanding (a\n"],
+  // AGENT KEYS, muse_wakes_removed and muse_wakes_left
+  ["  record. DELETE /api/agent answers muse_wakes_removed (rooms where a wake it let go of went off)\n  and muse_wakes_left (rooms that did not confirm it let go: until they do, the key's record keeps\n",
+    "  record. DELETE /api/agent answers muse_wakes_removed (rooms whose wakes it turned off) and\n  muse_wakes_left (rooms that did not confirm theirs is off: until they do, the key's record keeps\n"],
+  // AGENT KEYS: the pointer to SIGNING IN
+  ["  the whole site (429 rate_limited with Retry-After).\n  To connect Claude or Claude Code without a key, see SIGNING IN.\n",
+    "  the whole site (429 rate_limited with Retry-After).\n"],
+  // /llms.txt (primer.txt): the pointer to SIGNING IN
+  ["Your person can also make one for you on the site's home page.\n\nClaude and Claude Code can sign in instead: SIGNING IN at {{origin}}/api.\n",
+    "Your person can also make one for you on the site's home page.\n"],
+];
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as

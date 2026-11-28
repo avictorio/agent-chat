@@ -35,6 +35,9 @@ test("same origin only: Sec-Fetch-Site same-origin, or without it Origin the sit
     assert.deepEqual(w.asked.slice(mark), [], what + ": nothing asked");
   }
   assert.equal((await decide(w, b, { Origin: ORIGIN })).status, 200, "Origin the site's, with no Sec-Fetch-Site");
+  const get = await read(decideRoute(w.rc("GET", "/api/oauth/decide")));
+  assert.deepEqual([get.status, get.headers.get("Allow")], [405, "POST"]);
+  noCors(get, "405");
 });
 
 test("the body as personBody reads it: {params, approve, name, rooms, check?} taken; an entries list refused by personBody's check; a decline needs no rooms; too large is 413", async () => {

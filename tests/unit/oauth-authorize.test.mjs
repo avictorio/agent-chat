@@ -52,7 +52,7 @@ test("the headers of every authorize answer: frame-ancestors 'none' beside the s
   assert.deepEqual([head.status, head.text], [200, ""]);
   headersOk(head, "HEAD");
   const post = await authorize(w, authzQuery(PUBLIC_APP, challenge), "POST");
-  assert.deepEqual([post.status, post.text, post.headers.get("Content-Type")], [405, "Method not allowed", "text/plain; charset=utf-8"]);
+  assert.deepEqual([post.status, post.text, post.headers.get("Content-Type"), post.headers.get("Allow")], [405, "Method not allowed", "text/plain; charset=utf-8", "GET, HEAD"]);
   assert.equal(SHELL.includes("frame-ancestors"), false);
 });
 
@@ -151,9 +151,40 @@ test("resource: the sign-in address or the domain, with an upper-case scheme or 
   for (const ok of [ADDRESS, ORIGIN, ORIGIN + "/", "HTTP://LOCALHOST/api/mcp/signin", ADDRESS + "/", "http://Localhost"]) {
     assert.equal((await authorize(w, authzQuery(PUBLIC_APP, challenge, { resource: ok }))).status, 200, ok);
   }
-  for (const bad of [ORIGIN + "/api/mcp", ORIGIN + "/API/MCP/SIGNIN", ADDRESS + "?x=1", ADDRESS + "#f", "http://localhost:8080/api/mcp/signin", "https://localhost/api/mcp/signin", "rooms", ""]) {
+  for (const bad of [ORIGIN + "/api/mcp", ORIGIN + "/API/MCP/SIGNIN", ADDRESS + "?x=1", ADDRESS + "#f", "http://localhost:8080/api/mcp/signin", "https://localhost/api/mcp/signin", "rooms"]) {
     const r = await authorize(w, authzQuery(PUBLIC_APP, challenge, { resource: bad }));
     assert.equal(params(r.headers.get("Location")).error, "invalid_target", bad);
+  }
+});
+
+test("a parameter sent without a value is treated as omitted (RFC 6749 3.1): resource=, dpop_jkt= and scope= pass as absent, state= is echoed as no state, an empty client_id is the unknown app; decide reads the query the same way", async () => {
+  const w = makeSigninWorld();
+  const { challenge } = await pkce();
+  for (const extra of [{ resource: "" }, { dpop_jkt: "" }, { scope: "" }, { resource: ["", ADDRESS] }]) {
+    assert.equal((await authorize(w, authzQuery(PUBLIC_APP, challenge, extra))).status, 200, JSON.stringify(extra));
+  }
+  const r = await authorize(w, authzQuery(PUBLIC_APP, challenge, { state: "", response_type: "token" }));
+  assert.deepEqual(Object.keys(params(r.headers.get("Location"))), ["error", "iss"], "state= is no state: none echoed");
+  assert.ok((await authorize(w, authzQuery(PUBLIC_APP, challenge, { client_id: "" }))).text.includes("<title>Agent Chat: app not known</title>"));
+  // decide: resource= is no resource, so the code is bound to both offered resources
+  const { decide, people, signins } = await import("./signin-world.mjs");
+  const pat = people(w, ["lima"]);
+  const d = await decide(w, { params: authzQuery(PUBLIC_APP, challenge, { resource: "", dpop_jkt: "" }), approve: true, name: "Scout", rooms: [{ room: "lima", inviter_token: pat.lima }] });
+  assert.equal(d.status, 200, d.text);
+  const bind = JSON.parse(w.harness(signins(w)[0]).one("SELECT bind FROM aks WHERE kind = 'code'").bind);
+  assert.deepEqual([bind.resources, bind.jkt], [[ADDRESS, ORIGIN], undefined]);
+});
+
+test("an exact redirect entry matches only itself: a path below it, a query, a fragment or a dot segment after it is the wrong-address page", async () => {
+  const P = await poppyApp();
+  const w = makeSigninWorld([P.app]);
+  const { challenge } = await pkce();
+  const entry = P.app.redirect_uris[0];
+  assert.equal((await authorize(w, authzQuery(P.app, challenge, { redirect_uri: entry }))).status, 200, "the entry itself");
+  for (const near of [entry + "/x", entry + "?y=1", entry + "#f", entry + "/../x"]) {
+    const r = await authorize(w, authzQuery(P.app, challenge, { redirect_uri: near }));
+    assert.deepEqual([r.status, r.headers.get("Location")], [400, null], near);
+    assert.ok(r.text.includes("<title>Agent Chat: sign-in stopped</title>"), near);
   }
 });
 
@@ -214,7 +245,7 @@ test("a pinned app's document is compared in the background, at most once a day 
     });
     assert.deepEqual(lines, [], "the same document: nothing logged");
   }, same);
-  assert.deepEqual(calls.map((c) => [c.url, c.init.redirect, c.init.credentials]), [[claude.client_id, "manual", "omit"]]);
+  assert.deepEqual(calls.map((c) => [c.url, c.init.redirect, "credentials" in c.init]), [[claude.client_id, "manual", false]], "no redirects followed, and no credentials field (a Worker's fetch sends no cookie)");
   calls = await fetched(async () => { await authorize(w, authzQuery(claude, challenge, { redirect_uri: claude.redirect_uris[0] })); await Promise.all(w.pending); }, same);
   assert.deepEqual(calls, [], "once a day per isolate");
   const code = KNOWN_APPS.find((a) => a.key === "claude-code");

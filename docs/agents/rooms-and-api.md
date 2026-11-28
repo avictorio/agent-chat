@@ -925,7 +925,9 @@ docs.txt section that owns its routes, caps and formats.
     (`museHookLook`, or `museDropLook` for one link), and its answer is an
     observation: the room's clock T and the Muse link H the seat's hook is
     on after the call, or none (a room with no row for the token, or gone,
-    is an observation with no hook; an answer with no clock is none); then
+    is an observation with no hook; an answer with no clock is none; H is
+    the link the entry's own holds hold, `link` beside `on`: Muse delivery
+    hooks, The holders); then
     a compare-and-set write from version v takes off each link X != H whose
     outstanding recordings at v all have `deadline + AGENT_WAKE_SKEW_MS <
     T` (an empty list at once), and prunes recordings so expired from the
@@ -985,13 +987,16 @@ docs.txt section that owns its routes, caps and formats.
     `AGENT_SWAP_TRIES` writes that met a changed list, one more cut tells
     which: refused, the record is gone and the answer is the complete
     disconnect; otherwise 503 `try_again` (`dropBusy`), which says the key
-    is disconnected already and that the same DELETE again finishes. Its note says the wakes are off only when none is left, and
+    is disconnected already and that the same DELETE again finishes. Its
+    note says the key has let go of every wake it set up only when none is
+    left (a wake that another key or connection holding the same seat, or
+    a registration with the room's own token, also holds stays on), and
     otherwise names the rooms, says the record keeps them until the same
-    DELETE settles them, and what turns them off (the same DELETE again,
-    that room's own `DELETE .../muse-hook` while the seat is active, or the
-    gadget's Disconnect). A list that does not open is still disconnected,
-    its record deleted (`muse_wakes_left: null`). A registration whose key
-    is cut meanwhile turns off the hooks it set. `remove_room` and `POST
+    DELETE settles them, and what else ends them (that room's own `DELETE
+    .../muse-hook` while the seat is active, or the gadget's Disconnect).
+    A list that does not open is still disconnected, its record deleted
+    (`muse_wakes_left: null`). A registration whose key is cut meanwhile
+    lets go of the holds it set. `remove_room` and `POST
     /api/agent/rooms/remove`, and an add that puts a refused room back with
     another invite (`add_room`, `POST /api/agent/rooms`, `POST
     /api/agent/rooms/invite`, which does it in a settling write of its own
@@ -999,9 +1004,12 @@ docs.txt section that owns its routes, caps and formats.
     every link of it leaves on the room's observation; a room that does
     not let them stays on the key with its wake as it was
     (`try_again`). A wake counts as the
-    key's only while the room's hook is a Muse hook on a recorded link: a
-    hook the agent set with the room's own token on another link stays (on
-    the same link it cannot be told apart, and goes; docs.txt says so).
+    key's only while the room's hook is a Muse hook on a recorded link held
+    by the entry's holds: a take-off or a disconnect lets go of that hold,
+    and the hook goes only when no other holder is left
+    (`muse_wake_removed` and `muse_wakes_removed` name a room only where it
+    went). A hook the agent set with the room's own token stays, on any
+    link, but for one set before the rooms kept holders (docs.txt says so).
     `muse_wake` says the key records a wake it set up, not that one is on:
     the room's hook may have been replaced since. The link id is in no
     answer.
@@ -1014,6 +1022,172 @@ docs.txt section that owns its routes, caps and formats.
     its own address, and so does `leaveAfter` (`leave.clone`, `{room}`)
     after a leave through the key, as on the room's own leave route.
 
+- **Sign-in.** API: docs.txt SIGNING IN. Claude's apps (claude.ai,
+  desktop, mobile) and Claude Code connect without a key: an OAuth
+  authorization server for known apps (`worker/routes/oauth.ts`; the token
+  forms, the known apps and the checks in `worker/lib/oauth.ts`) whose
+  sign-ins are identities of the agent key's kind, and an MCP address of
+  their own, `POST /api/mcp/signin` (`signinMcpRoute`,
+  `worker/routes/agent.ts`). The person approves on this site's own page,
+  in the browser that holds their rooms (`docs/agents/web-app.md`, The
+  sign-in's approval page), and the site makes the agent's seats with
+  their own invites, exactly as the person's way of making a key does, and
+  puts each on the sign-in at once, sealed: no answer carries a room's
+  token, and holding a room never joins it.
+  - **The issuer** is the constant `SITE_ORIGIN` (`worker/limits.ts`),
+    never a request's `Host`; under `TEST_HOOKS`, `TEST_SIGNIN_ORIGIN`
+    stands in for it (`signinOrigin`), since a local server sees every
+    request as the site's host. The documents
+    (`/.well-known/oauth-protected-resource`, the same with
+    `/api/mcp/signin` after it, and
+    `/.well-known/oauth-authorization-server`, `wellKnownRoute`) name it,
+    the sign-in address as the resource, and the endpoints.
+  - **Known apps only.** `KNOWN_APPS` pins each app by its `client_id`
+    (the address of its client document), its redirect addresses, its kind
+    (`public`: no client authentication, as Claude's two are; `poppy`: a
+    signed client assertion) and the warning the page shows. Any other
+    `client_id` gets a fixed page saying the app is not known, and
+    nothing is shared. An app is added by the site's owner after checking
+    its document and the host it is served from; a pinned app's document
+    is compared with what was pinned at most once a day per isolate, in
+    the background, a difference only logged (`compareDocument`, never
+    under `TEST_HOOKS`, so a test server asks no outside host). Under
+    `TEST_HOOKS` the API suite registers stand-in apps on `__oauth-quota`
+    (`/api/test-hooks/oauth-app`), each with its key set inline or on the
+    test's own server.
+  - **The identity** is an `__agent-<id>` object, guarded as a key's,
+    whose list of rooms is sealed the same way and written through the
+    same compare-and-set (`rewrite`, with `keepsWakes` and `tagsKept`) by a
+    credential of its own (`signinCred`, beside the key's `keyCred`). `ak`
+    fills the columns a key leaves empty: `client` (the app's
+    `client_id`, in clear), `wakes` (a second sealed copy of the Muse wake
+    record, under a wake key of its own, holding room names, holder tags
+    and recorded links, never a token) and `cut`. Each credential is a
+    slot of `aks`, of kind `code`, `access`, `refresh` or `disconnect`,
+    with its verifier, the data key wrapped under it (never for the
+    disconnect slot), `expires`, `used`, `bind` (in clear: the client, the
+    redirect, the PKCE challenge, the resources, a DPoP key's thumbprint,
+    and the wake key wrapped) and `next` (a spent refresh token's pair,
+    sealed, for the grace). Tokens are `.oc1.` (code), `.ao1.` (access),
+    `.ar1.` (refresh) and `.ad1.` (disconnect-only), each followed by the
+    identity's id, the slot's name and its secret
+    (`<id22>.<slot11>.<secret43>`); `agentCredential` answers `bad` for
+    every one of them, so the key's routes and `/api/mcp` refuse them as
+    they refuse a mistyped key. A code lives `OAUTH_CODE_TTL_S`, once; an
+    access token `OAUTH_ACCESS_TTL_S`, at most `OAUTH_ACCESS_LIVE_MAX` kept
+    per sign-in; a refresh token rotates on every use, a repeat within
+    `OAUTH_REFRESH_GRACE_S` getting the same pair; a sign-in with no
+    refresh for `OAUTH_IDLE_DAYS` ends at its next refresh, its seats
+    staying. Expired rows go at the next write.
+  - **`GET /oauth/authorize`** checks the request on one parse of its
+    query (`checkAuthorize`): `client_id` or `redirect_uri` sent twice is
+    the wrong-address page; then every parameter sent without a value is
+    treated as omitted (RFC 6749 3.1, so an empty `client_id` reads as
+    missing); `client_id` a known app (else the unknown-app page),
+    `redirect_uri` exactly one of its own (Claude Code's on `localhost` or
+    `127.0.0.1`, any port, the pinned path; else the wrong-address page);
+    then, by redirect to the app,
+    another parameter but `resource` sent twice, `response_type=code`,
+    PKCE `S256`, a poppy app's scope, each `resource` (the sign-in address
+    or the origin), `dpop_jkt`. Its answers carry `AUTHORIZE_HEADERS`
+    (`worker/routes/pages.ts`). Passing, it serves the app shell, which
+    shows the approval page.
+  - **`POST /api/oauth/decide`** is the page's own call, same-origin only
+    (no CORS), its body capped: `params`, the authorize URL's raw query,
+    checked again exactly as above; `approve: false` answers the deny
+    redirect and makes nothing; with `check: true` the person routes'
+    check (a request approved before is 409 `request_used`, only peeked
+    at); the approval itself reserves the request (one approval per
+    request, remembered `OAUTH_REQUEST_KEEP_S` on the app's object),
+    counts as a key on the creation caps, makes the sign-in empty with its
+    code and disconnect slots, then each seat, made or reused, put on it at
+    once from the code slot. A failure keeps the invites it made, unopened,
+    names them, deletes the sign-in and gives back its places and the
+    request. The answer: the redirect with the code (and `iss`), the
+    disconnect-only code for the page to keep, and the rooms.
+  - **`POST /api/oauth/token`** (a form of at most `OAUTH_FORM_MAX`; every
+    body capped before it is read, and a credential in it opened only once
+    it is in; repeated parameters refused, and one sent without a value
+    treated as omitted, RFC 6749 3.2): the client, a known app, else 401
+    `invalid_client`; its authentication by kind: a public app sends no
+    assertion and no secret (a `client_secret` with a value is a failure;
+    `client_secret=` is omitted, so it is none); a poppy app's assertion is checked
+    against its key set (ES256 or PS384) and its `jti` kept until the
+    assertion's `exp` plus `OAUTH_SKEW_S`, so it is accepted once. Every
+    failure takes a place in the network's counter
+    (`OAUTH_AUTH_FAILS_PER_IP` per `OAUTH_AUTH_FAILS_WINDOW_S` on
+    `__oauth-quota`), and the counter is looked at only for a request that
+    carries an assertion, just before its signature check (429
+    `slow_down` with `Retry-After`): a public or an unknown client is
+    never refused by it, since every Claude user's connector shares a few
+    addresses. A key set kept past its time is a miss: the app's set is
+    fetched again when the site-wide refetch gate allows
+    (`OAUTH_KEYSET_REFETCH_S`, on the app's object), and the stale set
+    serves only while the gate refuses or the fetch fails, never past its
+    time plus `OAUTH_KEYSET_TTL_MAX_S`. A DPoP proof (RFC 9449) is checked
+    when sent; a family is bound to the proof's key when its code exchange
+    carries one (a public family also by its first refresh with one) and
+    then needs it. No `grant_type` is 400 `invalid_request`, another than
+    the two `unsupported_grant_type`. The code grant checks, in order, the
+    code's client, the `redirect_uri` (required, the same as the
+    request's) and the PKCE verifier, and only then treats a code redeemed
+    within its minute as reused, which ends the sign-in: a bare copy of a
+    redeemed code ends nothing, and past its `expires` a used code is
+    unknown. A reused refresh token past the grace, and a refresh after
+    `OAUTH_IDLE_DAYS`, end it too. Answers carry `CORS_OAUTH` and
+    `no-store`; errors are RFC 6749 5.2's, saying nothing about the
+    client.
+  - **`POST /api/oauth/revoke`** (RFC 7009) authenticates the client as
+    the token endpoint does, then: a refresh token of this client, live or
+    spent, ends its sign-in; an access token ends itself; any token of a
+    cut sign-in of this client finishes that disconnect; anything else,
+    another app's token included, changes nothing and is 200 `{}` all the
+    same (a deliberate choice: its caller holds the token already).
+  - **Ending a sign-in** (`signinDisconnect`, every way above and the
+    disconnect-only code) is the key's two steps from the presenting slot:
+    `signinCut`, which also drops every slot's wrapped data key but the
+    disconnect slot's (so no credential of a cut sign-in opens its room
+    list again, and each can still unwrap the wake key and finish), then
+    the wake list opened and its wakes let go of, observed by tag; all
+    settled, the identity is deleted, else the wake list keeps what did
+    not settle, sealed, until a credential of the sign-in is presented at
+    one of those endpoints again. A wake list that does not open deletes
+    the identity at once.
+  - **`POST /api/oauth/disconnect {code}`** is the page's other call,
+    same-origin only, with the disconnect-only code (`.ad1.`): it can do
+    nothing but end that connection. It answers `{disconnected: true,
+    wakes_left, note}` (`wakes_left: null` when the wake list did not
+    open: the connection is deleted all the same) or `{disconnected:
+    false, code: "unknown"}`.
+  - **The sign-in address** decides on `Authorization: Bearer` alone,
+    before any body is read: an access token that opens its sign-in live,
+    not idle and issued for this address is signed in; any other sign-in
+    token is 401 `invalid_token`, no credential 401 `sign_in_required`,
+    each with `WWW-Authenticate` naming this address's metadata; an agent
+    key, a room's invite token or another dot form is 200 with the tools'
+    -32001 `wrong_address`, saying where it works. It is the one MCP
+    address that answers 401 (`AGENTS.md` section 13, Errors). Signed in,
+    `mcpServe` answers as the key's address does, with the sign-in's
+    catalog (`mcpSigninCatalog`: the key's tools but `add_room`, with the
+    descriptions and titles a connection needs swapped in,
+    `MCP_SIGNIN_CATALOG_VERSION`) and instructions (`signinInstructions`);
+    every `tools/call` opens the sign-in again once its body is in. A
+    connection holds exactly the rooms approved: `leave_room` also takes
+    the room off it, and `remove_room` takes off only a refused room.
+    Every answer carries `CORS_SIGNIN`.
+  - **Muse wakes through a sign-in** are the key's record (`hooks`,
+    `worker/lib/wakes.ts`) with every entry tagged from its approval, so
+    the room counts the connection's holds by tag (Muse delivery hooks,
+    The holders), and every swap writes the room list and its wake list
+    together. From the cut on, the disconnect works from the wake list
+    alone, observing and dropping by tag with no room token.
+  - **Logs.** Names, booleans and counts only, never a token, code,
+    verifier, assertion, proof, key, `client_id` value, room or person:
+    `oauth.authorize_unknown`, `oauth.token_watch` (what a watched app
+    sends at the token endpoint), `oauth.keyset`, `oauth.client_changed`,
+    `oauth.reuse`, `oauth.request_reused`, `oauth.idle_end`,
+    `oauth.approve`, `oauth.count`, `oauth.release`, with an error's name
+    at most.
 - **Invite presentation.** An invitee is greeted in the form they will
   use, decided by the invite's `kind`: humans get the web app, agents get
   the note (`agent_onboarding`), which points at their start page. One
@@ -1172,16 +1346,27 @@ docs.txt section that owns its routes, caps and formats.
   the bridge told, the members notified) only when no holder is left,
   otherwise nothing anyone can see changes. `museHookLook` and
   `museDropLook` are an untagged entry's look and drop: they count
-  `LEGACY_HOLDS` (`pre`, the hold every set without a tag makes, and
-  `self`, the room's own registration's) as its own, so they see and take
-  every Muse hook no tagged set has reached. The four answer `on` beside
-  `link`: the link the hook is on whoever holds it. A key's entry may
-  carry a `tag` (and `pre`: its looks and drops also count the untagged
-  holds); the Worker only ever reads it: it passes the tag on to the set
-  (`museRegister`, from the list its recording write wrote), observes by
-  it (`observe`) and keeps it on every write (`tagsKept`, beside
-  `keepsWakes`), so an entry without one is looked at and dropped by the
-  untagged holds. A hook goes only when its last holder lets go, so one
+  `LEGACY_HOLDS`, `pre` alone (the hold every set without a tag makes, and
+  a hook step 10 found with no holder), as its own, so they see and take
+  every Muse hook neither a tagged set nor the member's own registration
+  has reached. `self` is in no identity's holds: a hook the member
+  registered with the room's own token stays through every key's and
+  connection's take-off and disconnect, and goes only by the member's own
+  removal, a revoke, a webhook or a set on another link (one registered
+  before the rooms kept holders got `pre` from step 10, so it cannot be
+  told from a key's own and goes with it; docs.txt says so). The four
+  answer `on` beside `link`: the link the hook is on whoever holds it.
+  Every entry made now is made with a `tag` (a key's creation, a room
+  added, the person's way, a sign-in's approval); an entry made before
+  tags gets one at `muse_register`'s recording write (`withTag`, the only
+  write that tags an untagged entry), with `pre` when it already records a
+  link, since those links were set without a tag, and a write drops `pre`
+  once the entry records no link (`clearPre`). The Worker passes the tag
+  on to the set (`museRegister`, from the list its recording write
+  wrote), observes by it (`observe`) and keeps both on every other write
+  (`tagsKept`, beside `keepsWakes`), so an entry without one, a key's that
+  has registered nothing since, is looked at and dropped by the untagged
+  holds. A hook goes only when its last holder lets go, so one
   identity's take-off or disconnect never turns off a wake another holds;
   a leave or a revoke of the seat, the member's own removal (`DELETE
   .../muse-hook`, `museRemove`), a webhook or a set on another link still
@@ -1562,7 +1747,10 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `mq` | items waiting for a Muse hook (`MqRow`): a number from one room-wide counter (the hook's cursor follows it), the kind, and the frame's data. At most `MUSE_QUEUE_MAX` per hook. Schema step 7. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
-| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`. `DELETE /api/agent` first marks the slot's `kind` `cut` (from then on the key opens nothing but that DELETE); once every Muse wake its list records is off it deletes the identity whole (`deleteAll`), and until then the cut record holds only the entries of the rooms whose wakes did not settle (their tokens and links, sealed), and stays until a DELETE with the same key settles them (the web app's Agent keys view offers that DELETE again, in the page, and when Open refuses the key); nothing else removes a cut record. A person's creation that fails deletes its identity too; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
+| (objects `__agent-<id>`, one per agent key) | tables `ak` (one row: `created`, `ver`, `ring`: the key's rooms with their tokens, sealed, and the link id of each Muse wake the key set up; `client` unused) and `aks` (one row, slot `key`: `verifier`, the data key `wrapped`, `created`; `expires`, `used`, `bind`, `next` unused: an agent key neither expires nor is used once). Made only by `POST /api/agents` and `POST /api/agents/invite`. `DELETE /api/agent` first marks the slot's `kind` `cut` (from then on the key opens nothing but that DELETE); once the key has let go of every Muse wake its list records it deletes the identity whole (`deleteAll`), and until then the cut record holds only the entries of the rooms whose wakes did not settle (their tokens and links, sealed), and stays until a DELETE with the same key settles them (the web app's Agent keys view offers that DELETE again, in the page, and when Open refuses the key); nothing else removes a cut record. A person's creation that fails deletes its identity too; nothing else deletes them. No room name, token or member name is stored in clear (Agent keys). |
+| (objects `__agent-<id>`, one per sign-in) | the same tables, with `ak.client` (the app's `client_id`), `ak.wakes` (the Muse wake record, sealed under the sign-in's wake key) and `ak.cut`, and one `aks` row per credential (`code`, `access`, `refresh`, `disconnect`, with `expires`, `used`, `bind` and `next`: Sign-in). Made only by an approval; deleted by its own failure, or by an ending once every wake settled, or at once when its wake list does not open. |
+| (object `__oauth-quota`, `OAUTH_QUOTA_ROOM`) | table `aq`, with the agent quota's methods: the failed client authentications per network (`net:<hash>`) per `OAUTH_AUTH_FAILS_WINDOW_S`; under `TEST_HOOKS` only, table `oat`: the API suite's stand-in apps (`/api/test-hooks/oauth-app`). |
+| (objects `__oauth-client-<32 hex>`, `OAUTH_CLIENT_PREFIX`, one per known app: the hash of its `client_id`) | table `oj`: the hashes the app has sent (an assertion's `jti`, `a:`, until its `exp` plus `OAUTH_SKEW_S`; a DPoP proof's, `d:`; an approved request, `r:`, for `OAUTH_REQUEST_KEEP_S`), each until its `exp`; table `ok`: the time of the last key-set fetch, the site-wide refetch gate (`clientNote`). |
 | (object `__agent-quota`, `AGENT_QUOTA_ROOM`) | table `aq`: new agent keys' counters, one row per cap key (`net:<hash>:<hour>`, `all:<day>`, `room:<hash>:<day>`) with its window and count; rows of past windows go when the next creation comes in (`agentReserve`); a check only reads them (`agentPeek`). |
 
 ### KV keys (`REQUESTS` namespace)

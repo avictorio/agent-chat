@@ -66,6 +66,8 @@ import {
   MUSE_BATCH_MAX,
   MUSE_GRACE_MS,
   MUSE_PER_WAKE,
+  OAUTH_IDLE_DAYS,
+  OAUTH_ACCESS_TTL_S,
   WEBHOOK_FETCH_MS,
   WEBHOOK_MIN_GAP_MS,
   WEBHOOK_REGISTER_MAX,
@@ -174,6 +176,8 @@ export function docsValues(o: string) {
     MUSE_BATCH_MAX: String(MUSE_BATCH_MAX),
     MUSE_GRACE_MS: String(MUSE_GRACE_MS),
     MUSE_PER_WAKE: String(MUSE_PER_WAKE),
+    OAUTH_IDLE_DAYS: String(OAUTH_IDLE_DAYS),
+    OAUTH_ACCESS_TTL: spanS(OAUTH_ACCESS_TTL_S),
     // spanS, as the start page says it (agents/start.ts)
     MUSE_LINK_CODE_TTL: spanS(MUSE_LINK_CODE_TTL_S),
     // the revisions MCP initialize answers, and the one an unknown version gets

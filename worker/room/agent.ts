@@ -14,8 +14,8 @@
 // one row, the key's slot (its verifier, and the data key wrapped under it);
 // the columns ak.client and aks.expires, used, bind and next are unused
 // (NULL): an agent key neither expires nor is used once. The slot's kind is
-// "key", or "cut" once its key is disconnected while the Muse wakes it set
-// up are being turned off: a cut key opens nothing and swaps nothing, and
+// "key", or "cut" once its key is disconnected while it lets go of the Muse
+// wakes it set up: a cut key opens nothing and swaps nothing, and
 // only its own disconnect reads its list again (agentCut), writes what is
 // left of it (agentRemain) and deletes it (agentDrop). The object compares
 // verifiers and swaps the list on its version, and never sees a secret, a
@@ -325,8 +325,9 @@ export const SigninMethods = {
   /** Opens the sign-in for one of its credentials: the verifier compared in
    *  constant time, the kind one of kinds, and the slot live (a code within
    *  its minute and not redeemed, an access slot not expired, a refresh token
-   *  not spent). spent also returns a redeemed code or a spent refresh token,
-   *  marked spent, to recognise a reuse; grace also returns an access slot
+   *  not spent). spent also returns a code redeemed within its minute (past
+   *  it, a code is unknown) or a spent refresh token, marked spent, to
+   *  recognise a reuse; grace also returns an access slot
    *  that expired at most OAUTH_ACCESS_WRITE_GRACE_S ago (a request that
    *  opened it live: routes/oauth.ts signinCred). A matching slot of a cut
    *  sign-in answers cut, with the app, so an endpoint that ends a sign-in
@@ -340,8 +341,8 @@ export const SigninMethods = {
     const now = Date.now(), s = f.s, o = opts || {};
     let spent = false;
     if (s.kind === "code") {
+      if (Number(s.expires) <= now) return { ok: false };
       if (s.used !== null) { if (!o.spent) return { ok: false }; spent = true; }
-      else if (Number(s.expires) <= now) return { ok: false };
     } else if (s.kind === "refresh") {
       if (s.used !== null) { if (!o.spent) return { ok: false }; spent = true; }
     } else if (s.kind === "access") {
@@ -434,14 +435,19 @@ export const SigninMethods = {
 
   /** The disconnect's first step, from any slot whose verifier matches
    *  (live, spent or redeemed, the disconnect slot included): the sign-in
-   *  marked cut, and its wake list as it stood then, with the wake key as
-   *  this slot wraps it. From then on every open, swap, redeem and refresh is
-   *  refused. A sign-in cut already answers the same to any of its slots, so
-   *  any of its credentials finishes what an earlier disconnect left. */
+   *  marked cut, every slot's wrapped data key deleted in the same step (a
+   *  cut sign-in never opens its room list again, so a copy of its storage
+   *  and a token opens no room token), and its wake list as it stood then,
+   *  with the wake key as this slot wraps it. From then on every open, swap,
+   *  redeem and refresh is refused. A sign-in cut already answers the same
+   *  to any of its slots, so any of its credentials finishes what an earlier
+   *  disconnect left. */
   signinCut(slot: string, verifier: string): { ok: true, ver: number, wakes: string, wkWrapped: string | null } | { ok: false } {
     const f = signinSlot(this.sql, slot, verifier);
     if (!f) return { ok: false };
     this.sql.exec("UPDATE ak SET cut = ? WHERE k = 1 AND cut IS NULL", Date.now());
+    // the disconnect slot's wrapped is the wake key, which every later presentation needs
+    this.sql.exec("UPDATE aks SET wrapped = NULL WHERE kind <> 'disconnect' AND wrapped IS NOT NULL");
     const wk = f.s.kind === "disconnect" ? f.s.wrapped : (() => { const b = bindOf(f.s); return typeof b.wk === "string" ? b.wk : null; })();
     return { ok: true, ver: f.a.ver, wakes: f.a.wakes, wkWrapped: wk };
   },

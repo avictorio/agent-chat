@@ -341,11 +341,11 @@ export const SIGNIN_SCOPE_TEXT = "Join the rooms you choose on Agent Chat's sign
 // A signed client assertion: exp at most OAUTH_ASSERTION_MAX_S after iat
 // (Poppy 4.1: "at most 5 minutes"), OAUTH_SKEW_S of clock skew on iat, exp
 // and nbf; a DPoP proof's iat within OAUTH_DPOP_WINDOW_S. A client's seen
-// jtis are kept OAUTH_JTI_KEEP_S (the assertion's longest life and the skew).
+// assertion jtis are kept until the assertion's exp and OAUTH_SKEW_S, the
+// last moment it is accepted.
 export const OAUTH_ASSERTION_MAX_S = 300;
 export const OAUTH_SKEW_S = 30;
 export const OAUTH_DPOP_WINDOW_S = 60;
-export const OAUTH_JTI_KEEP_S = OAUTH_ASSERTION_MAX_S + OAUTH_SKEW_S;
 // A known app's key set: at most OAUTH_KEYSET_MAX_BYTES, fetched within
 // OAUTH_FETCH_TIMEOUT_MS, cached between OAUTH_KEYSET_TTL_MIN_S and
 // OAUTH_KEYSET_TTL_MAX_S, refetched at most once per OAUTH_KEYSET_REFETCH_S
@@ -357,9 +357,12 @@ export const OAUTH_KEYSET_TTL_MIN_S = 60;
 export const OAUTH_KEYSET_TTL_MAX_S = 86400;
 export const OAUTH_KEYSET_REFETCH_S = 30;
 export const OAUTH_KEYS_TRIED_MAX = 10;
-// Failed client authentications per network per OAUTH_AUTH_FAILS_WINDOW_S,
-// then 429 (the counters on OAUTH_QUOTA_ROOM, with the agent quota's
-// methods); a token, revoke or disconnect body is at most OAUTH_FORM_MAX.
+// Failed client authentications per network per OAUTH_AUTH_FAILS_WINDOW_S
+// (the counters on OAUTH_QUOTA_ROOM, with the agent quota's methods); once
+// full, a request carrying a client assertion is refused 429 before its
+// signature check, and a public or an unknown client never is (every Claude
+// user's connector shares a few addresses). A token, revoke or disconnect
+// body is at most OAUTH_FORM_MAX.
 export const OAUTH_AUTH_FAILS_PER_IP = 20;
 export const OAUTH_AUTH_FAILS_WINDOW_S = 600;
 export const OAUTH_FORM_MAX = 8192;

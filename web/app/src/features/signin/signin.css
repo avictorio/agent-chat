@@ -25,7 +25,8 @@
 .homeApp .signin-bar {flex: none; background: var(--panel); border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
 .homeApp .signin-bar-inner {max-width: 592px; margin: 0 auto; }
 .homeApp .signin-say {margin: 0 0 8px; }
-.homeApp .signin-say:empty {display: none; }
+/* the live region stays in the accessibility tree while empty, so the words that arrive in it are read out */
+.homeApp .signin-say:empty {margin: 0; }
 .homeApp .signin-bar .hint.bad {margin: 0 0 8px; }
 .homeApp .signin-buttons {display: flex; gap: 10px; }
 .homeApp .signin-buttons .btn {flex: 1 1 0; justify-content: center; font-size: 15px; font-weight: 600; padding: 10px 14px; }

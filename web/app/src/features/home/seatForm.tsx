@@ -387,7 +387,8 @@ export function useSeatRun<T>(o: {
       setBusy(false);
       setSay("");
       const b = bodyOf(e);
-      if (!b) {
+      // no answer, or the platform's own page in place of the Worker's (a 5xx with neither a sentence nor a code): what was made is not known
+      if (!b || (b.status >= 500 && !b.error && !b.code)) {
         setAlert(o.lost);
         return;
       }

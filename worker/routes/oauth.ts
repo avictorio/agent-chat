@@ -24,7 +24,7 @@
 
 import {
   OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_AUTH_FAILS_WINDOW_S, OAUTH_CLIENT_PREFIX, OAUTH_DISCONNECT_CODE, OAUTH_DPOP_WINDOW_S, OAUTH_FORM_MAX,
-  OAUTH_JTI_KEEP_S, OAUTH_QUOTA_ROOM, OAUTH_REQUEST_KEEP_S, OAUTH_SKEW_S, AGENT_SWAP_TRIES, SIGNIN_SCOPE, SMALL_BODY_MAX,
+  OAUTH_QUOTA_ROOM, OAUTH_REQUEST_KEEP_S, OAUTH_SKEW_S, AGENT_QUOTA_ROOM, AGENT_SWAP_TRIES, SIGNIN_SCOPE, SMALL_BODY_MAX,
 } from "../limits.js";
 import { BadRequest, CORS, CORS_OAUTH, jsonAs, readBody, settleBody, type Body } from "../lib/http.js";
 import {
@@ -62,14 +62,14 @@ function quotas(env: Env): DurableObjectStub {
   return env.ROOM.get(env.ROOM.idFromName(OAUTH_QUOTA_ROOM));
 }
 function agentQuota(env: Env): DurableObjectStub {
-  return env.ROOM.get(env.ROOM.idFromName("__agent-quota"));
+  return env.ROOM.get(env.ROOM.idFromName(AGENT_QUOTA_ROOM));
 }
 
 /* ---------- the documents ---------- */
 
 /** A document's answer: cached an hour, open to every origin; nothing read from the request. */
 function document(rc: RouteContext, data: unknown): Response {
-  if (rc.request.method !== "GET" && rc.request.method !== "HEAD") return jsonAs({ error: "Method not allowed" }, 405, CORS, "no-store");
+  if (rc.request.method !== "GET" && rc.request.method !== "HEAD") return jsonAs({ error: "Method not allowed" }, 405, CORS, "no-store", { Allow: "GET, HEAD" });
   const res = jsonAs(data, 200, CORS, "public, max-age=3600");
   return rc.request.method === "HEAD" ? new Response(null, { status: 200, headers: res.headers }) : res;
 }
@@ -92,7 +92,7 @@ export function wellKnownRoute(rc: RouteContext): Response | undefined {
   return undefined;
 }
 
-/* ---------- the authorization request (section 7, shared with decide) ---------- */
+/* ---------- the authorization request (authorize, and decide, which checks it again) ---------- */
 
 /** An authorization request that passed every check: its app, its redirect
  *  address (for loopback as sent), its state when sent, its PKCE challenge,
@@ -117,22 +117,24 @@ function redirectTo(address: string, params: Array<[string, string]>, iss: strin
 }
 
 /** The request's checks, in order, on one parse of its query string
- *  (URLSearchParams): client_id or redirect_uri twice (wrong), client_id a
- *  known app (unknown), redirect_uri one of its own (wrong); then, by
- *  redirect, any other parameter but resource twice (invalid_request),
- *  response_type, the PKCE challenge, scope by the app's kind, each
- *  resource, dpop_jkt. Every later step reads this parse. */
+ *  (URLSearchParams): client_id or redirect_uri twice (wrong); then, with
+ *  every parameter sent without a value treated as omitted (RFC 6749 3.1),
+ *  client_id a known app (unknown), redirect_uri one of its own (wrong);
+ *  then, by redirect, any other parameter but resource sent twice
+ *  (invalid_request), response_type, the PKCE challenge, scope by the app's
+ *  kind, each resource, dpop_jkt. Every later step reads this parse. */
 async function checkAuthorize(env: Env, query: string, origin: string): Promise<Authz> {
-  const q = new URLSearchParams(query);
-  const twice = (k: string) => q.getAll(k).length > 1;
+  const raw = new URLSearchParams(query);
+  const twice = (k: string) => raw.getAll(k).length > 1;
   if (twice("client_id") || twice("redirect_uri")) return { ok: false, page: "wrong" };
+  const q = new URLSearchParams([...raw].filter(([, v]) => v !== ""));
   const app = await knownApp(env, q.get("client_id") || "");
   if (!app) return { ok: false, page: "unknown" };
   const redirect = q.get("redirect_uri") || "";
   if (!redirectAllowed(app, redirect)) return { ok: false, page: "wrong" };
   const state = q.get("state");
   const fail = (error: string): Authz => ({ ok: false, redirect: redirectTo(redirect, state === null ? [["error", error]] : [["error", error], ["state", state]], origin) });
-  const keys = new Set<string>(q.keys());
+  const keys = new Set<string>(raw.keys());
   for (const k of keys) if (k !== "resource" && twice(k)) return fail("invalid_request");
   if (q.get("response_type") !== "code") return fail("unsupported_response_type");
   const challenge = q.get("code_challenge") || "";
@@ -171,7 +173,7 @@ function fixedPage(which: "unknown" | "wrong"): Response {
 // a logged line.
 export async function authorizeRoute(rc: RouteContext): Promise<Response> {
   const { request, env, url } = rc;
-  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { "Content-Type": "text/plain; charset=utf-8", ...AUTHORIZE_HEADERS } });
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { "Content-Type": "text/plain; charset=utf-8", Allow: "GET, HEAD", ...AUTHORIZE_HEADERS } });
   const query = url.search.slice(1);
   const a = await checkAuthorize(env, query, signinOrigin(env));
   const head = (r: Response) => (request.method === "HEAD" ? new Response(null, { status: r.status, headers: r.headers }) : r);
@@ -249,7 +251,7 @@ function requestHash(req: AuthzRequest): Promise<string> {
 // for the page to keep, and the rooms. No CORS on any answer. Joins nothing.
 export async function decideRoute(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
-  if (request.method !== "POST") return plain({ error: "Method not allowed" }, 405);
+  if (request.method !== "POST") return plain({ error: "Method not allowed" }, 405, { Allow: "POST" });
   if (!sameOrigin(request, signinOrigin(env))) return plain(CROSS_SITE, 403);
   const small = await settleBody(request, SMALL_BODY_MAX);
   if (!small) return plain({ error: "That request's body is too large." }, 413);
@@ -491,7 +493,7 @@ async function signinDisconnect(env: Env, t: SigninToken): Promise<Dropped> {
 // the Worker: never the room list, never an invite.
 export async function disconnectRoute(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
-  if (request.method !== "POST") return plain({ error: "Method not allowed" }, 405);
+  if (request.method !== "POST") return plain({ error: "Method not allowed" }, 405, { Allow: "POST" });
   if (!sameOrigin(request, signinOrigin(env))) return plain(CROSS_SITE, 403);
   const small = await settleBody(request, OAUTH_FORM_MAX);
   if (!small) return plain({ error: "That request's body is too large." }, 413);
@@ -527,8 +529,9 @@ function invalidClient(request: Request): Response {
   return oauthError("invalid_client", 401, undefined, { "WWW-Authenticate": m ? m[1] : "Basic" });
 }
 
-/** A form body, at most OAUTH_FORM_MAX, each parameter once; null when it
- *  is too large, a parameter repeats (RFC 6749 3.2), or it does not read. */
+/** A form body, at most OAUTH_FORM_MAX, each parameter once (RFC 6749
+ *  3.2), a parameter sent without a value treated as omitted (3.1): too
+ *  large, or a parameter repeated. */
 async function readForm(request: Request): Promise<{ form: URLSearchParams } | { tooLarge: true } | { repeated: true }> {
   const small = await settleBody(request, OAUTH_FORM_MAX);
   if (!small) return { tooLarge: true };
@@ -537,7 +540,7 @@ async function readForm(request: Request): Promise<{ form: URLSearchParams } | {
   const form = new URLSearchParams(text);
   const keys = new Set<string>(form.keys());
   for (const k of keys) if (form.getAll(k).length > 1) return { repeated: true };
-  return { form };
+  return { form: new URLSearchParams([...form].filter(([, v]) => v !== "")) };
 }
 
 /** The network's failed client authentications (OAUTH_QUOTA_ROOM, the agent quota's methods). */
@@ -579,9 +582,14 @@ async function authenticate(env: Env, request: Request, form: URLSearchParams, o
     return { ok: true, app, alg: null, hasKid: false, dpopFresh: !!n && n.fresh[0] };
   }
   if (form.get("client_assertion_type") !== "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" || assertion === null) return fail();
+  // the network's failed authentications limit the signature checks, the work the limit exists for: a public
+  // client's comparison, and an unknown client's, are never refused by it, though every failure is counted
+  const wait = await quotas(env).agentPeek(await failCaps(request));
+  if (typeof wait === "number" && wait > 0) return { ok: false, response: oauthError("slow_down", 429, "Too many failed attempts from this network; try again later.", { "Retry-After": String(wait) }) };
   const c = await checkAssertion(app, assertion, origin, nowS, async () => { const n = await store.clientNote({ wantRefetch: true }); return !!n && n.refetch; });
   if (!c.ok) return fail();
-  const jtis = [{ h: await storedHash("a:", c.jti), exp: Date.now() + OAUTH_JTI_KEEP_S * 1000 }];
+  // the jti is kept for as long as the assertion would be accepted: until its exp and the skew
+  const jtis = [{ h: await storedHash("a:", c.jti), exp: (c.exp + OAUTH_SKEW_S) * 1000 }];
   if (dpopJti !== null) jtis.push({ h: await storedHash("d:", dpopJti), exp: Date.now() + (OAUTH_DPOP_WINDOW_S + OAUTH_SKEW_S) * 1000 });
   const n = await store.clientNote({ jtis });
   if (!n || !n.fresh[0]) return fail();
@@ -613,13 +621,14 @@ async function preparePair(id: string, dk: Uint8Array<ArrayBuffer>, wk: Uint8Arr
 }
 
 // POST /api/oauth/token, a form of at most OAUTH_FORM_MAX: in order, the
-// method; the network's failed-authentication counter (429 slow_down); the
-// client, from client_id or, without it, the assertion's sub, a known app
-// (401 invalid_client); its authentication by kind (a failure counted, 401
-// invalid_client); a DPoP header checked when sent (400
-// invalid_dpop_proof; one required by an app whose document says
-// dpop_bound_access_tokens); then the grant: authorization_code or
-// refresh_token (400 unsupported_grant_type). The credential is in the
+// method; the client, from client_id or, without it, the assertion's sub, a
+// known app (401 invalid_client); its authentication by kind (a failure
+// counted, 401 invalid_client; a signed assertion is checked only while the
+// network's failed authentications leave room, else 429 slow_down); a DPoP
+// header checked when sent (400 invalid_dpop_proof; one required by an app
+// whose document says dpop_bound_access_tokens); then the grant:
+// authorization_code or refresh_token (400 invalid_request when none is
+// named, unsupported_grant_type for another). The credential is in the
 // body, so the sign-in is opened only once the body is in. Every answer
 // carries CORS_OAUTH, no-store and Pragma: no-cache; errors are RFC 6749
 // 5.2's, with nothing about the client. A reused code or refresh token, and
@@ -627,13 +636,11 @@ async function preparePair(id: string, dk: Uint8Array<ArrayBuffer>, wk: Uint8Arr
 // waitUntil).
 export async function tokenRoute(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
-  if (request.method !== "POST") return oauthError("invalid_request", 405, "Use POST.");
+  if (request.method !== "POST") return oauthError("invalid_request", 405, "Use POST.", { Allow: "POST" });
   const f = await readForm(request);
   if ("tooLarge" in f) return oauthError("invalid_request", 413);
   if ("repeated" in f) return oauthError("invalid_request", 400, "A parameter was sent more than once.");
   const form = f.form;
-  const wait = await quotas(env).agentPeek(await failCaps(request));
-  if (typeof wait === "number" && wait > 0) return oauthError("slow_down", 429, "Too many failed attempts from this network; try again later.", { "Retry-After": String(wait) });
   const nowS = Math.floor(Date.now() / 1000);
   const dpop = await checkDpop(request, signinOrigin(env) + "/api/oauth/token", nowS);
   const grant = form.get("grant_type");
@@ -645,14 +652,15 @@ export async function tokenRoute(rc: RouteContext): Promise<Response> {
   const proof = dpop.kind === "ok" ? dpop.jkt : null;
   if (grant === "authorization_code") return codeGrant(rc, app, form, proof);
   if (grant === "refresh_token") return refreshGrant(rc, app, form, proof);
-  return oauthError("unsupported_grant_type");
+  return oauthError(grant === null ? "invalid_request" : "unsupported_grant_type");
 }
 
-/** grant_type=authorization_code: the code's slot (a redeemed one is a
- *  reuse, which ends the sign-in; one of a cut sign-in finishes its
- *  disconnect), its app, its redirect, PKCE, the resource, the DPoP key it
- *  was bound to; then the identity, in one step, marks it used and stores
- *  the new pair (a family bound to the proof's key when one was sent). */
+/** grant_type=authorization_code: the code's slot (live, or redeemed
+ *  within its minute; one of a cut sign-in finishes its disconnect), its
+ *  app, its redirect, PKCE (a redeemed code that passes these three is a
+ *  reuse, which ends the sign-in), the resource, the DPoP key it was bound
+ *  to; then the identity, in one step, marks it used and stores the new
+ *  pair (a family bound to the proof's key when one was sent). */
 async function codeGrant(rc: RouteContext, app: KnownApp, form: URLSearchParams, proof: string | null): Promise<Response> {
   const { env } = rc;
   const t = parseSigninToken(form.get("code") || "");
@@ -664,14 +672,16 @@ async function codeGrant(rc: RouteContext, app: KnownApp, form: URLSearchParams,
     return oauthError("invalid_grant");
   }
   if (o.bind.client !== app.client_id) return oauthError("invalid_grant");
+  if (form.get("redirect_uri") !== o.bind.redirect) return oauthError("invalid_grant");
+  const verifier = form.get("code_verifier") || "";
+  if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier) || b64urlEncode(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))) !== o.bind.challenge) return oauthError("invalid_grant");
+  // a code redeemed already, within its minute, presented by its own client with its redirect and verifier: the
+  // code was used twice, so the sign-in ends (RFC 6749 4.1.2); a bare copy of the code ends nothing
   if (o.spent) {
     await outlive(rc, () => signinDisconnect(env, t));
     warn("oauth.reuse", null, { kind: "code" });
     return oauthError("invalid_grant");
   }
-  if (form.get("redirect_uri") !== o.bind.redirect) return oauthError("invalid_grant");
-  const verifier = form.get("code_verifier") || "";
-  if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier) || b64urlEncode(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))) !== o.bind.challenge) return oauthError("invalid_grant");
   const resource = tokenResource(form, signinOrigin(env), o.bind.resources);
   if (!resource) return oauthError("invalid_target");
   if (typeof o.bind.jkt === "string" && proof !== o.bind.jkt) return oauthError("invalid_grant");
@@ -753,22 +763,24 @@ async function refreshGrant(rc: RouteContext, app: KnownApp, form: URLSearchPara
 }
 
 // POST /api/oauth/revoke {token, token_type_hint?} (RFC 7009), a form of at
-// most OAUTH_FORM_MAX: the method, the failed-authentication counter, the
-// client and its authentication by kind (401 invalid_client), then by the
-// token's form: a refresh token, live or spent, issued to this client ends
-// its sign-in (signinDisconnect, under waitUntil); an access token issued to
-// it ends itself (signinAccessDrop); anything else, unknown, gone or
-// another app's, changes nothing. Always 200 {} once the client
-// authenticated, a remainder of wakes the rooms did not confirm included.
+// most OAUTH_FORM_MAX: the method, the client and its authentication by kind
+// (401 invalid_client, or 429 slow_down as at the token endpoint), then by
+// the token's form: a refresh token, live or spent, issued to this client
+// ends its sign-in (signinDisconnect, under waitUntil); an access token
+// issued to it ends itself (signinAccessDrop); any token of this client's
+// sign-in that a disconnect cut finishes what that disconnect left. Anything
+// else, unknown, gone or another app's, changes nothing, and is answered as a
+// success all the same: a token issued to another client is a deliberate 200,
+// since its caller holds the token already and a refusal would tell it
+// nothing more. Always 200 {} once the client authenticated, a remainder of
+// wakes the rooms did not confirm included.
 export async function revokeRoute(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
-  if (request.method !== "POST") return oauthError("invalid_request", 405, "Use POST.");
+  if (request.method !== "POST") return oauthError("invalid_request", 405, "Use POST.", { Allow: "POST" });
   const f = await readForm(request);
   if ("tooLarge" in f) return oauthError("invalid_request", 413);
   if ("repeated" in f) return oauthError("invalid_request", 400, "A parameter was sent more than once.");
   const form = f.form;
-  const wait = await quotas(env).agentPeek(await failCaps(request));
-  if (typeof wait === "number" && wait > 0) return oauthError("slow_down", 429, "Too many failed attempts from this network; try again later.", { "Retry-After": String(wait) });
   const auth = await authenticate(env, request, form, signinOrigin(env), null, null);
   if (!auth.ok) return auth.response;
   const t = parseSigninToken(form.get("token") || "");
@@ -780,6 +792,7 @@ export async function revokeRoute(rc: RouteContext): Promise<Response> {
     const s = await heldOf(env, t);
     const o = await s.stub.signinOpen(s.slot, s.verifier, ["access"], { grace: true });
     if (o.ok && o.bind.client === auth.app.client_id) await s.stub.signinAccessDrop(s.slot, s.verifier);
+    else if (!o.ok && o.cut && o.client === auth.app.client_id) await outlive(rc, () => signinDisconnect(env, t));
   }
   return oauthJson({});
 }

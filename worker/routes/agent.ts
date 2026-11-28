@@ -23,7 +23,8 @@
 // credential beyond the key itself: the invites a person's routes make go
 // straight onto the key, and no answer carries them, a link or a note.
 // Disconnecting a key (DELETE /api/agent) ends every call made with it, at
-// once, and then turns off the Muse wakes the key set up (muse_register). It
+// once, and then lets go of the Muse wakes the key set up (muse_register):
+// each goes unless another holder keeps it (room/muse.ts, mhh). It
 // does not end what lives outside the key: each room's own invite still
 // works for whoever holds it, and the links a room tool already handed out
 // through the key run out on their own clocks (upload tickets and resumable
@@ -531,7 +532,7 @@ function stillOut(e: AgentEntry, now: number): number {
   return wait;
 }
 
-/** One entry's wakes turned off as far as the room allows, from the list
+/** One entry's wakes let go of as far as the room allows, from the list
  *  read at version ver: a look; while a recording may still reach the room,
  *  nothing is dropped (waitMax: how long the caller may wait for that, then
  *  look again); else, when the hook is one of the entry's links, it is
@@ -585,7 +586,7 @@ function wakeSaid(e: AgentEntry, d: { on?: string | null }): "off" | "kept" {
   return typeof d.on === "string" && (e.hooks || []).some((h) => h.link === d.on) ? "kept" : "off";
 }
 
-/** The wakes a cut key set up, turned off from its list read at version
+/** The wakes a cut key set up, let go of from its list read at version
  *  ver: every entry that records one, AGENT_GLANCE_PARALLEL rooms at a
  *  time, each waiting for a recording that may still land at most
  *  AGENT_WAKE_SET_MS + AGENT_WAKE_SKEW_MS. Which rooms did not let every
@@ -619,10 +620,11 @@ export async function dropWakes(env: Env, rooms: AgentEntry[], ver: number): Pro
 // everywhere, in two steps. First the cut (agentCut): the key's slot is
 // marked cut, and from then on the key opens nothing, every route and the
 // MCP address refusing it as they refuse a key that does not exist, but
-// this same DELETE. Then the Muse wakes the key set up (muse_register) are
-// turned off, on the list as the cut read it, room by room with a look and
-// a drop that open nothing (museHookLook, museDropLook: dropWakes); a hook
-// the agent set with a room's own token on another link stays. When every
+// this same DELETE. Then the key lets go of the Muse wakes it set up
+// (muse_register), on the list as the cut read it, room by room with a look
+// and a drop of its own holds that open nothing (by its tag, or the
+// untagged holds: dropWakes); a hook goes only when no other holder is left,
+// so one the agent set with a room's own token stays. When every
 // one settled the identity is deleted (agentDrop, from the version read).
 // When some did not, the list is written again, from that version, holding
 // only the rooms whose wakes did not settle (agentRemain), and the answer
@@ -660,7 +662,7 @@ async function agentAnswer(rc: RouteContext): Promise<Response> {
 
 /** DELETE /api/agent's two steps, the cut and the wakes (above). */
 async function disconnect(env: Env, stub: DurableObjectStub, id: string, secret: Uint8Array<ArrayBuffer>, verifier: string): Promise<Response> {
-  // what this call itself turned off, over its tries, and the key's rooms as its first read found them
+  // where a hook this call let go of went, over its tries, and the key's rooms as its first read found them
   const removed = new Set<string>();
   let rooms: string[] | null = null;
   for (let t = 0; t < AGENT_SWAP_TRIES; t++) {
@@ -672,7 +674,7 @@ async function disconnect(env: Env, stub: DurableObjectStub, id: string, secret:
       return json({ deleted: true, rooms, muse_wakes_removed: [...removed], muse_wakes_left: [], note: dropNote([]) });
     }
     // a list that does not open is no reason to keep the key: it goes, and
-    // the answer says its wakes could not be turned off
+    // the answer says it could not let go of its wakes
     const list = await agentUnseal(id, secret, cut.wrapped, cut.ver, cut.ring);
     if (!list) {
       await stub.agentDrop("key", verifier);
@@ -713,7 +715,7 @@ async function disconnect(env: Env, stub: DurableObjectStub, id: string, secret:
  *  already held is refused, one the room refused since is replaced in
  *  place, the key holds AGENT_ROOMS_MAX at most, and every new room's token
  *  is looked up, in order, before anything is written. A refused entry that
- *  records Muse wakes has them turned off first (dropWake, through its gone
+ *  records Muse wakes lets go of them first (dropWake, through its gone
  *  seat, after this write's read of the list): it is replaced only when
  *  every link of it may leave, otherwise the call answers try_again and
  *  changes nothing. */
@@ -812,8 +814,8 @@ export async function agentRoomsRoute(rc: RouteContext): Promise<Response> {
 
 // POST /api/agent/rooms/remove {"room"} with the key: the key forgets the
 // room (the room in the body, out of a logged URL). The seat and everything
-// else in the room stay, but for the Muse wake the key set up there, which
-// is turned off first (removeRoom).
+// else in the room stay; the key first lets go of the Muse wake it set up
+// there, which goes unless another holder keeps it (removeRoom).
 export async function agentRemoveRoute(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -1659,9 +1661,9 @@ async function settleRooms(env: Env, u: Unsealed, which: Array<{ room: string, t
 // (its own too after a refusal) is looked at after that write, and a
 // settling write from the version it wrote takes off what the rule lets go
 // (a tidy that throws, or meets a newer list, changes nothing). A key cut
-// meanwhile has the hook this call set turned off again (only its own hold:
-// by the entry's tag when it has one; its disconnect turns off every link
-// the list names). The bridge is asked what the REST
+// meanwhile lets go of the hold this call set (only its own: by the entry's
+// tag when it has one; its disconnect lets go of every link the list
+// names). The bridge is asked what the REST
 // route asks it: /claim once, /rooms once per hook set. The link id is in
 // no answer.
 async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnswer> {
@@ -1803,7 +1805,7 @@ async function museRegister(env: Env, u: Unsealed, args: Body): Promise<ToolAnsw
     return { rooms, then: there, own: answered.map((n) => ids[n]) };
   });
   if ("gone" in post) {
-    // cut meanwhile: the hooks this call set go again (the disconnect also turns off every link it recorded)
+    // cut meanwhile: this call lets go of the holds it set (the disconnect also lets go of every link it recorded)
     for (const n of todo) {
       if (outcome.get(n) !== "ok") continue;
       // only the hold this call set: by its tag, or, for an entry without one, by the holds an untagged set makes (museDropLook)
@@ -1954,7 +1956,7 @@ function signinCors(res: Response): Response {
 export async function signinMcpRoute(rc: RouteContext): Promise<Response> {
   const { request, env } = rc;
   const origin = signinOrigin(env), address = origin + "/api/mcp/signin";
-  if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405, CORS_SIGNIN);
+  if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405, { ...CORS_SIGNIN, Allow: "POST" });
   const c = signinCredential(request);
   const unauthorized = async (code: "sign_in_required" | "invalid_token"): Promise<Response> => {
     // decided before the body; what was sent is read away, bounded, so the client gets this answer rather than a reset

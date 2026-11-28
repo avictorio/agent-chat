@@ -123,6 +123,48 @@ Playwright); `tests/fixtures/` holds the files they share.
   take-off in every order, lost compare-and-sets; at every state a hook
   that is on has its link recorded) and the Agent keys view's
   name check against the server's (`agent-name`).
+- **The sign-in's tests** (`docs/agents/rooms-and-api.md`, Sign-in) run
+  over `signin-world.mjs`: the agent key's harness world under
+  `TEST_HOOKS`, stand-in apps put on the `__oauth-quota` object as the
+  test hook puts them, and the OAuth client's side done by hand (PKCE,
+  ES256 and PS384 client assertions, DPoP proofs, every key made in the
+  test with Web Crypto). The documents (`oauth-metadata`), the authorize
+  page's checks in order, its fixed pages and headers (`oauth-authorize`,
+  with RFC 6749 3.1's empty parameters and an exact HTTPS redirect's near
+  misses), the approval (`oauth-decide`), the token endpoint
+  (`oauth-token`: each assertion refusal, the key set and its refetch
+  gate, a set past its time, the failed-authentication limit refusing
+  only a request with an assertion, the code exchange and a redeemed
+  code's copy, the refresh's rotation, grace and reuse, idle, DPoP and
+  `jwkThumbprint` against RFC 9449's and RFC 7638's published values),
+  the revocation and every way a sign-in ends (`oauth-revoke`, a cut
+  sign-in's credentials opening no room list), the disconnect-only code
+  (`oauth-disconnect`), the sign-in address (`signin-mcp`), the identity
+  object and an app's store (`signin-object`), and the page's pinned copy
+  (`signin-page`). A test server compares no pinned app's document:
+  `compareDocument` runs only without `TEST_HOOKS` (its own test runs
+  with `TEST_HOOKS` removed and `fetch` replaced), so nothing asks an
+  outside host. On a local server the issuer is `TEST_SIGNIN_ORIGIN`
+  (`AGENTS.md` section 2), its own address. The API suite's
+  `tests/api/signin.js` runs two stand-in apps against a real local
+  Worker, registered with `POST /api/test-hooks/oauth-app` (a public one
+  with a loopback redirect, a poppy one with its key set inline): the
+  authorize page, the approval with a person's invites, the code
+  exchange, the address's tools, a post as the invited agent, a refresh, a
+  revoke, the wakes two connections and a key hold on one seat, and the
+  times of an approval of `AGENT_ROOMS_MAX` rooms; `tests/api/mcp-clients.js`
+  runs the official client libraries with an OAuth provider set (K1 to
+  K8): they sign in only where the sign-in address's 401 asks, and a key,
+  no credential or a room's token never meets a 401 anywhere. The UI file
+  `web/tests/ui/signin.test.js` runs the approval page and the
+  connections section on a fake API of its own that answers every
+  request of the browser (the apps' callbacks are stand-ins, anything
+  else is refused), with the authorize page served with the Worker's own
+  `AUTHORIZE_HEADERS`; at the end of every scenario it requires the
+  site's `localStorage` as seeded but for an expected connection record,
+  `sessionStorage` holding only the harness's seeding flag (a tab that
+  left the site is brought back to a blank page of it to read its own),
+  and no cookie.
 - **The Muse bridge's tests** (`tests/bridge/`, `worker/bridge/`) run
   in the same `npm run test:unit`, with the same hook, and need no
   network and no Python. `bridge.test.mjs` runs the bridge's router and

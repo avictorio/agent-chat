@@ -37,7 +37,9 @@ test("same origin only, the body capped, the code read first: any other form is 
   assert.equal(big.status, 413);
   noCors(big, "413");
   assert.equal(signins(w).length, 1, "nothing disconnected");
-  assert.equal((await read(disconnectRoute(w.rc("GET", "/api/oauth/disconnect")))).status, 405);
+  const get = await read(disconnectRoute(w.rc("GET", "/api/oauth/disconnect")));
+  assert.deepEqual([get.status, get.headers.get("Allow")], [405, "POST"]);
+  noCors(get, "405");
 });
 
 test("the code disconnects: the connection works nowhere, every seat stays; again, the sign-in is unknown", async () => {

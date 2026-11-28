@@ -12,8 +12,11 @@
 // must do and never do: the two buttons alike and always in view, focus on
 // the heading and no key choosing a button, only looks and decide asked,
 // nothing stored but the connection's record after an approval that gives
-// one, the popup's opener kept, a retry after a lost answer, names and the
-// server's sentences as text; and the third section's records and dialogs.
+// one (no other storage key, no changed value, nothing in sessionStorage
+// but the harness's own flag, no cookie), no connection handed to the app
+// without that record, only an http or https answer followed, the popup's
+// opener kept, a retry after a lost answer, names and the server's
+// sentences as text; and the third section's records and dialogs.
 // The server's sentences in the fixtures come from the Worker's own
 // functions, so they cannot drift.
 const { chromium, installClock, trackNetwork, settle, shot, must, failed, done, badConsole, HTML, DIST, ICON_PNG, NOW, D, authorizePage, workerModule } = require('./harness');
@@ -30,6 +33,8 @@ const LOOKS = {
   tok_gone000000000000000000: 404,
   tok_flaky00000000000000000: 500,
   tok_hold0000000000000000000: 'hold',
+  // its first look fails, and Try again finds a person's invite
+  tok_flip00000000000000000: (S) => ((S.flips = (S.flips || 0) + 1) === 1 ? 500 : PERSON()),
 };
 const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
 const CODE = '.oc1.Q2mZp9X4vB1nW8cR5tYaKw.Ab3Cd4Ef5Gh.Hq3Lx8Zr2Vn6Bt0Wk4Sd9Fg1Jc7Pm5Ye3Ua6Io2NbXa';
@@ -74,9 +79,11 @@ const DECIDE = (appKey) => async (body) => {
  * o.stayBack: the app's callback answers 204 No Content, so the browser
  * stays on the page as it was when it left (a navigation still pending
  * would leave the page drawing nothing to take a picture of); o.stored: a
- * RegExp of the storage keys the
- * scenario may add or remove. S.calls lists every request to the site
- * (method, path, body), S.backs every callback reached.
+ * RegExp of the storage keys the scenario may add or remove (only
+ * chat-signin:<id> is ever added); o.init: a script each page runs first.
+ * An api answer is {status, body} (JSON), {status, html} or 'network'.
+ * S.calls lists every request to the site (method, path, body), S.backs
+ * every callback reached.
  */
 async function scenario(name, o, fn) {
   if (process.env.ONLY && !process.env.ONLY.split(',').includes(name)) return;
@@ -93,6 +100,7 @@ async function scenario(name, o, fn) {
   watch(page);
   ctx.on('page', watch);
   const S = { calls: [], unhandled: [], holds: [], backs: [] };
+  if (o.init) await ctx.addInitScript(o.init);
   const api = o.api || {};
   const looks = Object.assign({}, LOOKS, api.looks || {});
   await ctx.route('**/*', async (route) => {
@@ -106,6 +114,8 @@ async function scenario(name, o, fn) {
       if (p === '/api/build') return J({ build: 'uitestbuild1' });
       if (p.startsWith('/assets/')) { try { return route.fulfill({ status: 200, contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: require('fs').readFileSync(DIST + p) }); } catch { return route.fulfill({ status: 404, body: 'nf' }); } }
       if (p.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
+      // a blank page of the site's, where the guard below reads a tab's sessionStorage once it has left
+      if (p === '/__session') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>session</title>' });
       // the browser's headers: an intercepted request shows no Sec-Fetch-Site here, so the Origin the browser sends with every POST stands for it
       const h = await rq.allHeaders();
       let body = null;
@@ -113,7 +123,7 @@ async function scenario(name, o, fn) {
       S.calls.push({ m, p, token: h['x-invite-token'] || '', auth: h.authorization || '', site: h['sec-fetch-site'] || (h.origin === ORIGIN ? 'same-origin' : h.origin || ''), body });
       const lm = /^\/api\/rooms\/([^/]+)\/invite$/.exec(p);
       if (lm && m === 'GET') {
-        const v = looks[h['x-invite-token']];
+        const v = typeof looks[h['x-invite-token']] === 'function' ? looks[h['x-invite-token']](S) : looks[h['x-invite-token']];
         if (v === 'hold') { await new Promise((r) => S.holds.push(r)); return J({ error: 'held' }, 500); }
         if (typeof v === 'number') return J({ error: v === 404 ? 'No room with that name yet. Create it from the home page.' : v === 403 ? 'This invite link has been revoked. Ask whoever gave it to you for a new one.' : 'upstream connect error' }, v);
         if (!v) return J({ error: "This invite link isn't valid for this room." }, 403);
@@ -124,6 +134,7 @@ async function scenario(name, o, fn) {
         if (!f) { S.unhandled.push(m + ' ' + p); return J({ error: 'not stubbed' }, 500); }
         const out = await f(...a, S);
         if (out === 'network') return route.abort('failed');
+        if (out.html !== undefined) return route.fulfill({ status: out.status || 200, contentType: 'text/html', body: out.html });
         return J(out.body, out.status, out.headers);
       };
       if (p === '/api/oauth/decide' && m === 'POST') return call('decide', body);
@@ -151,7 +162,7 @@ async function scenario(name, o, fn) {
       }
     } catch { /* the scenario fails visibly */ }
   }, { origin: ORIGIN, rooms, store: o.store || {} });
-  const seeded = Object.keys(rooms).flatMap((r) => ['chat-invite:' + r, 'chat-you:' + r]).concat(Object.keys(o.store || {})).sort();
+  const seeded = Object.assign(Object.fromEntries(Object.entries(rooms).flatMap(([r, tok]) => [['chat-invite:' + r, tok], ['chat-you:' + r, 'Anthony']])), o.store || {});
   let out = null;
   try {
     await page.goto(o.url || authorizeUrl(o.app || 'claude'));
@@ -169,12 +180,25 @@ async function scenario(name, o, fn) {
     if (other.length) throw new Error('the page asked something beyond the looks and the sign-in: ' + JSON.stringify(other.map((c) => c.m + ' ' + c.p)));
     const cross = S.calls.filter((c) => c.m === 'POST' && c.site !== 'same-origin');
     if (cross.length) throw new Error('a call that is not same-origin: ' + JSON.stringify(cross.map((c) => c.p + ' ' + c.site)));
-    // the site's storage: as seeded, but for the keys the scenario may change
+    // the site's localStorage: every seeded value as it was (one the scenario may change can only be removed), and
+    // nothing added but a connection's record where the scenario expects one
     const state = await ctx.storageState();
-    const site = (state.origins.find((x) => x.origin === ORIGIN) || { localStorage: [] }).localStorage.map((x) => x.name).sort();
-    const changed = site.filter((k) => !seeded.includes(k)).concat(seeded.filter((k) => !site.includes(k)));
-    const bad = changed.filter((k) => !(o.stored && o.stored.test(k)));
+    const now = Object.fromEntries((state.origins.find((x) => x.origin === ORIGIN) || { localStorage: [] }).localStorage.map((x) => [x.name, x.value]));
+    const may = (k) => !!(o.stored && o.stored.test(k));
+    const bad = [];
+    for (const [k, v] of Object.entries(seeded)) if (k in now ? now[k] !== v : !may(k)) bad.push((k in now ? 'changed ' : 'removed ') + k);
+    for (const k of Object.keys(now)) if (!(k in seeded) && !(may(k) && /^chat-signin:[A-Za-z0-9_-]{22}$/.test(k))) bad.push('added ' + k);
     if (bad.length) throw new Error('storage changed: ' + JSON.stringify(bad));
+    // no cookie on any origin
+    const jar = await ctx.cookies();
+    if (jar.length) throw new Error('a cookie was set: ' + JSON.stringify(jar.map((c) => c.domain + ' ' + c.name)));
+    // every tab's sessionStorage on the site holds the seeding flag alone (a tab that left the site is brought back to a blank page of it to read its own)
+    for (const pg of ctx.pages()) {
+      if (pg.isClosed()) continue;
+      if (new URL(pg.url()).origin !== ORIGIN) await pg.goto(ORIGIN + '/__session');
+      const ss = await pg.evaluate(() => Object.entries(sessionStorage));
+      if (JSON.stringify(ss) !== '[["seeded","1"]]') throw new Error('sessionStorage holds more than the seeding flag: ' + JSON.stringify(ss.map(([k]) => k)));
+    }
     console.log('PASS ' + name + (out ? ' ' + JSON.stringify(out) : ''));
   } catch (e) {
     failed();
@@ -207,7 +231,14 @@ const connect = (page) => page.click('#signinConnect');
 const decides = (S) => S.calls.filter((c) => c.p === '/api/oauth/decide');
 // the page's own sentences
 const NEVER = 'Agent Chat never sends you a link to approve a connection: approve only one you started yourself, in your own app, a moment before.';
-const LOST = 'The connection may or may not have been made. If it was, the app has it; if not, approving again uses the same seats. Approving this same link again will be refused; start again from the app.';
+const LOST = "The site's answer didn't arrive, so this page can't tell whether the connection was made. If it was, the app never received it and nothing can use it. Choose Connect to try again: if the page then says this link was already used, start again from the app. Approving again with the same name uses the same seats.";
+const UNKEPT = "This browser couldn't keep the record that lets you disconnect this connection, so the page stopped before the app received it: nothing is connected. The seats made stay unused, and approving again with the same name uses them. Free up this site's storage in your browser, then start again from the app.";
+const UNFOLLOWED = "The site's answer can't be followed from this page. Start again from the app.";
+// a page script that makes this browser refuse to keep a connection's record (setItem throws), or lose it (setItem keeps nothing)
+const REFUSE_RECORD = '(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (String(k).startsWith("chat-signin:")) throw new DOMException("full", "QuotaExceededError"); return set.call(this, k, v); }; })();';
+const LOSE_RECORD = '(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (String(k).startsWith("chat-signin:")) return; return set.call(this, k, v); }; })();';
+// the platform's own page in place of the Worker's answer
+const PLATFORM_502 = { status: 502, html: '<!doctype html><title>502 Bad Gateway</title><h1>Bad gateway</h1>' };
 const USED = "This sign-in link has already been used. If you just approved it and the app didn't connect, start again from your own app: approving again uses the same seats. If you didn't approve it yourself, someone else may have sent you this link.";
 
 (async () => {
@@ -301,11 +332,15 @@ const USED = "This sign-in link has already been used. If you just approved it a
   }, '#signinErr');
   // the approval held until the scenario ends, then answered with a failure, so nothing is made
   const busy = { decide: async (body, S) => { if (body.approve && !body.check) { await new Promise((r) => S.holds.push(r)); return { status: 500, body: { error: 'held' } }; } return DECIDE('claude')(body); } };
-  await state('busy', { app: 'claude', api: busy, stayBack: true }, async (page) => {
+  await state('busy', { app: 'claude', rooms: { ...ROOMS, 'flaky-room': 'tok_flaky00000000000000000' }, api: busy, stayBack: true }, async (page) => {
+    await page.waitForSelector('#signinRooms .key-retry', { timeout: 5000 });
     await tick(page, 'family-trip');
     await connect(page);
     await page.waitForFunction(() => document.getElementById('signinSay')?.textContent === 'Connecting…', null, { timeout: 5000 });
-    const off = await page.$$eval('#signinRooms input, #signinName, #signinDeny, #signinConnect', (els) => els.filter((e) => !e.disabled).map((e) => e.id || e.outerHTML.slice(0, 60)));
+    // the rows' own buttons too: Try again on the room whose look failed, the other-name link on the ticked one
+    const rowButtons = await page.$$eval('#signinRooms button', (els) => els.map((e) => e.textContent.trim()));
+    must(rowButtons.includes('Try again') && rowButtons.includes('Use another name in this room'), 'the rows have their buttons: ' + JSON.stringify(rowButtons));
+    const off = await page.$$eval('#signinRooms input, #signinRooms button, #signinName, #signinDeny, #signinConnect', (els) => els.filter((e) => !e.disabled).map((e) => e.id || e.outerHTML.slice(0, 60)));
     must(!off.length, 'every control disabled while it connects: ' + JSON.stringify(off));
     return { held: true };
   });
@@ -329,8 +364,57 @@ const USED = "This sign-in link has already been used. If you just approved it a
     await connect(page);
     await page.waitForSelector('#signinErr', { timeout: 5000 });
     must((await text(page, '#signinErr')) === LOST, await text(page, '#signinErr'));
-    must(!(await page.$eval('#signinConnect', (b) => b.disabled)), 'Connect stays: approving again is answered as already used');
+    must(!(await page.$eval('#signinConnect', (b) => b.disabled)), 'Connect stays: a request that was not approved is given back, so Connect tries again');
   }, '#signinErr');
+  // the platform's own page in place of the approval's answer: as lost, since what was made is not known
+  await state('lost-502', { app: 'claude', api: { decide: async (body) => (body.approve && !body.check ? PLATFORM_502 : DECIDE('claude')(body)) } }, async (page) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#signinErr', { timeout: 5000 });
+    must((await text(page, '#signinErr')) === LOST, await text(page, '#signinErr'));
+    must(!(await page.$eval('#signinConnect', (b) => b.disabled)), 'Connect stays');
+  }, '#signinErr');
+  // the browser cannot keep the connection's record: the app is not sent the connection, the page disconnects it, and says so
+  const unkept = { decide: DECIDE('claude'), disconnect: async () => ({ body: { disconnected: true, wakes_left: [], note: W.signinDropNote([]) } }) };
+  await state('unkept', { app: 'claude', api: unkept, init: REFUSE_RECORD, stayBack: true }, async (page, S) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#signinUnkept', { timeout: 5000 });
+    must((await text(page, '#signinUnkept')) === UNKEPT, await text(page, '#signinUnkept'));
+    must(await until(() => S.calls.some((c) => c.p === '/api/oauth/disconnect')), 'the page disconnects it');
+    must(!S.backs.length, 'the app is not sent the connection: ' + JSON.stringify(S.backs));
+    must(!(await page.$('#signinConnect')) && !(await page.$('#signinRooms')) && !(await page.$eval('#signinDeny', (b) => b.disabled)), "only Don't connect");
+  }, '#signinUnkept');
+  // a room whose look failed beside an agent's invite: the form, whose rows say why; Try again then finds the person's own invite
+  await state('agent-failed', { app: 'claude', rooms: { 'work-notes': 'tok_work000000000000000000', 'flip-room': 'tok_flip00000000000000000' }, api: { decide: DECIDE('claude') } }, async (page) => {
+    await page.waitForSelector('#signinRooms .key-retry', { timeout: 5000 });
+    must(!(await page.$('#signinAgentsOnly')), 'not every invite is an agent\'s, so the sentence does not show');
+    must(!!(await page.$('#signinForm')) && (await page.$eval('#signinConnect', (b) => b.disabled)), 'the form, with Connect waiting for a room');
+    must((await row(page, 'work-notes')) === "work-notes The invite this browser holds here is an agent's." && (await row(page, 'flip-room')) === "flip-room Couldn't check this room; try again. Try again", (await row(page, 'work-notes')) + ' | ' + (await row(page, 'flip-room')));
+  }, '#signinRooms');
+  // the progress line, empty, stays in the bar (and in the accessibility tree) and takes no height
+  await state('bar-empty', { app: 'claude', api: { decide: DECIDE('claude') } }, async (page) => {
+    const m = await page.evaluate(() => {
+      const say = document.getElementById('signinSay'), bar = document.querySelector('.signin-bar');
+      const shown = { say: say.getBoundingClientRect().height, bar: bar.getBoundingClientRect().height, display: getComputedStyle(say).display, live: say.getAttribute('aria-live') };
+      say.style.display = 'none';
+      const gone = bar.getBoundingClientRect().height;
+      say.style.display = '';
+      return { ...shown, gone };
+    });
+    must(m.display !== 'none' && m.live === 'polite' && m.say === 0 && m.bar === m.gone, 'the empty line is rendered, live, and takes no height: ' + JSON.stringify(m));
+    return m;
+  }, '.signin-bar');
+  // an answer the page will not follow (no http or https address): it stays, says so, and keeps Don't connect
+  await state('stopped', { app: 'claude', api: { decide: async (body) => (body.check ? { body: { redirect: 'javascript:window.__ran=1' } } : DECIDE('claude')(body)) } }, async (page, S) => {
+    const at = page.url();
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#signinStopped', { timeout: 5000 });
+    must((await text(page, '#signinStopped')) === UNFOLLOWED, await text(page, '#signinStopped'));
+    must(page.url() === at && !S.backs.length && (await page.evaluate(() => window.__ran)) === undefined, 'no navigation, and no script ran');
+    must(!(await page.$('#signinConnect')) && !(await page.$eval('#signinDeny', (b) => b.disabled)), "Don't connect stays");
+  });
   await state('success', { app: 'claude', api: { decide: DECIDE('claude') }, stayBack: true, stored: /^chat-signin:/ }, async (page, S) => {
     await tick(page, 'family-trip');
     await connect(page);
@@ -404,6 +488,88 @@ const USED = "This sign-in link has already been used. If you just approved it a
     await page.waitForFunction(() => document.getElementById('signinSay')?.textContent === 'Returning you to Claude Code…', null, { timeout: 5000 });
     must(await until(() => S.backs.length === 1) && S.backs[0].startsWith('http://localhost:43123/callback?code='), 'the loopback callback: ' + S.backs[0]);
   });
+  // decide sends the request back to the app with its error, to the check or to the approval: the page goes with it, and keeps no record
+  const errBack = back('claude', { error: 'invalid_request', state: 'st-1' });
+  await scenario('signin-check-redirect', { app: 'claude', api: { decide: async (body) => (body.check ? { body: { redirect: errBack } } : DECIDE('claude')(body)) } }, async (page, S) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#back', { timeout: 10000 });
+    must(S.backs.length === 1 && S.backs[0] === errBack, 'the app gets its error: ' + JSON.stringify(S.backs));
+    must(decides(S).length === 1, 'nothing asked after the check: ' + decides(S).length);
+  });
+  await scenario('signin-approve-redirect', { app: 'claude', api: { decide: async (body) => (body.approve && !body.check ? { body: { redirect: errBack } } : DECIDE('claude')(body)) } }, async (page, S) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#back', { timeout: 10000 });
+    must(S.backs.length === 1 && S.backs[0] === errBack, 'the app gets its error: ' + JSON.stringify(S.backs));
+    must(decides(S).length === 2, 'the check, then the approval: ' + decides(S).length);
+  });
+  // a connection whose record this browser refuses to keep is never handed to the app: the page disconnects it once, with
+  // its code, says so, and Don't connect tells the app it did not connect
+  await scenario('signin-unkept-requests', { app: 'claude', api: unkept, init: REFUSE_RECORD }, async (page, S) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#signinUnkept', { timeout: 5000 });
+    must(await until(() => S.calls.some((c) => c.p === '/api/oauth/disconnect')), 'the page disconnects it');
+    await settle(page);
+    const d = decides(S);
+    must(d.length === 2 && d[0].body.check === true && !('check' in d[1].body), 'the check, then the approval: ' + JSON.stringify(d.map((x) => x.body.check)));
+    const sent = S.calls.filter((c) => c.p === '/api/oauth/disconnect').map((c) => c.body);
+    must(JSON.stringify(sent) === JSON.stringify([{ code: DCODE }]), 'one disconnect, with the code: ' + JSON.stringify(sent));
+    must(!S.backs.length, 'the callback is not reached: ' + JSON.stringify(S.backs));
+    await page.click('#signinDeny');
+    await page.waitForSelector('#back', { timeout: 10000 });
+    must(S.backs.length === 1 && S.backs[0] === back('claude', { error: 'access_denied', state: 'st-1' }), "Don't connect tells the app: " + JSON.stringify(S.backs));
+    must(decides(S).length === 3 && decides(S)[2].body.approve === false, 'the decline');
+  });
+  // the same when the record is written but does not read back
+  await scenario('signin-unkept-lost-write', { app: 'claude', api: unkept, init: LOSE_RECORD, stayBack: true }, async (page, S) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#signinUnkept', { timeout: 5000 });
+    must(await until(() => S.calls.some((c) => c.p === '/api/oauth/disconnect')) && !S.backs.length, 'disconnected, and not handed to the app');
+  });
+  // and when that disconnect itself fails: the same sentence, and nothing else changes
+  await scenario('signin-unkept-disconnect-fails', { app: 'claude', api: { decide: DECIDE('claude'), disconnect: async () => 'network' }, init: REFUSE_RECORD, stayBack: true, allowConsole: /net::ERR_FAILED/ }, async (page, S) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#signinUnkept', { timeout: 5000 });
+    must(await until(() => S.calls.some((c) => c.p === '/api/oauth/disconnect')), 'the disconnect was tried');
+    await settle(page);
+    must((await text(page, '#signinUnkept')) === UNKEPT && !(await page.$('#signinErr')) && !(await page.$('#signinDeclineErr')) && !S.backs.length, 'the same sentence alone');
+    must(!(await page.$eval('#signinDeny', (b) => b.disabled)), "Don't connect stays");
+  });
+  // an answer the page will not follow, to the decline: it stays, says so, and Don't connect can be chosen again
+  await scenario('signin-stopped-decline', { app: 'claude', api: { decide: async (body) => (body.approve === false ? { body: { redirect: 'javascript:window.__ran=1' } } : DECIDE('claude')(body)) } }, async (page, S) => {
+    await page.click('#signinDeny');
+    await page.waitForSelector('#signinStopped', { timeout: 5000 });
+    must((await page.evaluate(() => window.__ran)) === undefined && !S.backs.length, 'not followed');
+    must(!(await page.$eval('#signinDeny', (b) => b.disabled)), "Don't connect again");
+  });
+  // the Worker's own 500 says what was made: it stays a refusal, said as before
+  const worker500 = { decide: async (body) => (body.approve && !body.check ? { status: 500, body: { error: 'The connection could not be made. Try again.', left_unused: ['family-trip'], note: W.unusedNote(['family-trip']) } } : DECIDE('claude')(body)) };
+  await scenario('signin-worker-500', { app: 'claude', api: worker500 }, async (page) => {
+    await tick(page, 'family-trip');
+    await connect(page);
+    await page.waitForSelector('#signinErr', { timeout: 5000 });
+    must((await text(page, '#signinErr')) === 'The connection could not be made. Try again. Nothing was connected. The seat made in family-trip stays unused; approving again with the same name uses it.', await text(page, '#signinErr'));
+  });
+  // only when every room's invite is an agent's does the page say so: beside a room whose look failed it shows the form,
+  // and Try again, finding the person's own invite, makes that room tickable; beside a room that is gone, the form too
+  await scenario('signin-agent-beside-failed', { app: 'claude', rooms: { 'work-notes': 'tok_work000000000000000000', 'flip-room': 'tok_flip00000000000000000' }, api: { decide: DECIDE('claude') } }, async (page) => {
+    await page.waitForSelector('#signinRooms .key-retry', { timeout: 5000 });
+    must(!(await page.$('#signinAgentsOnly')) && !!(await page.$('#signinForm')), 'the form, and no sentence');
+    must(await page.$eval('#signinConnect', (b) => b.disabled), 'Connect waits while nothing is ticked');
+    await page.click('#signinRooms li[data-room="flip-room"] .key-retry');
+    await page.waitForFunction(() => /flip-room as Anthony/.test(document.getElementById('signinRooms')?.innerText.replace(/\s+/g, ' ') || ''), null, { timeout: 5000 });
+    must(!(await page.$eval('#signinRooms-flip-room', (i) => i.disabled)) && (await page.$eval('#signinRooms-work-notes', (i) => i.disabled)), 'the person\'s room tickable, the agent\'s not');
+    await tick(page, 'flip-room');
+    must(!(await page.$eval('#signinConnect', (b) => b.disabled)), 'Connect once it is ticked');
+  });
+  await scenario('signin-agent-beside-gone', { app: 'claude', rooms: { 'work-notes': 'tok_work000000000000000000', 'gone-room': 'tok_gone000000000000000000' }, api: { decide: DECIDE('claude') } }, async (page) => {
+    await page.waitForFunction(() => /no longer exists/.test(document.getElementById('signinRooms')?.innerText || ''), null, { timeout: 5000 });
+    must(!(await page.$('#signinAgentsOnly')) && !!(await page.$('#signinForm')) && (await page.$eval('#signinConnect', (b) => b.disabled)), 'the form, no sentence, and Connect waiting');
+  });
   await scenario('signin-decline-requests', { app: 'claude', api: { decide: DECIDE('claude') } }, async (page, S) => {
     await page.click('#signinDeny');
     await page.waitForSelector('#back', { timeout: 10000 });
@@ -443,7 +609,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
     must(!r.closedEarly, 'the opener\'s handle never read closed before the callback ran');
     return { msgs: r.msgs.length };
   });
-  // a retry after a lost answer: the approval went through, its answer did not reach the page; the same link again is already used
+  // a retry after a lost answer in the made case: the approval went through, its answer did not reach the page; Connect again checks, and the check finds the link used
   let spent = false;
   const retry = {
     decide: async (body, S) => {
@@ -511,7 +677,7 @@ const USED = "This sign-in link has already been used. If you just approved it a
   await state('conns-left', { ...KEYS, api: leftThenDone, stored: /^chat-signin:/ }, async (page) => {
     await page.click('#keyConnList li[data-conn="' + DCODE_ID + '"] .key-conn-drop');
     await page.waitForSelector('#keyConnDropDlg[open]', { timeout: 4000 });
-    must((await text(page, '#keyConnDropDlg')) === "Disconnect Claude everywhere? It stops working at once in every room it joined through this connection. It stays a member of those rooms until it leaves or the site's owner removes it. It lets go of the Muse wakes it set up: each one goes, unless another key or connection holding the same seat, or a registration with the room's own token, also holds it. Cancel Disconnect", await text(page, '#keyConnDropDlg'));
+    must((await text(page, '#keyConnDropDlg')) === "Disconnect Claude everywhere? It stops working at once in every room it joined through this connection. It stays a member of each of those rooms that still takes its invite, until it leaves or the site's owner removes it. It lets go of the Muse wakes it set up: each one goes, unless another key or connection holding the same seat, or a registration with the room's own token, also holds it. Cancel Disconnect", await text(page, '#keyConnDropDlg'));
     await page.click('#keyConnDropYes');
     await page.waitForFunction(() => /family-trip/.test(document.getElementById('keyConnSay')?.textContent || ''), null, { timeout: 5000 });
     must((await text(page, '#keyConnSay')) === W.signinDropNote(['family-trip']), await text(page, '#keyConnSay'));
@@ -521,7 +687,18 @@ const USED = "This sign-in link has already been used. If you just approved it a
     await page.waitForSelector('#keyConns', { timeout: 5000 });
     await page.click('#keyConnList li[data-conn="' + DCODE_ID + '"] .key-conn-drop');
     await page.waitForSelector('#keyConnDropDlg[open]', { timeout: 4000 });
+    must((await text(page, '#keyConnDropDlg')).includes("It stays a member of each of those rooms that still takes its invite, until it leaves or the site's owner removes it."), await text(page, '#keyConnDropDlg'));
   });
+  // a disconnect whose wake list did not open: the site ended the connection all the same, so its record goes and nothing is offered again
+  const unreadable = { disconnect: async () => ({ body: { disconnected: true, wakes_left: null, note: W.signinDropNote(null) } }) };
+  await state('conns-unreadable', { ...KEYS, api: unreadable, stored: /^chat-signin:/ }, async (page) => {
+    await page.click('#keyConnList li[data-conn="' + DCODE_ID + '"] .key-conn-drop');
+    await page.waitForSelector('#keyConnDropDlg[open]', { timeout: 4000 });
+    await page.click('#keyConnDropYes');
+    await page.waitForFunction((n) => document.getElementById('keyConnSay')?.textContent === n, W.signinDropNote(null), { timeout: 5000 });
+    must((await page.evaluate((k) => localStorage.getItem(k), 'chat-signin:' + DCODE_ID)) === null, 'its record removed');
+    must(!(await page.$('#keyConnList li[data-conn="' + DCODE_ID + '"]')) && !/Disconnect again/.test(await text(page, '#keyConns')), 'its row is gone, and nothing says Disconnect again');
+  }, '#keyConns');
   // the For agents view's card: Claude's apps sign in, and the same reminder as the approval page's
   await state('agents-card', { url: ORIGIN + '/#agents', ready: '#view-agents', api: {} }, async (page) => {
     must((await text(page, '#agentsSignin')) === 'Sign in from Claude Claude and Claude Code can join your rooms without a key: add a connector for chat.victorio.cloud/api/mcp/signin, connect, and approve the rooms on the page that opens. ' + NEVER, await text(page, '#agentsSignin'));

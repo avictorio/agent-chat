@@ -120,7 +120,13 @@ Front-end conventions.
   the making card's sits above its button, and its margin spaces it. A
   failure says what is left (the answer's note on `left_unused` and
   `maybe_unused`, else "Nothing was kept."), and a lost answer that a key
-  made then is lost and that making it again uses the same seats. A pasted key is checked for its form
+  made then is lost and that making it again uses the same seats. A 5xx
+  whose body carries neither an `error` sentence nor a `code` is the
+  platform's own page, not the Worker's (the Worker rethrows what it did
+  not expect), so the call's failure (`useSeatRun`, never its check) is
+  said as a lost answer too; a 5xx with the Worker's JSON stays a refusal,
+  said with what it left. The two forms and the approval page share this
+  run (`features/home/seatForm.tsx`). A pasted key is checked for its form
   first, then opened (`GET /api/agent`): its rooms with their state and
   "Muse wake set up with this key" (`muse_wake`: what the key records, not
   that the wake is still on), Add rooms (the device's rooms not on it; a full key says so), Take
@@ -150,8 +156,10 @@ Front-end conventions.
   row says the agent stays a member if it still is one, and points at
   Leave this room for taking it out. Membership is said only of
   rooms that still take the key's invite: the take-off dialog of a refused
-  row says the room no longer takes it, and that the Muse wake set up with
-  the key there is turned off where the row has one (else that nothing
+  row says the room no longer takes it, and that the key lets go of the
+  Muse wake set up with it there where the row has one, which stays on
+  while another key or connection holding the same seat, or a
+  registration with the room's own token, holds it (else that nothing
   else changes there), the disconnect dialog limits its sentence to those
   rooms, and the disconnect result names only rooms the key showed as
   held. A disconnect that left Muse wakes (`muse_wakes_left`) names those
@@ -175,6 +183,70 @@ Front-end conventions.
   rendered as text. Copy goes through the toast bus (`ToastHost`, which the
   home page renders).
 
+- **The sign-in's approval page:** `/oauth/authorize`
+  (`features/signin/SignInApproval.tsx`; `App.tsx` renders it on that
+  path). The Worker checks the request first and then serves the app
+  shell (`docs/agents/rooms-and-api.md`, Sign-in); the page reads the
+  request from its own URL and sends the query string back to `POST
+  /api/oauth/decide` exactly as it got it. The app is named from the
+  page's pinned copy (`apps.ts`, held equal to the Worker's `KNOWN_APPS`,
+  the scope sentence and `OAUTH_IDLE_DAYS` by
+  `tests/unit/signin-page.test.mjs`), never from the request; an unknown
+  `client_id` shows the unknown-app sentence and asks nothing. The rooms
+  are the device's (`chat-invite:`, `chat-you:`), each looked at once
+  with `GET /invite` through the key page's seat form (`seatForm.tsx`:
+  the looks, the rows, the check, the pause before a reused seat, the
+  call). "Your rooms in this browser are all agents' invites" shows only
+  when every room's look is an agent's; any other mix shows the form,
+  whose rows say why each one cannot be ticked. Nothing is ticked at
+  first; focus starts on the heading and the page has no `<form>`, so no
+  key press chooses a button; Don't connect and Connect are alike (size,
+  weight, colours), Don't connect first, in a bar fixed at the foot, so
+  declining is one tap away with any number of rooms. The bar's progress
+  line is the page's live region and stays rendered while empty, taking
+  no height (`.signin-say:empty`), so its words are read out when they
+  come. The window moves only to decide's answer, and only when it is an
+  `http:` or `https:` address (the loopback callbacks are `http:`):
+  anything else stays, says "The site's answer can't be followed from
+  this page. Start again from the app." in the bar, and keeps Don't
+  connect, since this origin holds the browser's invites. A lost answer
+  (no answer, or the platform's page in place of the Worker's) says the
+  page cannot tell whether the connection was made, that the app never
+  received one if it was, and that Connect tries again (a request that
+  did not approve is given back; one that did is spent, so the next
+  check shows "already used"). It stores one thing: after an approval
+  whose answer carries the disconnect-only code, the connection's record
+  `chat-signin:<id>` (`records.ts`; `AGENTS.md` section 5), and it hands
+  the connection to the app only once that record reads back as written.
+  A record the browser does not keep stops the page before the app
+  receives anything: it sends `POST /api/oauth/disconnect` with the code
+  once, as best it can, keeps no copy, says nothing is connected and the
+  seats stay unused, and offers only Don't connect, which tells the app
+  it did not connect. Every name and sentence from the server is rendered
+  as text. Its answers carry `AUTHORIZE_HEADERS` (`worker/routes/pages.ts`):
+  `frame-ancestors 'none'` and `X-Frame-Options: DENY` (no site may frame
+  a page that approves), `no-store`, `no-referrer`, and no
+  `Cross-Origin-Opener-Policy`: an app may open the page as a popup and
+  wait for its callback window, and with COOP `same-origin` a page opened
+  from another origin moves to a browsing context group of its own for
+  the window's whole life, so the opener would never see the sign-in
+  finish (`signin-popup` fails with it put back). The UI harness serves
+  the page with the same list.
+- **Connections approved in this browser:** the Agent keys view's third
+  section (`Connections` in `AgentKeys.tsx`), shown while a record is
+  kept: each connection's app, when it was approved and its rooms, with
+  Disconnect (asked first in a `<dialog>`, which says the agent stays a
+  member of each room that still takes its invite and that its Muse wakes
+  are let go of) and Forget (the record only; the site is asked nothing).
+  Disconnect sends the record's code to `POST /api/oauth/disconnect` and
+  shows the server's note; the record goes when no room is left to
+  confirm its wakes, or when the site could not read them (`wakes_left:
+  null`: it ended the connection all the same), and stays, its button
+  "Disconnect again", while rooms are left. A connection already ended
+  says so and loses its record. There is no Leave: the code opens no
+  invite. Home's room Forget leaves these records alone. The For agents
+  view has a "Sign in from Claude" card with the address and the same
+  reminder the approval page ends its warning with.
 - **Install strip:** the native install prompt on Android, Share steps on
   iOS, with one shared 30-day dismissal for the home banner and the room
   strip, under the localStorage key `ac:install-hide-2`
