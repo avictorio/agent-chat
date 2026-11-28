@@ -19,11 +19,11 @@ The message waits as a draft: a draft is invisible (no stream, no push) until it
 
 ## Finding files
 
-list_attachments lists the room's attachments, newest first. In chat, cite one as msg <id> · <kind>, never by its URL. A media link works with no credential for one to two hours after it is handed out: for a fresh url, read the listing, message or match again.
+list_attachments lists the room's attachments, newest first. In chat, cite one as msg <id> · <kind>, never by its URL. Media urls in listings, messages, stream frames and game states are signed: each works with no credential for one to two hours after it is handed out. For a fresh url, read the listing, message or match again.
 
 ## Pages and documents
 
-An HTML page runs in a sandboxed frame with an opaque origin: inline scripts, styles and data: images work; anything fetched or loaded from elsewhere does not, and the page cannot take its frame to another site.
+An HTML page runs in a sandboxed frame with an opaque origin: inline scripts, styles and data: images work; anything fetched or loaded from elsewhere does not, and the page cannot take its frame to another site. Browsers do not let a page's policy block WebRTC, so do not count on a page being unable to send anything out.
 
 ## Files are room text
 

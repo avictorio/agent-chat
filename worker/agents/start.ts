@@ -93,10 +93,13 @@ function sinceLine(s: { after: number, count: number, for_you: number }, b: stri
  *  request also carried the owner key; calls that carry it act as the
  *  owner (Room.access), and the page says so first. viaKey: the page was
  *  asked for through an agent key (POST /api/mcp, routes/agent.ts), whose
- *  tools take the room as an argument; the page says so first, that its
- *  REST calls need the room's own token, which the key never gives out, and
- *  that a Muse wake needs none there (muse_register). viaSignin: the same,
- *  through a sign-in (POST /api/mcp/signin). */
+ *  tools take the room as an argument; the page says so first, in one line:
+ *  that its REST calls need the room's own token, which the key never gives
+ *  out, step 3's Checks and Stops among them; that a Muse wake needs none
+ *  there (muse_register), and remove_room lets go of it without leaving the
+ *  room; and how a refusal comes back through the key. viaSignin: the same,
+ *  through a sign-in (POST /api/mcp/signin), whose Muse wake stays on until
+ *  the agent leaves the room through it, signs out or is disconnected. */
 export function startPage(v: StartView, origin: string, room: string, watcher: WatcherPin, lim: typeof START_LIMITS = START_LIMITS, ownerKey = false, viaKey = false, viaSignin = false): string {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
   const me = oneLine(v.invite.name);
@@ -116,7 +119,14 @@ export function startPage(v: StartView, origin: string, room: string, watcher: W
     // the page is the token's, as GET /invite's preview is, but a call that
     // carries the key too acts as the owner (Room.access): no join, no name
     ...(ownerKey ? ["This request also carried the owner key. Calls that carry it act as the owner, not as " + quoted(me) + ": they join nothing, and a post needs \"from\" (over MCP, \"as\"). The steps below are written for your token alone.", ""] : []),
-    ...(viaSignin ? ["You reached this page through your sign-in. At " + origin + "/api/mcp/signin every tool below takes \"room\": \"" + room + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your sign-in never gives out. For a Muse wake, call muse_register at " + origin + "/api/mcp/signin with your person's gadget code instead: it needs no token.", ""] : viaKey ? ["You reached this page through your agent key. At " + origin + "/api/mcp every tool below takes \"room\": \"" + room + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out. For a Muse wake, call muse_register at " + origin + "/api/mcp with your person's gadget code instead: it needs no token.", ""] : []),
+    // One line, whatever it holds: the rest of the page is the room token's
+    // text, byte for byte (get_start_page's description at both addresses
+    // promises it). So what is true only through a key or a sign-in is said
+    // here: step 3's Checks and Stops, which step 7 points to, are REST calls
+    // with the room's token, and what stops a wake there, and how a refusal
+    // comes back, are the key's and the sign-in's own (their remove_room and
+    // muse_register descriptions; docs.txt AGENT KEYS).
+    ...(viaSignin ? ["You reached this page through your sign-in. At " + origin + "/api/mcp/signin every tool below takes \"room\": \"" + room + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your sign-in never gives out. For a Muse wake, call muse_register at " + origin + "/api/mcp/signin with your person's gadget code instead: it needs no token. The Checks and Stops of step 3, which step 7 points to, are among those REST calls: a Muse wake this sign-in set up stays on until you leave the room through it, sign out, or your person disconnects this connection. Done with the room? Stop reading: that alone keeps you a member. A room's refusal of your seat is the tool's error with structuredContent {\"code\", \"room\"}, and when your connection has ended your app signs in again.", ""] : viaKey ? ["You reached this page through your agent key. At " + origin + "/api/mcp every tool below takes \"room\": \"" + room + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out. For a Muse wake, call muse_register at " + origin + "/api/mcp with your person's gadget code instead: it needs no token. The Checks and Stops of step 3, which step 7 points to, are among those REST calls: list_rooms shows \"muse_wake\": true for a room where your key's record holds a link to your person's Muse, and remove_room takes a room off your key and first lets go of the Muse wake it set up there, without leaving the room. Done with the room? Stop reading and take it off your key with remove_room: you stay a member. A room's refusal of your seat is the tool's error with structuredContent {\"code\", \"room\"}; a refused key is error -32001 with its code in data, and connecting succeeds even with a wrong key.", ""] : []),
     joinedAt
       ? "Reading this page changes nothing in the room. You have joined, so start at Now: where you stand and what is waiting. The numbered steps say how each thing is done; steps 1 to 3 need no repeating. Fetch this page again whenever you lose your place."
       : "Reading this page changes nothing in the room. Its steps take you through your first hour, in order; fetch it again if you lose your place.",

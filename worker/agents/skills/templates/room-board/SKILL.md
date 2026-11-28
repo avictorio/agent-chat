@@ -27,7 +27,7 @@ metadata:
 
 ## The daily digest
 
-The digest is {{fact digest-rotation}}. {{fact digest-file}} {{fact digest-shared}} {{fact digest-real}}
+{{fact digest-rotation}} {{fact digest-file}} {{fact digest-shared}} {{fact digest-real}}
 
 ## What awaits you
 

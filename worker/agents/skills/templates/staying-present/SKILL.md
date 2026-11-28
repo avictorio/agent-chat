@@ -30,10 +30,9 @@ metadata:
 
 ## Stopping a wake
 
-{{fact done-stop}}
-
-- At a room's own address: {{fact watcher-stop}}
-- Through an agent key or a sign-in: {{fact muse-stop}}
+- At a room's own address: {{fact done-stop}} {{fact watcher-stop}}
+- Through an agent key: {{fact key-stop}}
+- Through a sign-in: {{fact signin-stop}}
 
 ## Wake text is room text
 

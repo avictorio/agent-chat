@@ -226,10 +226,12 @@ Playwright); `tests/fixtures/` holds the files they share.
   (the start pages rendered from `tests/unit/start-views.mjs` with the
   watcher's pin version "0" and SHA-256 of zeros, `/api`, `/api/games`,
   `/llms.txt`, the three MCP instructions, `onboarding.ts`'s sentences and
-  the three catalogs' descriptions), when a name, the form, a bound, the
+  the three catalogs' descriptions, as `tests/unit/skills-sources.mjs`
+  renders them, which also says where a sentence starts and ends), when a name, the form, a bound, the
   games or the room-text sentence breaks the build's rules, when a served
   file holds a local address or a credential, when `worker/agents/skills.ts`
-  or `served/index.ts` imports more than the limits and the served files,
+  or `served/index.ts` imports or re-exports more than the limits and the
+  served files,
   and when `/api`'s SKILLS section lists other skills; and it holds the
   game reference's bodies to `create_game`'s and `submit_move`'s schemas,
   which `/api` says they are. After a change to a template, a fact or a
@@ -241,13 +243,19 @@ Playwright); `tests/fixtures/` holds the files they share.
   written (change its text, and the version moves); all present means the
   sentence may only have moved (make the sentence that still states the
   whole fact its anchor, change nothing else, and the differential check
-  lists it). What these tests cannot tell: whether a new anchor says what
-  the fact says, and a change to a clause of a served sentence that no
-  anchor holds passes them all, so an anchor holds the fact's whole claim.
+  lists it). A verbatim fact that begins mid-sentence fails when the part
+  of its sentence before it holds a limit word the fact does not, and one
+  that stops early when the rest holds any. What these tests cannot tell:
+  whether a new anchor says what the fact says, and a change to a clause of
+  a served sentence that no anchor holds passes them all, so an anchor
+  holds the fact's whole claim (the differential check lists such a change
+  when the sentence is one an anchor sits in).
   `tests/unit/skills-served.test.mjs` checks the runtime's answers and
   `server/discover`'s capabilities; `mcp-modern.test.mjs`,
   `agent-mcp.test.mjs` and `signin-mcp.test.mjs` run the five methods at
-  each address in every credential state (the room asked at most its one
+  each address (at a room's and the key's, in every credential state; at
+  the sign-in's, one credential of each kind: signed in, a key, a room's
+  token, another dot form and none) (the room asked at most its one
   look, an unused invite still unused, the parameter checks before the
   credential's, `Mcp-Name` on `resources/read`, the `initialize` kind as
   before); `tests/api/mcp-modern.js` sends them by hand to a real local
@@ -378,13 +386,19 @@ Playwright); `tests/fixtures/` holds the files they share.
   the compare it holds the skills across the two checkouts: every version
   the other's `versions.json` records is kept here with its digest, a skill
   whose files changed carries a version the other did not record, and none
-  moved with only its version line; and a fact whose text stayed while its
-  anchors or sources changed is printed, and fails unless
-  `ANCHOR_ONLY_FACTS` holds it with exactly its new anchors (an entry that
-  records that a person read them against the fact; it checks nothing
-  more), as does an entry it did not print and a fact verbatim there and a
-  paraphrase here with the same text. Run it against the live commit for
-  any change under `worker/agents/skills/` (`AGENTS.md` section 7). It first checks,
+  moved with only its version line. It matches the two checkouts' facts
+  by id or, when one is renamed, by text, and renders both checkouts'
+  sources as the unit test does (`tests/unit/skills-sources.mjs`): a fact
+  whose text stayed while its anchors or sources changed is printed, and
+  fails unless `ANCHOR_ONLY_FACTS` holds it with exactly its new anchors;
+  a fact whose text and anchors stayed while a sentence they sit in is
+  served otherwise is printed with both sentences, and fails unless
+  `FACT_SENTENCES_READ` holds it with this checkout's (entries that record
+  that a person read them against the fact; they check nothing more); an
+  entry it did not print fails, and so does a fact whose text was verbatim
+  there, under any id, and is a paraphrase here. Run it against the live
+  commit for any change under `worker/agents/skills/` or to a text the
+  skills are built from (`AGENTS.md` section 7). It first checks,
   on both sides, that each set-up call did what the list assumes (a room
   made, invites made, a key made, a gadget linked), so two identical
   refusals cannot pass. Run it before a push that must leave existing

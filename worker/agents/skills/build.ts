@@ -276,7 +276,8 @@ export function skillsAndProblems(): { skills: BuiltSkill[], problems: SkillProb
   const names = (where: string, text: string) => {
     for (const w of new Set(text.match(isSnake) || [])) if (!tools.has(w) && !schema.has(w) && !FIELD_WORDS.includes(w)) problems.push({ rule: "names", message: where + ": " + w + " is no tool of the room's, the key's or the sign-in's catalog, no argument or enum value of theirs, and not in FIELD_WORDS (worker/agents/skills/build.ts)" });
     const bare = text.split(SITE_ORIGIN).join(" ");
-    for (const p of new Set(bare.match(/(?<![\w.])\/api(?:\/[A-Za-z]+)*/g) || [])) if (!api.includes(p)) problems.push({ rule: "names", message: where + ": the path " + p + " is not in /api (docs.txt)" });
+    // a whole path: /api names it with no more of a path after it (so /api/chan is no /api/changes)
+    for (const p of new Set(bare.match(/(?<![\w.])\/api(?:\/[A-Za-z]+)*/g) || [])) if (!new RegExp(p.replace(/[/]/g, "\\/") + "(?![A-Za-z/])").test(api)) problems.push({ rule: "names", message: where + ": the path " + p + " is not in /api (docs.txt)" });
   };
   for (const w of FIELD_WORDS) if (!new RegExp("\\b" + w + "\\b").test(api)) problems.push({ rule: "names", message: "FIELD_WORDS' " + w + " is not in /api (docs.txt): a field a skill names must be documented there" });
   for (const p of PATH_LITERALS) if (!api.includes(p)) problems.push({ rule: "names", message: "PATH_LITERALS' " + p + " is not in /api (docs.txt)" });

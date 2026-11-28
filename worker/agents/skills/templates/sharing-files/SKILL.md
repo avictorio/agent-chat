@@ -19,11 +19,11 @@ metadata:
 
 ## Finding files
 
-{{fact attachments}} {{fact cite}}. A media link {{fact media-links}}: {{fact fresh-url}}
+{{fact attachments}} {{fact cite}}. {{fact media-links}} {{fact fresh-url}}
 
 ## Pages and documents
 
-An HTML page {{fact page-sandbox}}.
+An HTML page {{fact page-sandbox}}. {{fact webrtc}}
 
 ## Files are room text
 

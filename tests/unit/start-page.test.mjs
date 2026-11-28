@@ -417,3 +417,47 @@ test("the page stays within its size budgets", () => {
     assert.ok(more > 0 && more <= keyLine, name + " grows by " + more + " characters with the owner key");
   }
 });
+
+// Through an agent key and a sign-in (startPage's viaKey and viaSignin) the
+// page is the room token's page with one line first, as both addresses'
+// get_start_page descriptions say. That line holds what is true only there:
+// the REST calls need the room's own token, step 3's Checks and Stops (which
+// step 7 points to) among them; through a key remove_room lets go of the
+// Muse wake the key set up and keeps the seat, and list_rooms' muse_wake
+// says where the key holds one; through a sign-in its Muse wake stays on
+// until the agent leaves the room through it, signs out or is disconnected;
+// and a room's refusal comes back as the tool's error with code and room.
+// Each sentence is held to the description or /api sentence it restates.
+import { mcpAgentCatalog, mcpSigninCatalog } from "../../worker/agents/mcp.ts";
+import { docs } from "../../worker/agents/docs.ts";
+import { SIGNIN_TOKEN_ENDED } from "../../worker/agents/onboarding.ts";
+import { joined } from "./start-views.mjs";
+test("each way's step 7 and refusals: a room's own token word for word; through a key and a sign-in, one line first with their own Stops and refusals, the rest the token's page", () => {
+  const room7 = "7. Leaving the room\nDone with the room? Remove your wake (its Stop, in step 3) and stop reading: that alone keeps you a member.\n";
+  const roomRefused = "Over MCP it is error -32001 with the code in data, and connecting succeeds even with a wrong token.\n";
+  const key = "You reached this page through your agent key. At " + ORIGIN + "/api/mcp every tool below takes \"room\": \"" + ROOM + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your key never gives out. For a Muse wake, call muse_register at " + ORIGIN + "/api/mcp with your person's gadget code instead: it needs no token. The Checks and Stops of step 3, which step 7 points to, are among those REST calls: list_rooms shows \"muse_wake\": true for a room where your key's record holds a link to your person's Muse, and remove_room takes a room off your key and first lets go of the Muse wake it set up there, without leaving the room. Done with the room? Stop reading and take it off your key with remove_room: you stay a member. A room's refusal of your seat is the tool's error with structuredContent {\"code\", \"room\"}; a refused key is error -32001 with its code in data, and connecting succeeds even with a wrong key.";
+  const signin = "You reached this page through your sign-in. At " + ORIGIN + "/api/mcp/signin every tool below takes \"room\": \"" + ROOM + "\"; list_rooms and whats_waiting cover all your rooms. The REST calls below need this room's own invite token, which your sign-in never gives out. For a Muse wake, call muse_register at " + ORIGIN + "/api/mcp/signin with your person's gadget code instead: it needs no token. The Checks and Stops of step 3, which step 7 points to, are among those REST calls: a Muse wake this sign-in set up stays on until you leave the room through it, sign out, or your person disconnects this connection. Done with the room? Stop reading: that alone keeps you a member. A room's refusal of your seat is the tool's error with structuredContent {\"code\", \"room\"}, and when your connection has ended your app signs in again.";
+  for (const [label, v] of [["before joining", base], ["joined", joined]]) {
+    const own = startPage(v, ORIGIN, ROOM, PIN);
+    assert.ok(own.includes("\n" + room7) && own.includes(roomRefused), label + ": a room's own token keeps step 7 and the refusal as they were");
+    assert.ok(!own.includes("through your agent key") && !own.includes("through your sign-in"), label);
+    for (const [way, line, viaKey, viaSignin] of [["through a key", key, true, false], ["through a sign-in", signin, false, true]]) {
+      const t = startPage(v, ORIGIN, ROOM, PIN, START_LIMITS, false, viaKey, viaSignin);
+      const lines = t.split("\n");
+      assert.equal(lines[2], line, label + ", " + way + ": the one line, after the title");
+      assert.equal(lines[3], "", label + ", " + way);
+      assert.equal(lines.slice(0, 2).concat(lines.slice(4)).join("\n"), own, label + ", " + way + ": the rest is the room token's page, byte for byte");
+    }
+  }
+  // each sentence restates what the site already serves
+  const desc = (cat, name) => cat.find((t) => t.name === name).description;
+  assert.ok(desc(mcpAgentCatalog(), "remove_room").includes("and first lets go of the Muse wake it set up there"), "the key's remove_room lets go of its wake");
+  assert.ok(desc(mcpAgentCatalog(), "remove_room").includes("Taking a room off a key does not leave it: a seat still held there stays."), "and keeps the seat");
+  assert.ok(desc(mcpSigninCatalog(), "muse_register").includes("Leaving a room through this sign-in, signing out, or your person disconnecting this connection lets go of the wakes it set up"), "the sign-in's three ways");
+  assert.ok(desc(mcpSigninCatalog(), "remove_room").includes("A room it still holds comes off only by leaving it"), "the sign-in has no other way that keeps the seat");
+  const api = docs(ORIGIN).replace(/\s+/g, " ");
+  assert.ok(api.includes("Through the key, a room's refusal is the tool's error with structuredContent {\"code\", \"room\"}; a refused key is JSON-RPC error -32001 with data {\"code\"}"), "/api's refusals through a key");
+  assert.ok(api.includes("muse_wake: true in GET /api/agent and list_rooms says the key's record holds a link to your person's Muse for that room"), "/api's muse_wake");
+  assert.ok(SIGNIN_TOKEN_ENDED.endsWith("The app signs in again."), "the sign-in's ended connection");
+  for (const [cat, w] of [[mcpAgentCatalog(), "your key"], [mcpSigninCatalog(), "your sign-in"]]) assert.ok(desc(cat, "get_start_page").endsWith("The same text as a GET of /api/rooms/ROOM with that room's token, with one line first saying it came through " + w + "."), "the description the one line keeps true: " + w);
+});

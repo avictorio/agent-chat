@@ -41,7 +41,10 @@
 // whose text stays while its anchors or sources change is listed, and passes
 // only when ANCHOR_ONLY_FACTS names it with those new anchors: a person's
 // record of having read them against the fact, which nothing checks; a fact
-// verbatim there and a paraphrase here with the same text fails).
+// whose text and anchors stay while a sentence they sit in is served
+// otherwise passes only when FACT_SENTENCES_READ names it with that sentence;
+// facts are matched by their text when renamed; and a fact verbatim there
+// and a paraphrase here with the same text fails).
 // Everything else must be identical.
 //
 //   node tests/api/differential.js /path/to/earlier-checkout
@@ -81,8 +84,13 @@ const EXPECTED_DOC_EDITS = [
 /** The sentences this checkout changes in the agent key's answers and
  *  instructions: [this checkout's, the other's], taken out of this
  *  checkout's copy (as written, and as a JSON string's body), filled as
- *  above. Against fc84da6: none. */
-const EXPECTED_SENTENCE_EDITS = [];
+ *  above. Against 1f2b85b: the start page's one line through a key
+ *  (worker/agents/start.ts), which now also says what stops a wake there,
+ *  what step 3's Checks and Stops are, and how a refusal comes back. */
+const EXPECTED_SENTENCE_EDITS = [
+  [" it needs no token. The Checks and Stops of step 3, which step 7 points to, are among those REST calls: list_rooms shows \"muse_wake\": true for a room where your key's record holds a link to your person's Muse, and remove_room takes a room off your key and first lets go of the Muse wake it set up there, without leaving the room. Done with the room? Stop reading and take it off your key with remove_room: you stay a member. A room's refusal of your seat is the tool's error with structuredContent {\"code\", \"room\"}; a refused key is error -32001 with its code in data, and connecting succeeds even with a wrong key.",
+    " it needs no token."],
+];
 /** The pages whose markup this checkout changes, by label: [this
  *  checkout's, the other's], each taken out of this checkout's copy before
  *  the compare, the words and headers compared as they are. Against
@@ -106,6 +114,15 @@ const NEW_METHODS = new Set(['skills/list', 'skills/get', 'resources/list', 'res
  *  for one not here, or here with other anchors, and for an entry it did not
  *  print. Against 1f2b85b, which has no facts.ts: none. */
 const ANCHOR_ONLY_FACTS = [];
+/** The facts whose served sentence this checkout changes while the fact,
+ *  its text and its anchors stay: [id, source, the sentence as this checkout
+ *  serves it], each put here by the person who has read that sentence
+ *  against the fact. A change to a clause of a sentence that no anchor holds
+ *  shows here and nowhere else. The facts rule prints every such sentence
+ *  (as both checkouts serve it) and fails for one not here, or here with
+ *  another sentence, and for an entry it did not print. Against 1f2b85b,
+ *  which has no facts.ts: none. */
+const FACT_SENTENCES_READ = [];
 /** The answers whose retry time is the seconds left in a counter's window,
  *  which moves with the run (the two servers are asked a while apart): that
  *  number masked in both copies, the Retry-After header and the body's
@@ -587,31 +604,61 @@ function masked(text, tokens) {
         }
       }
     }
-    // The facts rule (worker/agents/skills/facts.ts): a fact whose text stays the same while its anchors
-    // (or verbatim sources) change is printed, for a person to read the new anchors against it; it
-    // passes only when ANCHOR_ONLY_FACTS holds it with exactly those anchors, and every entry there
-    // must be printed. A fact verbatim there and a paraphrase here with the same text fails: its
-    // sentence is no longer served, so its text, and its skill's version, must change.
+    // The facts rule (worker/agents/skills/facts.ts), on facts matched by id, or by their text when
+    // the id is new or names another text there (a rename): a fact whose text stays the same while its
+    // anchors (or verbatim sources) change is printed, for a person to read the new anchors against
+    // it; it passes only when ANCHOR_ONLY_FACTS holds it with exactly those anchors, and every entry
+    // there must be printed. A fact here whose text was verbatim there, under any id, and is a
+    // paraphrase here fails: that sentence is no longer served, so its text, and its skill's
+    // version, must change. And a fact whose text and anchors both stay, while a sentence one of
+    // them sits in is served otherwise here (rendered as the unit test renders it), is printed with
+    // both sentences, and passes only when FACT_SENTENCES_READ holds it with this one.
     const theirFile = path.resolve(OTHER, 'worker', 'agents', 'skills', 'facts.ts');
     const factsHere = (await import('../../worker/agents/skills/facts.ts')).FACTS;
     const factsThere = fs.existsSync(theirFile) ? (await import(pathToFileURL(theirFile).href)).FACTS : null;
-    const printed = new Set();
+    const printed = new Set(), readHere = new Set();
     if (!factsThere) console.log('note facts: the earlier checkout has no worker/agents/skills/facts.ts (it serves no skills): no fact to compare');
     else {
+      const { factSources, placeOf } = await import('../unit/skills-sources.mjs');
+      const srcHere = (await factSources(path.join(__dirname, '..', '..'))).source;
+      const srcThere = (await factSources(path.resolve(OTHER), { lenient: true })).source;
+      const thereByText = new Map();
+      for (const [id, o] of Object.entries(factsThere)) { if (!thereByText.has(o.text)) thereByText.set(o.text, []); thereByText.get(o.text).push([id, o]); }
+      const fold = (t) => t.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[.:;,]$/, '');
       for (const [id, f] of Object.entries(factsHere)) {
-        const o = Object.hasOwn(factsThere, id) ? factsThere[id] : null;
-        if (!o || o.text !== f.text) continue;
+        const sameText = thereByText.get(f.text) || [];
+        if (f.anchors) for (const [was] of sameText.filter(([, o]) => o.verbatim)) ruleFail('facts: ' + id + ' is a paraphrase here, and its text was verbatim in the earlier checkout' + (was === id ? '' : ' (as ' + was + ')') + ': the sentence it was is no longer served, so change its text (and move its skill\'s metadata.version)');
+        const byId = Object.hasOwn(factsThere, id) && factsThere[id].text === f.text ? [id, factsThere[id]] : null;
+        const match = byId || sameText[0] || null;
+        if (!match) continue;
+        const [thereId, o] = match;
         const was = o.anchors || o.verbatim, now = f.anchors || f.verbatim;
-        if (JSON.stringify(was) === JSON.stringify(now) && !!o.anchors === !!f.anchors) continue;
-        printed.add(id);
-        console.log('facts: ' + id + ' keeps its text and changes its ' + (f.anchors ? 'anchors' : 'sources') + '\n  text: ' + f.text + '\n  was:  ' + JSON.stringify(was) + '\n  now:  ' + JSON.stringify(now));
-        if (o.verbatim && f.anchors) { ruleFail('facts: ' + id + ' was verbatim in the earlier checkout and is a paraphrase here with the same text: the sentence it was is no longer served, so change its text (and move its skill\'s metadata.version)'); continue; }
-        const entry = ANCHOR_ONLY_FACTS.find(([x]) => x === id);
-        if (!entry) ruleFail('facts: ' + id + '\'s anchors changed while its text did not: read the new anchors against the fact and, if they state all of it, add [' + JSON.stringify(id) + ', its anchors as facts.ts holds them] to ANCHOR_ONLY_FACTS');
-        else if (JSON.stringify(entry[1]) !== JSON.stringify(now)) ruleFail('facts: ANCHOR_ONLY_FACTS holds ' + id + ' with other anchors than facts.ts does: copy the anchors that were read');
+        if (JSON.stringify(was) !== JSON.stringify(now) || !!o.anchors !== !!f.anchors) {
+          printed.add(id);
+          console.log('facts: ' + id + (thereId === id ? '' : ' (' + thereId + ' in the earlier checkout)') + ' keeps its text and changes its ' + (f.anchors ? 'anchors' : 'sources') + '\n  text: ' + f.text + '\n  was:  ' + JSON.stringify(was) + '\n  now:  ' + JSON.stringify(now));
+          if (o.verbatim && f.anchors) continue;
+          const entry = ANCHOR_ONLY_FACTS.find(([x]) => x === id);
+          if (!entry) ruleFail('facts: ' + id + '\'s anchors changed while its text did not: read the new anchors against the fact and, if they state all of it, add [' + JSON.stringify(id) + ', its anchors as facts.ts holds them] to ANCHOR_ONLY_FACTS');
+          else if (JSON.stringify(entry[1]) !== JSON.stringify(now)) ruleFail('facts: ANCHOR_ONLY_FACTS holds ' + id + ' with other anchors than facts.ts does: copy the anchors that were read');
+          continue;
+        }
+        // the same fact, the same anchors: the sentences they sit in, as each checkout serves them
+        const needles = f.anchors ? f.anchors.map(([k, anchor]) => [k, anchor, false]) : f.verbatim.map((k) => [k, fold(f.text), true]);
+        for (const [k, needle, folded] of needles) {
+          const here = placeOf(srcHere(k).text, needle, { fold: folded }), there = placeOf(srcThere(k).text, needle, { fold: folded });
+          if (!here || !there) { console.log('note facts: ' + id + '\'s ' + (folded ? 'text' : 'anchor') + ' is not found in ' + k + ' as ' + (here ? 'the earlier' : 'this') + ' checkout serves it'); continue; }
+          if (here.sentence === there.sentence) continue;
+          readHere.add(JSON.stringify([id, k, here.sentence]));
+          console.log('facts: ' + id + ' keeps its text and anchors, and a sentence it sits in (' + k + ') is served otherwise\n  text: ' + f.text + '\n  was:  ' + there.sentence + '\n  now:  ' + here.sentence);
+          // an entry is the fact's id, the source and the sentence exactly as printed here
+          if (FACT_SENTENCES_READ.some(([x, y, z]) => x === id && y === k && z === here.sentence)) continue;
+          if (FACT_SENTENCES_READ.some(([x, y]) => x === id && y === k)) ruleFail('facts: FACT_SENTENCES_READ holds ' + id + ' (' + k + ') with another sentence than this checkout serves: copy the sentence that was read');
+          else ruleFail('facts: ' + id + '\'s sentence in ' + k + ' changed while the fact did not: read the new sentence against the fact; if it still states all of it, add [' + JSON.stringify(id) + ', ' + JSON.stringify(k) + ', the sentence as printed] to FACT_SENTENCES_READ, else change the fact');
+        }
       }
     }
     for (const [id] of ANCHOR_ONLY_FACTS) if (!printed.has(id)) ruleFail('facts: ANCHOR_ONLY_FACTS names ' + id + ', whose anchors did not change against the earlier checkout: take it out (the list is written for each release)');
+    for (const [id, k, sentence] of FACT_SENTENCES_READ) if (!readHere.has(JSON.stringify([id, k, sentence]))) ruleFail('facts: FACT_SENTENCES_READ holds ' + id + ' (' + k + ') with a sentence this checkout does not print as changed: take it out, or copy the sentence printed (the list is written for each release)');
   } finally {
     a.stop();
     b.stop();

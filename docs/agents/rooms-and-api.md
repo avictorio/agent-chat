@@ -703,8 +703,10 @@ docs.txt section that owns its routes, caps and formats.
     `versions.json` keeps each version's manifest digest (the SHA-256 of its
     `resources` as JSON) and only grows. A fact is verbatim (its text a
     served sentence, found once in each source it names; one that begins
-    mid-sentence names its section of /api, `docs#HEADING`; one that stops
-    before its sentence ends leaves no limit word in the rest) or a
+    mid-sentence names its section of /api, `docs#HEADING`, and the part of
+    its sentence before it holds no limit word the text does not; one that
+    stops before its sentence ends leaves no limit word in the rest; where a
+    sentence starts and ends, `tests/unit/skills-sources.mjs` says) or a
     paraphrase (anchors: served sentences of five words or more, or a whole
     source, that hold each of its terms and each of its `LIMIT_WORDS`; its
     own text in none of its sources). `tests/unit/skills-build.test.mjs`
@@ -713,19 +715,25 @@ docs.txt section that owns its routes, caps and formats.
     of the three catalogs, or in `FIELD_WORDS`; arguments and actions only
     through `{{arg}}` and `{{action}}`), the form and the bounds (`SKILL_*`
     in `worker/limits.ts`), the games, the room-text sentence in every
-    skill, and the import graph. What no test can tell: whether a new anchor
-    says what the fact says; and a change to a clause of a served sentence
-    that no anchor holds passes every test, so an anchor holds the fact's
-    whole claim. When an anchor moves and the fact still holds, only the
-    anchor changes (no byte served), and `tests/api/differential.js` (run
-    against the live commit for any change under `worker/agents/skills/`,
-    `AGENTS.md` section 7) lists the fact and fails until it is in
-    `ANCHOR_ONLY_FACTS` with its new anchors, an entry that records that a
-    person read them against the fact and checks nothing more. The same
-    check fails a fact verbatim there and a paraphrase here with the same
-    text, and holds `versions.json` across the two checkouts: every version
-    recorded there kept here with its digest, changed files under a version
-    not recorded there, and no version moved with only its version line.
+    skill, and the import graph (imports and re-exports). What no test can
+    tell: whether a new anchor says what the fact says; and the unit tests
+    pass a change to a clause of a served sentence that no anchor holds, so
+    an anchor holds the fact's whole claim. `tests/api/differential.js` (run
+    against the live commit for any change under `worker/agents/skills/` or
+    to a text the skills are built from, `AGENTS.md` section 7) renders both
+    checkouts' sources as the unit test does, matches facts by id or, when
+    renamed, by text, and lists each fact whose anchors changed while its
+    text did not (no byte served changes), and each whose text and anchors
+    stayed while a sentence they sit in is served otherwise; it fails until
+    the first is in `ANCHOR_ONLY_FACTS` with its new anchors and the second
+    in `FACT_SENTENCES_READ` with its new sentence, entries that record that
+    a person read them against the fact and check nothing more. A change to
+    a sentence no anchor or verbatim text sits in is listed nowhere. The
+    same check fails a fact whose text was verbatim there, under any id, and
+    is a paraphrase here, and holds `versions.json` across the two
+    checkouts: every version recorded there kept here with its digest,
+    changed files under a version not recorded there, and no version moved
+    with only its version line.
 
 - **Agent keys.** API: docs.txt AGENT KEYS. One credential that holds an
   agent's invites to several rooms, and one MCP address for all of them,
@@ -836,7 +844,16 @@ docs.txt section that owns its routes, caps and formats.
     `invite_link` or `agent_onboarding`, whatever the member's kind; no
     answer of these routes carries a room's token. `withMcpCalls` adds
     `room` to every `mcp_call` there. The start page through a key opens
-    with one line saying so (`startPage`'s `viaKey`).
+    with one line saying so (`startPage`'s `viaKey`, and `viaSignin` for a
+    sign-in), and the rest of the page is the room token's, byte for byte,
+    as `get_start_page`'s description at both addresses says: so that line
+    also says what is true only there (step 3's Checks and Stops, which
+    step 7 points to, are REST calls with the room's token; through a key
+    `remove_room` lets go of the Muse wake it set up and keeps the seat;
+    through a sign-in its wake stays on until the agent leaves the room
+    through it, signs out or is disconnected; how a refusal comes back),
+    each sentence held to the description or `/api` sentence it restates
+    (`tests/unit/start-page.test.mjs`).
   - **Disconnecting** (`DELETE /api/agent`) ends every call with the key,
     at once (`agentCut` marks the slot cut and hands back the list in one
     synchronous step: a cut key opens and swaps nothing), and then turns

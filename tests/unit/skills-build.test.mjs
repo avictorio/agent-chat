@@ -16,15 +16,12 @@ import {
   FIELD_WORDS, GAME_REFERENCES, SKILL_ORDER, SKILL_PREFIX,
   buildSkills, digestOf, factText, holdsWord, limitWordsOf, manifestDigest, renderIndex, sectionOf, skillEntry, skillsAndProblems, termsOf, versionRule,
 } from "../../worker/agents/skills/build.ts";
+import { factSources, placeOf, sectionNamed } from "./skills-sources.mjs";
 import { FACTS, LIMIT_WORDS } from "../../worker/agents/skills/facts.ts";
 import { SERVED_SKILLS } from "../../worker/agents/skills/served/index.ts";
 import { SITE_ORIGIN } from "../../worker/limits.ts";
-import { START_LIMITS, startPage } from "../../worker/agents/start.ts";
-import { docs, gamesDocs, primer } from "../../worker/agents/docs.ts";
-import * as OB from "../../worker/agents/onboarding.ts";
-import { mcpAgentCatalog, mcpCatalog, mcpSigninCatalog } from "../../worker/agents/mcp.ts";
+import { docs, gamesDocs } from "../../worker/agents/docs.ts";
 import { GAME_ENGINES } from "../../worker/games/engine.ts";
-import { ROOM, base, joined } from "./start-views.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DIR = path.join(ROOT, "worker", "agents", "skills");
@@ -33,50 +30,13 @@ const rel = (p) => path.relative(ROOT, p).split(path.sep).join("/");
 const walk = (dir) => (existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)])) : []);
 const sha = (bytes) => "sha256:" + createHash("sha256").update(bytes).digest("hex");
 
-// ---- the texts a fact is held to, rendered as the site serves them ----
+// ---- the texts a fact is held to, rendered as the site serves them (tests/unit/skills-sources.mjs) ----
 
-// the watcher's pin is fixed: no fact names its values
-const PIN = { version: "0", sha256: "0".repeat(64) };
-const page = (view, viaKey, viaSignin) => startPage(view, SITE_ORIGIN, ROOM, PIN, START_LIMITS, false, viaKey, viaSignin);
-const CATALOGS = { tool: mcpCatalog(), "agent-tool": mcpAgentCatalog(), "signin-tool": mcpSigninCatalog() };
-CATALOGS.arg = CATALOGS.tool; CATALOGS["agent-arg"] = CATALOGS["agent-tool"]; CATALOGS["signin-arg"] = CATALOGS["signin-tool"];
-/** A section of a served text, by its heading or the heading's words before " (": "" when none. */
-function sectionNamed(text, name) {
-  const head = text.split("\n").find((l) => l === name || l.startsWith(name + " ("));
-  return head ? sectionOf(text, head) : "";
-}
-/** A fact's source as served (its text), and the tool and argument it names. */
-function source(k) {
-  const [kind, section] = k.split("#");
-  let text, names = [];
-  if (kind === "start:unjoined") text = page(base, false, false);
-  else if (kind === "start:joined") text = page(joined, false, false);
-  else if (kind === "start:key") text = page(base, true, false);
-  else if (kind === "start:signin") text = page(base, false, true);
-  else if (kind === "docs") text = docs(SITE_ORIGIN);
-  else if (kind === "games") text = gamesDocs(SITE_ORIGIN);
-  else if (kind === "llms") text = primer(SITE_ORIGIN);
-  else if (kind === "instructions:room") text = OB.mcpInstructions(SITE_ORIGIN, "ok");
-  else if (kind === "instructions:key") text = OB.agentInstructions(SITE_ORIGIN, "ok");
-  else if (kind === "instructions:signin") text = OB.signinInstructions(SITE_ORIGIN);
-  else {
-    let m;
-    if ((m = /^onboarding:(\w+)$/.exec(kind))) { const v = OB[m[1]]; text = typeof v === "function" ? v(SITE_ORIGIN) : typeof v === "string" ? v : ""; }
-    else if ((m = /^((?:agent-|signin-)?tool):(\w+)$/.exec(kind))) { text = (CATALOGS[m[1]].find((t) => t.name === m[2]) || {}).description || ""; names = [m[2]]; }
-    else if ((m = /^((?:agent-|signin-)?arg):(\w+)\.(\w+)$/.exec(kind))) { const t = CATALOGS[m[1]].find((x) => x.name === m[2]); text = (t && t.inputSchema.properties[m[3]] && t.inputSchema.properties[m[3]].description) || ""; names = [m[2], m[3]]; }
-    else throw new Error("unknown fact source " + k + " (facts.ts FactSource names the kinds)");
-  }
-  if (section !== undefined) {
-    if (kind !== "docs" && kind !== "games") throw new Error(k + ": only docs and games have sections");
-    text = sectionNamed(text, section);
-  }
-  return { text, names };
-}
+const { source, CATALOGS } = await factSources(ROOT);
 const norm = (s) => s.replace(/\s+/g, " ");
 /** the fold of a verbatim fact: whitespace runs as one space, case folded, a final . : ; or , dropped */
 const fold = (s) => norm(s).trim().toLowerCase();
 const foldText = (s) => fold(s).replace(/[.:;,]$/, "");
-const count = (hay, needle) => hay.split(needle).length - 1;
 
 // ---- 1. stale output ----
 
@@ -151,31 +111,32 @@ test("4. every fact is of one kind and holds: a verbatim fact's text is served, 
   }
   for (const [id, f] of VERBATIM) {
     const text = factText(id), want = foldText(text);
-    // a text that begins mid-sentence, its subject the template's, names the section of /api it is in
-    if (/^[a-z]/.test(text)) for (const k of f.verbatim) assert.ok(k !== "docs" && k !== "games", id + " begins mid-sentence, so " + k + " must name the section it is in (" + k + "#HEADING): the same words elsewhere in it, with another subject, would not state this fact");
     for (const k of f.verbatim) {
-      const s = fold(source(k).text);
-      assert.ok(s.length > 0, id + ": its source " + k + " is empty or gone (a section renamed?)");
-      assert.equal(count(s, want), 1, count(s, want) === 0
-        ? "fact " + id + " is verbatim, and its text is no longer served in " + k + ":\n    " + text + "\n  Change its text to what the site serves now; its skill's bytes change, so run npm run skills and move that skill's metadata.version."
-        : "fact " + id + "'s text is served " + count(s, want) + " times in " + k + (k.includes("#") ? ": quote more of its sentence, so it is found once" : ": name the section it means (" + k + "#HEADING)"));
+      const s = source(k).text;
+      assert.ok(s.trim().length > 0, id + ": its source " + k + " is empty or gone (a section renamed?)");
+      const at = placeOf(s, want, { fold: true });
+      assert.ok(at, "fact " + id + " is verbatim, and its text is no longer served in " + k + ":\n    " + text + "\n  Change its text to what the site serves now; its skill's bytes change, so run npm run skills and move that skill's metadata.version.");
+      assert.equal(at.count, 1, "fact " + id + "'s text is served " + at.count + " times in " + k + (k.includes("#") ? ": quote more of its sentence, so it is found once" : ": name the section it means (" + k + "#HEADING)"));
+      // a text that begins mid-sentence (its subject the template's) names the section of /api it is in
+      if (at.head.trim()) assert.ok(k !== "docs" && k !== "games", id + " begins mid-sentence in " + k + " (\"" + at.head.trim().slice(-60) + " ...\"), so it must name the section it is in (" + k + "#HEADING): the same words elsewhere, with another subject, would not state this fact");
+      // the part of its sentence before it holds no limit word the text does not
+      const own = new Set(limitWordsOf(want, LIMIT_WORDS));
+      const before = limitWordsOf(at.head, LIMIT_WORDS).filter((w) => !own.has(w));
+      assert.deepEqual(before, [], "fact " + id + " begins after \"" + at.head.trim().slice(-120) + "\" in " + k + ", which holds " + before.join(", ") + " that its text does not: a condition before it would not reach the skill. Start its text where its sentence starts, or make it a paraphrase anchored on the whole sentence.");
       // a text that stops before its served sentence ends leaves no limit word in the rest of it
-      const rest = s.slice(s.indexOf(want) + want.length);
-      const end = /[.!?](?:\s|$)/.exec(rest);
-      const tail = end ? rest.slice(0, end.index) : rest;
-      const dropped = limitWordsOf(tail, LIMIT_WORDS);
-      assert.deepEqual(dropped, [], "fact " + id + " stops before its served sentence in " + k + " ends, and the rest holds " + dropped.join(", ") + ": \"..." + tail.slice(0, 120) + "\". Take the rest into its text, or make it a paraphrase anchored on the whole sentence.");
+      const dropped = limitWordsOf(at.tail, LIMIT_WORDS);
+      assert.deepEqual(dropped, [], "fact " + id + " stops before its served sentence in " + k + " ends, and the rest holds " + dropped.join(", ") + ": \"..." + at.tail.slice(0, 120) + "\". Take the rest into its text, or make it a paraphrase anchored on the whole sentence.");
     }
   }
   for (const [id, f] of PARAPHRASES) {
     const text = factText(id);
     for (const [k, a] of f.anchors) {
       const s = source(k).text;
-      assert.ok(norm(s).includes(norm(a)), "fact " + id + ": its anchor in " + k + " is no longer served.\n  anchor: " + a + "\n  text:   " + text + "\n  " + marks(text, s)
+      assert.ok(placeOf(s, a), "fact " + id + ": its anchor in " + k + " is no longer served.\n  anchor: " + a + "\n  text:   " + text + "\n  " + marks(text, s)
         + "\n  If a term or a limit word is absent from the source, the fact is no longer true as written: change its text (npm run skills then asks for its skill's metadata.version to move)."
         + "\n  If all are present and a served sentence still states the whole fact, make that sentence the anchor and change nothing else; tests/api/differential.js then lists the fact, and fails until a person who has read the new anchors against the fact puts them in its ANCHOR_ONLY_FACTS.");
     }
-    for (const k of new Set(f.anchors.map(([at]) => at))) assert.ok(!fold(source(k).text).includes(foldText(text)), "fact " + id + "'s text is served in " + k + ": it is verbatim, so mark it so (verbatim: [sources], no anchors)");
+    for (const k of new Set(f.anchors.map(([at]) => at))) assert.ok(!placeOf(source(k).text, foldText(text), { fold: true }), "fact " + id + "'s text is served in " + k + ": it is verbatim, so mark it so (verbatim: [sources], no anchors)");
   }
   // every fact is said somewhere
   assert.ok(skills, NOT_BUILT);
@@ -285,14 +246,15 @@ test("11. the Worker's skills modules import only the limits, the served files a
   const importsOf = (file) => {
     const src = readFileSync(file, "utf8");
     assert.ok(!/\bimport\s*\(|\brequire\s*\(/.test(src), rel(file) + " imports dynamically");
-    return [...src.matchAll(/^\s*import\s+(type\s+)?[^;]*?from\s+"([^"]+)";?$|^\s*import\s+"([^"]+)";?$/gm)].map((m) => ({ type: !!m[1], from: m[2] || m[3] }));
+    // imports and re-exports alike: an export ... from reaches the module it names
+    return [...src.matchAll(/^\s*(?:import|export)\s+(type\s+)?[^;]*?from\s+"([^"]+)";?$|^\s*import\s+"([^"]+)";?$/gm)].map((m) => ({ type: !!m[1], from: m[2] || m[3] }));
   };
   for (const i of importsOf(path.join(ROOT, "worker", "agents", "skills.ts"))) {
-    assert.ok(i.from === "../limits.js" || i.from === "./skills/served/index.js" || (i.type && i.from === "./skills/types.js"), "worker/agents/skills.ts imports " + i.from + ": it may import only ../limits.js, ./skills/served/index.js and types from ./skills/types.js, so the Worker bundles no template, fact or build code and no room module reaches a skill");
+    assert.ok(i.from === "../limits.js" || i.from === "./skills/served/index.js" || (i.type && i.from === "./skills/types.js"), "worker/agents/skills.ts imports or re-exports " + i.from + ": it may import only ../limits.js, ./skills/served/index.js and types from ./skills/types.js, so the Worker bundles no template, fact or build code and no room module reaches a skill");
   }
   const files = new Set(SERVED_SKILLS.flatMap((s) => s.files.map((f) => "./" + f.uri.slice(SKILL_PREFIX.length))));
   const idx = importsOf(path.join(SERVED, "index.ts"));
-  for (const i of idx) assert.ok(files.has(i.from) || (i.type && i.from === "../types.js"), "served/index.ts imports " + i.from + ": only the served files and a type");
+  for (const i of idx) assert.ok(files.has(i.from) || (i.type && i.from === "../types.js"), "served/index.ts imports or re-exports " + i.from + ": only the served files and a type");
   assert.equal(idx.filter((i) => !i.type).length, files.size, "one import per served file");
 });
 

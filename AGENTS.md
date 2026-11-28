@@ -430,13 +430,16 @@ Before pushing:
      connects with).
    - A new schema step also runs `tests/upgrade/run.sh` (section 13,
      Schema changes).
-   - A change to anything under `worker/agents/skills/` also runs
-     `node tests/api/differential.js` against the commit that is live
-     (`docs/agents/testing.md`, The differential check): the skills'
-     versions rule (`versions.json` only grows, and a skill's version
-     moves with its bytes), the listing of facts whose anchors changed
-     while their text did not, and the rule that a verbatim fact cannot
-     turn into a paraphrase run there and nowhere else.
+   - A change to anything under `worker/agents/skills/`, or to a text
+     the skills are built from (`docs.txt`, `games.txt`, `primer.txt`,
+     `etiquette.txt`, `start.ts`, `onboarding.ts`, the tool descriptions
+     in `mcp.ts`), also runs `node tests/api/differential.js` against the
+     commit that is live (`docs/agents/testing.md`, The differential
+     check): the skills' versions rule (`versions.json` only grows, and a
+     skill's version moves with its bytes), the listing of facts whose
+     anchors changed while their text did not or whose served sentence
+     changed under them, and the rule that a verbatim fact cannot turn
+     into a paraphrase, renamed or not, run there and nowhere else.
 2. For UI changes, do the visual checks in section 10 — inspect visually
    before committing, at desktop and mobile sizes.
 3. A change meant to leave behaviour alone (a move, types, comments) should
@@ -789,14 +792,20 @@ native-only features. The Android app is retired (section 8).
   field, a path or a rule is a fact (the served sentence itself, verbatim,
   or a paraphrase anchored on the served text) or a name the build checks;
   a template's own words are headings, advice, connectives and words about
-  the skills, and a new claim goes into a fact. An anchor holds the fact's
-  whole claim, every clause of it: a change to a clause of a served
-  sentence that no anchor holds passes every test. When a paraphrase's
-  anchor moves and the fact still holds, change only the anchor, read the
-  new anchor against the fact, and add the fact's id with its new anchors
-  to `ANCHOR_ONLY_FACTS` in `tests/api/differential.js`: that entry records
-  that a person read them, it does not check it. Nothing of a request, a
-  room or a member reaches a skill.
+  the skills, and a new claim goes into a fact. A skill's frontmatter
+  description sums up its body: the build checks the names in it against
+  the catalogs, and its claims are own words, which a person reads against
+  the body whenever it changes. An anchor
+  holds the fact's whole claim, every clause of it: the unit tests pass a
+  change to a clause no anchor holds, and the differential check lists it
+  only when it is in a sentence an anchor or a verbatim text sits in. When
+  a paraphrase's anchor moves and the fact still holds, change only the
+  anchor, read the new anchor against the fact, and add the fact's id with
+  its new anchors to `ANCHOR_ONLY_FACTS` in `tests/api/differential.js`;
+  when a sentence a fact sits in changes and the fact still holds, add the
+  fact's id, the source and the new sentence to `FACT_SENTENCES_READ`
+  there. Each entry records that a person read them; it does not check
+  it. Nothing of a request, a room or a member reaches a skill.
 
 ---
 

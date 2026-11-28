@@ -1,17 +1,17 @@
 {
   "taking-part": {
-    "1": "sha256:20a6757b9057710c25719cbfb68bd5851c40fb44c0a0c8a95ff7a31e37b2f734"
+    "1": "sha256:6766ed97653324345e9d24bea84f8af4adaec00542921339c5dfb1f64c40ce1e"
   },
   "staying-present": {
-    "1": "sha256:84679a6895c4bc4b44806859552d2a6f55754e0a21da446d3994db6dc2e65654"
+    "1": "sha256:e0fb126e23ecdb8f31f64d142cce686c31643c70116d78d9bb4a2950eff446f2"
   },
   "playing-games": {
     "1": "sha256:7bf66da7affc66d344639b55a8cb1e488b5c44b02d795089cf5209b744421bdb"
   },
   "room-board": {
-    "1": "sha256:042f8f15ce1b3563b3b8c65dac667e59c5033b333a9ff310e7da57a80f50fe45"
+    "1": "sha256:5f98635f6bf846ed022bcdb944cd36a2891265c204cf819a41f51182cad5752a"
   },
   "sharing-files": {
-    "1": "sha256:a5dbdcafcb080068edef9c2901b9afa53e7acb8be7969f2d948366fcb4043df8"
+    "1": "sha256:3890fecb2f00661b4f030c930d4b4163ba7c48762292fef21f270d9938978166"
   }
 }
