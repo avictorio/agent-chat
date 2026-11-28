@@ -1130,12 +1130,16 @@ docs.txt section that owns its routes, caps and formats.
     check (429 `slow_down` with `Retry-After`). Never reading it: an
     unknown client, a public app's failure, no assertion, a malformed
     one, failing claims, and a `kid` no key matches when no fetch may
-    start. Reading it once (so refused while it is full) and taking no
-    place: a replayed `jti` after a signature that matched, and a request
-    whose fetch found no key for its `kid`. Taking a place: only a
-    signature check that ran and matched no key. So a stranger's failures
-    hold back only their own network, and one app's bad assertions only
-    that app there; every Claude user's connector shares a few addresses.
+    start. Each request that reaches the start of a fetch reads it once,
+    so requests that arrive together each read it, then one fetch starts
+    and the others wait for it. Reading it once (so refused while it is
+    full) and taking no place: a replayed `jti` after a matched signature;
+    and a request that read the counter before a fetch, its own or one
+    another request started at the same moment, that brought no key for
+    its `kid`. Taking a place: only a signature check that ran and
+    matched no key. So a stranger's failures hold back only their own
+    network, and one app's bad assertions only that app there; every
+    Claude user's connector shares a few addresses.
     The key set (`keysFor`, `worker/lib/oauth.ts`) is kept per isolate
     and `jwks_uri`, with nothing shared that a caller could hold and no
     object called: the set (its keys, when it was fetched, until when it
@@ -1152,14 +1156,23 @@ docs.txt section that owns its routes, caps and formats.
     that lacks the `kid` means there is no such key). Before it starts
     the counter is read; then, in one synchronous step, the try and the
     fetch in flight are recorded, and the fetch is handed to the
-    request's `waitUntil`, so a requester that hangs up cannot cut it
-    off. A burst of requests on an isolate holding no set makes one
-    fetch, shared as parsed data (never a `Response`). A failure of the
-    app's host (a status, a redirect, the size cap, the timeout, a body
-    that does not parse) marks the try failed; nothing else does: a fetch
-    cut off counts toward the window and never as a failure. The last set
-    serves only after a try the host failed, never past its time plus
-    `OAUTH_KEYSET_TTL_MAX_S`. So an app's new key is taken at most
+    request's `waitUntil`, so it outlives a requester that hangs up. A
+    burst of requests on an isolate holding no set makes one fetch,
+    shared as parsed data (never a `Response`). One
+    `OAUTH_FETCH_TIMEOUT_MS` covers the try, so a fetch in flight ends
+    within it. A failure of the app's host (a status, a redirect, the size
+    cap, the timeout, a body that does not parse) marks the try failed at
+    once. A fetch that rejects for any other reason (a refused connection,
+    a name or TLS failure, a fetch cut off) is fetched once more, at once,
+    in the same handed-over promise and under the same timeout, and the
+    try is marked failed only when that second attempt brings no set
+    either (logged `oauth.keyset` with `cut`): a refused connection is the
+    host being down, which is what the last set is for, and a fetch cut
+    off because its requester hung up cannot also cut one started after
+    the requester had gone, so a caller cannot make a try fail. So at most
+    one fetch per window per isolate, two when the first was rejected. The
+    last set serves only after a try the host failed, never past its time
+    plus `OAUTH_KEYSET_TTL_MAX_S`. So an app's new key is taken at most
     `OAUTH_KEYSET_REFETCH_S` after it is published, and a removed key is
     gone at its set's time, or at a data centre's copy's time, or sooner.
     The guides' "at most once per interval" is kept per isolate and per

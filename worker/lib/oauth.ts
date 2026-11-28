@@ -493,15 +493,26 @@ async function settledWithin(p: Promise<void>, ms: number): Promise<void> {
   }
 }
 
-/** One fetch of the set, kept by this isolate and the data centre's Cache
- *  API on success; a failure of the app's host marks the try failed;
- *  anything else (a fetch cut off) marks nothing. The fetch in flight is
- *  cleared either way. Never throws. */
+/** The try's fetch of the set, kept by this isolate and the data centre's
+ *  Cache API on success. One OAUTH_FETCH_TIMEOUT_MS covers both attempts, so
+ *  a fetch in flight ends within it. A fetch that rejects for a reason
+ *  other than that timeout (a refused connection, a name or TLS failure, a
+ *  fetch cut off) is fetched once more, at once: a refused connection is
+ *  the app's host being down, which is what the last set is kept for, and a
+ *  fetch cut off because its requester hung up cannot also cut one started
+ *  after the requester had gone, so a caller cannot make a try fail. The
+ *  try is marked failed when the host failed an attempt (a status, a
+ *  redirect, the size cap, the timeout, a body that does not parse: no
+ *  second attempt after such a first), or when the second rejected too,
+ *  logged as cut. The fetch in flight is cleared either way. Never throws. */
 async function fetchInto(app: KnownApp, uri: string, held: HeldSet, tr: KeyTry): Promise<void> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), OAUTH_FETCH_TIMEOUT_MS);
   try {
-    const got = await fetchKeySet(app, uri);
-    if (got === "failed") { tr.failed = true; return; }
-    if (got === "cut") return;
+    let got = await fetchKeySet(app, uri, ctl.signal);
+    if (got === "rejected") got = await fetchKeySet(app, uri, ctl.signal);
+    if (got === "rejected") warn("oauth.keyset", null, { app: app.key, cut: true });
+    if (got === "failed" || got === "rejected") { tr.failed = true; return; }
     const now = Date.now();
     const set: KeySet = { keys: keptKeys(app, got.set), fetchedAt: now, until: now + got.ttl * 1000 };
     if (!held.set || set.fetchedAt >= held.set.fetchedAt) held.set = set;
@@ -509,22 +520,22 @@ async function fetchInto(app: KnownApp, uri: string, held: HeldSet, tr: KeyTry):
   } catch {
     // keptKeys or the cache threw: nothing kept, nothing marked failed
   } finally {
+    clearTimeout(t);
     if (held.inflight && held.inflight.of === tr) held.inflight = null;
   }
 }
 
-/** The pinned key set fetched (no redirects, no credential, at most
- *  OAUTH_KEYSET_MAX_BYTES, within OAUTH_FETCH_TIMEOUT_MS), with how long to
- *  keep it (its Cache-Control within the bounds). failed: the app's host
- *  failed it (a status, a redirect, the size cap, the timeout, a body that
- *  does not parse), logged with the status; cut: the fetch broke off for
- *  any other reason, which says nothing of the host. */
-async function fetchKeySet(app: KnownApp, uri: string): Promise<{ set: unknown, text: string, ttl: number } | "failed" | "cut"> {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), OAUTH_FETCH_TIMEOUT_MS);
+/** One fetch of the pinned key set (no redirects, no credential, at most
+ *  OAUTH_KEYSET_MAX_BYTES, until signal aborts it: the try's one timeout),
+ *  with how long to keep it (its Cache-Control within the bounds). failed:
+ *  the app's host failed it (a status, a redirect, the size cap, the
+ *  timeout, a body that does not parse), logged with the status; rejected:
+ *  the fetch broke off for any other reason, unlogged, as fetchInto tries
+ *  once more. */
+async function fetchKeySet(app: KnownApp, uri: string, signal: AbortSignal): Promise<{ set: unknown, text: string, ttl: number } | "failed" | "rejected"> {
   const failed = (status: number): "failed" => { warn("oauth.keyset", null, { app: app.key, status }); return "failed"; };
   try {
-    const res = await fetch(uri, { method: "GET", redirect: "manual", signal: ctl.signal, headers: { accept: "application/jwk-set+json, application/json" } });
+    const res = await fetch(uri, { method: "GET", redirect: "manual", signal, headers: { accept: "application/jwk-set+json, application/json" } });
     if (res.status !== 200 || !res.body) { try { await res.body?.cancel(); } catch { /* nothing left to read */ } return failed(res.status); }
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -550,12 +561,9 @@ async function fetchKeySet(app: KnownApp, uri: string): Promise<{ set: unknown, 
     const ttl = Math.min(OAUTH_KEYSET_TTL_MAX_S, Math.max(OAUTH_KEYSET_TTL_MIN_S, m ? Number(m[1]) : OAUTH_KEYSET_TTL_MIN_S));
     return { set, text, ttl };
   } catch {
-    // the timeout aborted it: the host failed it; anything else cut it off
-    if (ctl.signal.aborted) return failed(0);
-    warn("oauth.keyset", null, { app: app.key, cut: true });
-    return "cut";
-  } finally {
-    clearTimeout(t);
+    // the timeout aborted it: the host failed it; anything else rejected it
+    if (signal.aborted) return failed(0);
+    return "rejected";
   }
 }
 

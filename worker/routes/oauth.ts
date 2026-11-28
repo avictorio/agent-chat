@@ -573,11 +573,13 @@ async function clientOf(env: Env, form: URLSearchParams): Promise<KnownApp | nul
  *  signature check), and full it refuses the app's assertion from that
  *  network (429 slow_down). A public app's failure, no assertion, a
  *  malformed one, claims that fail, and a kid no key matches when no fetch
- *  may start never ask the counter; a replayed jti after a signature that
- *  matched, and a request whose fetch found no key for its kid, read it
- *  (and are refused while it is full) and take no place. A key-set fetch is
- *  handed to waitUntil (the request's), so a requester that hangs up cannot
- *  cut it off. dpopJti: the proof's jti to record (null: none). */
+ *  may start never ask the counter; a replayed jti after a matched
+ *  signature, and a request that read the counter before a fetch, its own
+ *  or one another request started at the same moment, that brought no key
+ *  for its kid, read it (and are refused while it is full) and take no
+ *  place. A key-set fetch is handed to waitUntil (the request's), so it
+ *  outlives a requester that hangs up. dpopJti: the proof's jti to record
+ *  (null: none). */
 type Authed = { ok: true, app: KnownApp, alg: string | null, hasKid: boolean, dpopFresh: boolean } | { ok: false, response: Response };
 async function authenticate(env: Env, request: Request, form: URLSearchParams, origin: string, app: KnownApp, dpopJti: string | null, grant: string | null, waitUntil: (p: Promise<unknown>) => void): Promise<Authed> {
   const refuse = (): Authed => ({ ok: false, response: invalidClient(request) });

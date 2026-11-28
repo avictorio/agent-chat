@@ -137,12 +137,17 @@ Playwright); `tests/fixtures/` holds the files they share.
   per isolate and `jwks_uri` against a stand-in key-set host in place of
   `fetch` and a stand-in `caches.default` playing the data centre on the
   test's clock (a burst on an isolate holding no set and at a set's
-  expiry: one fetch, all taken; an own fetch lacking the `kid`: no second
-  fetch in the window; one app's failed fetch holding back no other;
-  200 unknown kids: one fetch, one counter read, no store call, no place;
-  the data centre's copy by when it was fetched; a just-published key; the
-  fetch handed to `waitUntil`; a removed key; failed and cut-off fetches
-  and the last set's bound; a fetch that never settles), the
+  expiry, the counter's read taking time: one fetch, all taken; an own
+  fetch lacking the `kid`: no second fetch in the window; one app's
+  failed fetch holding back no other; 200 unknown kids one after another:
+  one fetch, one counter read, no store call, no place; the data centre's
+  copy by when it was fetched, and an older one never adopted over a
+  newer set; a just-published key; the fetch handed to `waitUntil`, also
+  with a first attempt cut off and a second that answers; a rejected
+  fetch fetched once more; each failure of the host's at a first attempt,
+  with no second; both attempts within one `OAUTH_FETCH_TIMEOUT_MS`; a
+  removed key; failed fetches (a status, a connection refused twice) and
+  the last set's bound; a fetch that never settles), the
   failed-authentication limit one per network and app, filled only by a
   signature that matched no key, with the quota object's calls and the
   signature checks counted per case, and refusing before any fetch or

@@ -347,21 +347,24 @@ export const OAUTH_ASSERTION_MAX_S = 300;
 export const OAUTH_SKEW_S = 30;
 export const OAUTH_DPOP_WINDOW_S = 60;
 // A known app's key set (lib/oauth.ts keysFor): at most
-// OAUTH_KEYSET_MAX_BYTES, fetched within OAUTH_FETCH_TIMEOUT_MS, kept
-// between OAUTH_KEYSET_TTL_MIN_S and OAUTH_KEYSET_TTL_MAX_S. Each isolate
-// fetches a jwks_uri at most once per OAUTH_KEYSET_REFETCH_S (one fetch in
-// flight, shared by the requests that wait for it; a failed or cut-off try
-// counts toward the window), and none while its data centre's Cache API copy
-// is fresher than that. The guides say "Refetch each jwks_uri at most once
-// per interval, such as 30 seconds, and count failed fetches too. Otherwise a
-// stream of bad assertions can flood the personal agent's server." This
-// keeps it per isolate and per data centre, deliberately, and not for the
-// whole site: a site-wide bound needs a gate that a caller with no key can
-// hold, which would keep an app's new key out and its removed key in. A
-// fetch needs at least one request in that data centre in that window, so
-// the site is never an amplifier. The last set serves only after a try the
-// app's host failed, and never past its time plus OAUTH_KEYSET_TTL_MAX_S. An
-// assertion with no kid tries at most OAUTH_KEYS_TRIED_MAX keys.
+// OAUTH_KEYSET_MAX_BYTES, fetched within OAUTH_FETCH_TIMEOUT_MS (one for
+// both attempts of a try), kept between OAUTH_KEYSET_TTL_MIN_S and
+// OAUTH_KEYSET_TTL_MAX_S. Each isolate tries a jwks_uri at most once per
+// OAUTH_KEYSET_REFETCH_S, so at most one fetch per window per isolate, two
+// when the first was rejected (a try in flight is shared by the requests
+// that wait for it, and counts toward the window, failed or not), and none
+// while its data centre's Cache API copy is fresher than that. The guides
+// say "Refetch each jwks_uri at most once per interval, such as 30 seconds,
+// and count failed fetches too. Otherwise a stream of bad assertions can
+// flood the personal agent's server." This keeps it per isolate and per
+// data centre, deliberately, and not for the whole site: a site-wide bound
+// needs a gate that a caller with no key can hold, which would keep an
+// app's new key out and its removed key in. A fetch needs at least one
+// request in that data centre in that window, so the site is never an
+// amplifier. The last set serves only after a try the app's host failed (an
+// attempt it failed, or both attempts rejected), and never past its time
+// plus OAUTH_KEYSET_TTL_MAX_S. An assertion with no kid tries at most
+// OAUTH_KEYS_TRIED_MAX keys.
 export const OAUTH_KEYSET_MAX_BYTES = 65536;
 export const OAUTH_FETCH_TIMEOUT_MS = 5000;
 export const OAUTH_KEYSET_TTL_MIN_S = 60;
@@ -378,12 +381,15 @@ export const OAUTH_KEYS_TRIED_MAX = 10;
 // network 429 with no fetch and no signature check. Never asking it: a
 // request naming no known app, a public app's failure, no assertion, a
 // malformed one, claims that fail, and a kid no key matches when no fetch
-// may start. Reading it once, refused while it is full, and taking no
-// place: a replayed jti after a signature that matched, and a request whose
-// fetch found no key for its kid. Only the costly work is limited, by
-// network as an unverified request is, so a stranger's failures hold back
-// nobody but their own network (every Claude user's connector shares a few
-// addresses).
+// may start. Each request that reaches the start of a fetch reads it once,
+// so requests that arrive together each read it, then one fetch starts and
+// the others wait for it. Reading it once, refused while it is full, and
+// taking no place: a replayed jti after a matched signature; and a request
+// that read the counter before a fetch, its own or one another request
+// started at the same moment, that brought no key for its kid. Only the
+// costly work is limited, by network as an unverified request is, so a
+// stranger's failures hold back nobody but their own network (every Claude
+// user's connector shares a few addresses).
 // A token, revoke or disconnect body is at most OAUTH_FORM_MAX.
 export const OAUTH_AUTH_FAILS_PER_IP = 20;
 export const OAUTH_AUTH_FAILS_WINDOW_S = 600;

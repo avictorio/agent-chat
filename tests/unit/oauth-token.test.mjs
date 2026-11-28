@@ -13,7 +13,7 @@ import {
   makeSigninWorld, people, signIn, token, clientAuth, assertion, dpopProof, keyPair, poppyApp, pkce, authzQuery, decide, jws, newJti,
   PUBLIC_APP, ORIGIN, ADDRESS, signins, signin, toolCall,
 } from "./signin-world.mjs";
-import { OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_CLIENT_PREFIX, OAUTH_CODE_TTL_S, OAUTH_FETCH_TIMEOUT_MS, OAUTH_IDLE_DAYS, OAUTH_KEYSET_REFETCH_S, OAUTH_KEYSET_TTL_MAX_S, OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
+import { OAUTH_ACCESS_TTL_S, OAUTH_AUTH_FAILS_PER_IP, OAUTH_CLIENT_PREFIX, OAUTH_CODE_TTL_S, OAUTH_FETCH_TIMEOUT_MS, OAUTH_IDLE_DAYS, OAUTH_KEYSET_MAX_BYTES, OAUTH_KEYSET_REFETCH_S, OAUTH_KEYSET_TTL_MAX_S, OAUTH_KEYSET_TTL_MIN_S, OAUTH_QUOTA_ROOM, OAUTH_REFRESH_GRACE_S } from "../../worker/limits.ts";
 import { forgetKeySets, jwkThumbprint } from "../../worker/lib/oauth.ts";
 import { resetWarnings } from "../../worker/lib/log.ts";
 
@@ -400,6 +400,18 @@ async function remoteApps(...names) {
 const tryKey = async (w, app, pair, headers) => token(w, { grant_type: "refresh_token", refresh_token: ".ar1.x", client_assertion_type: URN, client_assertion: await assertion(app, pair) }, headers);
 const taken = (r) => r.status === 400 && r.json.error === "invalid_grant";
 const refused = (r) => r.status === 401 && r.json.error === "invalid_client";
+/** the quota object's counter read made to take ms, as a call to another object does */
+function slowCounter(w, ms) {
+  const room = w.harness(OAUTH_QUOTA_ROOM).room, read = room.agentPeek;
+  room.agentPeek = async (...args) => { await sleep(ms); return read.apply(room, args); };
+}
+/** what a fetch rejects with when the host refuses the connection or it breaks off */
+const lost = () => new TypeError("Network connection lost.");
+/** an answer that comes after ms, unless the fetch's signal aborts it first */
+const answerAfter = (init, ms, res) => new Promise((ok, no) => {
+  const t = setTimeout(() => ok(res()), ms);
+  init.signal.addEventListener("abort", () => { clearTimeout(t); no(init.signal.reason); });
+});
 /** runs f with a data centre, a key-set host and an isolate of its own, all put back after */
 async function withKeys(answer, f) {
   forgetKeySets();
@@ -420,8 +432,9 @@ test("an inline set's key without a kid is skipped and logged once", async () =>
   assert.deepEqual(lines.filter((l) => l.warn === "oauth.keyset"), [{ warn: "oauth.keyset", error: null, app: "nokid", reason: "no_kid" }]);
 });
 
-test("a burst of assertions on an isolate holding no set makes one fetch, and every one is taken; the same once the set's time is up; the fetch asks for the set with no redirect followed and no credentials field", async () => {
+test("a burst of assertions on an isolate holding no set, the counter's read taking as long as a call to another object, makes one fetch, and every one is taken; the same once the set's time is up; the fetch asks for the set with no redirect followed and no credentials field", async () => {
   const { w, apps: [A] } = await remoteApps("burst");
+  slowCounter(w, 20); // so the requests overlap while they wait for the read
   const inits = [];
   await withKeys(async (url, init) => { inits.push([init.redirect, "credentials" in init]); await sleep(50); return served(setOf(A.es), OAUTH_KEYSET_TTL_MIN_S); }, async (host) => {
     const first = await Promise.all(Array.from({ length: 25 }, () => tryKey(w, A.app, A.es)));
@@ -457,7 +470,7 @@ test("one app's failed fetch does not hold back another's: B's set, its time up,
   });
 });
 
-test("200 assertions naming kids the set lacks, within one window: one fetch, one read of the counter (by the request that started it) and no other call to the quota object, none to the app's store, no place", async () => {
+test("200 assertions naming kids the set lacks, within one window, requests one after another: one fetch, one read of the counter and no other call to the quota object, none to the app's store, no place", async () => {
   const { w, apps: [A] } = await remoteApps("stream");
   const quota = (m) => w.asked.filter((a) => a.name === OAUTH_QUOTA_ROOM && a.method === m).length;
   const store = () => w.asked.filter((a) => a.name.startsWith(OAUTH_CLIENT_PREFIX)).length;
@@ -489,6 +502,18 @@ test("the data centre's copy: fetched OAUTH_KEYSET_REFETCH_S ago or less and lac
   });
 });
 
+test("an older data centre copy is not adopted over this isolate's newer set: a key the app removed, still listed in a live copy fetched before this isolate's set, is refused", async () => {
+  const { w, apps: [A] } = await remoteApps("older");
+  const gone = await keyPair("ES256", "es-gone");
+  await withKeys(async () => served(setOf(A.es), 600), async (host, dc) => {
+    assert.ok(taken(await tryKey(w, A.app, A.es)), "this isolate's set, fetched after the app removed es-gone");
+    const t0 = Date.now();
+    dc.put(A.app.jwks_uri, setOf(A.es, gone), t0 - 10000, t0 + 600000);
+    assert.ok(refused(await tryKey(w, A.app, gone)), "the removed key, listed only in the older copy: refused");
+    assert.equal(host.count(), 1, "no fetch");
+  });
+});
+
 test("a key the app has just published is taken once OAUTH_KEYSET_REFETCH_S has passed since the last fetch, whatever kids others sent meanwhile", async () => {
   const { w, apps: [A] } = await remoteApps("publish");
   const fresh = await keyPair("ES256", "es-new");
@@ -506,21 +531,95 @@ test("a key the app has just published is taken once OAUTH_KEYSET_REFETCH_S has 
   });
 });
 
-test("the fetch is handed to the request's waitUntil: a requester that hangs up before it ends leaves a set the next request uses, with no second fetch", async () => {
-  const { w, apps: [A] } = await remoteApps("dropped");
-  let release = null;
-  await withKeys(() => new Promise((r) => { release = () => r(served(setOf(A.es), 600)); }), async (host) => {
+test("the fetch is handed to the request's waitUntil: a requester that hangs up before it ends leaves a set the next request uses, with no further fetch; so does a first attempt cut off as its requester leaves, whose second attempt answers", async () => {
+  for (const cut of [false, true]) {
+    const { w, apps: [A] } = await remoteApps(cut ? "dropped-cut" : "dropped");
+    let release = null;
+    await withKeys(() => new Promise((ok, no) => { release = (off) => (off ? no(lost()) : ok(served(setOf(A.es), 600))); }), async (host) => {
+      const before = w.pending.length;
+      const dropped = tryKey(w, A.app, A.es);
+      for (let i = 0; i < 200 && host.count() === 0; i++) await sleep(5);
+      assert.equal(host.count(), 1, "the fetch started");
+      assert.equal(w.pending.length, before + 1, "handed to waitUntil");
+      if (cut) {
+        release(true);
+        for (let i = 0; i < 200 && host.count() === 1; i++) await sleep(5);
+        assert.deepEqual([host.count(), w.pending.length - before], [2, 1], "cut off: fetched once more, in the same handed-over promise");
+      }
+      release(false);
+      await Promise.all(w.pending);
+      assert.ok(taken(await tryKey(w, A.app, A.es)), "the next request: the set the fetch left");
+      assert.equal(host.count(), cut ? 2 : 1, "no further fetch");
+      await dropped;
+    });
+  }
+});
+
+test("a fetch rejected for a reason other than the timeout is fetched once more, at once, within the same try: the second answering, its set is kept and taken, nothing is logged, and no other fetch within OAUTH_KEYSET_REFETCH_S", async () => {
+  const { w, apps: [A] } = await remoteApps("refused-once");
+  let calls = 0;
+  const lines = await logged(() => withKeys(async () => { calls++; if (calls === 1) throw lost(); return served(setOf(A.es), 600); }, async (host) => {
     const before = w.pending.length;
-    const dropped = tryKey(w, A.app, A.es);
-    for (let i = 0; i < 200 && host.count() === 0; i++) await sleep(5);
-    assert.equal(host.count(), 1, "the fetch started");
-    assert.equal(w.pending.length, before + 1, "handed to waitUntil");
-    release();
-    await Promise.all(w.pending);
-    assert.ok(taken(await tryKey(w, A.app, A.es)), "the next request: the set the fetch left");
-    assert.equal(host.count(), 1, "no second fetch");
-    await dropped;
-  });
+    assert.ok(taken(await tryKey(w, A.app, A.es)), "taken with the second attempt's set");
+    assert.deepEqual([host.count(), w.pending.length - before], [2, 1], "two fetches in one handed-over promise");
+    assert.ok(refused(await tryKey(w, A.app, await keyPair("ES256", "es-9"))), "an unknown kid within the window");
+    assert.ok(taken(await tryKey(w, A.app, A.es)), "the set kept");
+    assert.equal(host.count(), 2, "one try: no other fetch within the window");
+  }));
+  assert.deepEqual(lines.filter((l) => l.warn === "oauth.keyset"), [], "not failed: nothing logged");
+});
+
+test("a first attempt the app's host failed (a status, a redirect, the size cap, a body that does not parse, the timeout) marks the try failed with no second: one fetch, the last set serves, logged with the status", async () => {
+  const kinds = [
+    ["status", () => new Response("down", { status: 503 }), 503],
+    ["redirect", () => new Response(null, { status: 302, headers: { Location: "http://127.0.0.1:9/elsewhere.json" } }), 302],
+    ["cap", () => new Response("x".repeat(OAUTH_KEYSET_MAX_BYTES + 1), { status: 200 }), 413],
+    ["body", () => new Response("{\"keys\": [", { status: 200 }), 200],
+    ["timeout", (init) => answerAfter(init, OAUTH_FETCH_TIMEOUT_MS * 2, () => served({ keys: [] }, 600)), 0],
+  ];
+  const { w, apps } = await remoteApps(...kinds.map(([k]) => "host-" + k));
+  let down = false;
+  const lines = await logged(() => withKeys(async (url, init) => {
+    const i = apps.findIndex((a) => a.app.jwks_uri === url);
+    return down ? kinds[i][1](init) : served(setOf(apps[i].es), OAUTH_KEYSET_TTL_MIN_S);
+  }, async (host) => {
+    for (const a of apps) assert.ok(taken(await tryKey(w, a.app, a.es)));
+    down = true;
+    await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
+      const rs = await Promise.all(apps.map((a) => tryKey(w, a.app, a.es)));
+      kinds.forEach(([k], i) => {
+        assert.ok(taken(rs[i]), k + ": failed, the last set serves");
+        assert.equal(host.count(apps[i].app.jwks_uri), 2, k + ": no second attempt");
+      });
+    });
+  }));
+  const got = lines.filter((l) => l.warn === "oauth.keyset").map((l) => l.app + " " + JSON.stringify(l.status) + " " + JSON.stringify(l.cut)).sort();
+  assert.deepEqual(got, kinds.map(([k, , st]) => "keys-host-" + k + " " + st + " undefined").sort());
+});
+
+test("both attempts of a try share one OAUTH_FETCH_TIMEOUT_MS: a slow rejection, then a slow answer past it, is failed by the timeout (the last set serves, logged with status 0), and the fetch in flight has ended within it", async () => {
+  const { w, apps: [A] } = await remoteApps("slow");
+  let slow = false, calls = 0, started = 0;
+  const lines = await logged(() => withKeys((url, init) => {
+    if (!slow) return served(setOf(A.es), OAUTH_KEYSET_TTL_MIN_S);
+    calls++;
+    if (calls === 1) { started = Date.now(); return sleep(OAUTH_FETCH_TIMEOUT_MS * 0.6).then(() => { throw lost(); }); }
+    return answerAfter(init, OAUTH_FETCH_TIMEOUT_MS * 0.8, () => served(setOf(A.es), 600));
+  }, async (host) => {
+    assert.ok(taken(await tryKey(w, A.app, A.es)));
+    slow = true;
+    await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
+      const before = w.pending.length;
+      const r = tryKey(w, A.app, A.es);
+      for (let i = 0; i < 200 && w.pending.length === before; i++) await sleep(5);
+      const ended = w.pending[before].then(() => Date.now());
+      assert.ok(taken(await r), "failed by the timeout: the last set serves");
+      assert.equal(host.count(), 3, "two attempts");
+      // a timer fires a little after its time: a quarter of a second allowed
+      assert.ok((await ended) - started < OAUTH_FETCH_TIMEOUT_MS + 250, "the fetch in flight ended within OAUTH_FETCH_TIMEOUT_MS");
+    });
+  }));
+  assert.deepEqual(lines.filter((l) => l.warn === "oauth.keyset"), [{ warn: "oauth.keyset", error: null, app: "keys-slow", status: 0 }]);
 });
 
 test("a key the app removed stops working once its set's time is up: fetched again, the key refused, the new one taken", async () => {
@@ -539,49 +638,57 @@ test("a key the app removed stops working once its set's time is up: fetched aga
   });
 });
 
-test("failed fetches: the last set serves only after a try the host failed, within its time plus OAUTH_KEYSET_TTL_MAX_S and not after; a failed fetch counts toward the window; a fetch cut off never makes the last set serve", async () => {
-  // the host fails: the last set within its bound, one fetch per window, and nothing past the bound
-  const { w, apps: [A, C] } = await remoteApps("outage", "cut");
+test("failed fetches: the last set serves only after a try the host failed, by a status or by refusing the connection at both attempts, within its time plus OAUTH_KEYSET_TTL_MAX_S and not after; a failed try counts toward the window, with its two fetches when the first was rejected", async () => {
+  const { w, apps: [A, C] } = await remoteApps("outage", "refusing");
+  const both = [A, C];
   let down = false;
   await withKeys(async (url) => {
-    if (!down) return served(setOf(url.includes("/cut.json") ? C.es : A.es), OAUTH_KEYSET_TTL_MIN_S);
-    if (url.includes("/cut.json")) throw new TypeError("Network connection lost.");
+    if (!down) return served(setOf(url.includes("/refusing.json") ? C.es : A.es), OAUTH_KEYSET_TTL_MIN_S);
+    if (url.includes("/refusing.json")) throw lost();
     return new Response("down", { status: 500 });
   }, async (host) => {
-    assert.ok(taken(await tryKey(w, A.app, A.es)));
-    assert.ok(taken(await tryKey(w, C.app, C.es)));
+    const fetches = () => [host.count("/outage.json"), host.count("/refusing.json")];
+    for (const X of both) assert.ok(taken(await tryKey(w, X.app, X.es)));
     down = true;
-    await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
-      assert.ok(taken(await tryKey(w, A.app, A.es)), "a failed fetch: the last set, within its bound");
-      assert.ok(taken(await tryKey(w, A.app, A.es)), "again within the window");
-      assert.equal(host.count("/outage.json"), 2, "two requests within the window of a failed fetch: one fetch");
-      assert.ok(refused(await tryKey(w, C.app, C.es)), "a fetch cut off: the last set does not serve");
-      assert.equal(host.count("/cut.json"), 2);
-    });
+    const lines = await logged(() => later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
+      for (const X of both) {
+        assert.ok(taken(await tryKey(w, X.app, X.es)), X.app.key + ": a failed try: the last set, within its bound");
+        assert.ok(taken(await tryKey(w, X.app, X.es)), X.app.key + ": again within the window");
+      }
+      assert.deepEqual(fetches(), [2, 3], "within the window of a failed try: one fetch, two when the first was rejected");
+    }));
+    assert.deepEqual(lines.filter((l) => l.warn === "oauth.keyset"), [
+      { warn: "oauth.keyset", error: null, app: "keys-outage", status: 500 },
+      { warn: "oauth.keyset", error: null, app: "keys-refusing", cut: true },
+    ]);
     await later((OAUTH_KEYSET_TTL_MIN_S + OAUTH_KEYSET_REFETCH_S + 2) * 1000, async () => {
-      assert.ok(taken(await tryKey(w, A.app, A.es)), "past the window: fetched again, failed, the last set");
-      assert.equal(host.count("/outage.json"), 3);
+      for (const X of both) assert.ok(taken(await tryKey(w, X.app, X.es)), X.app.key + ": past the window: fetched again, failed, the last set");
+      assert.deepEqual(fetches(), [3, 5]);
     });
     await later((OAUTH_KEYSET_TTL_MIN_S + OAUTH_KEYSET_TTL_MAX_S + 1) * 1000, async () => {
-      assert.ok(refused(await tryKey(w, A.app, A.es)), "an outage past the bound: no set, refused");
-      assert.equal(host.count("/outage.json"), 4, "the fetch was tried, and failed");
+      for (const X of both) assert.ok(refused(await tryKey(w, X.app, X.es)), X.app.key + ": an outage past the bound: no set, refused");
+      assert.deepEqual(fetches(), [4, 7], "the fetch was tried, and failed");
     });
   });
 });
 
-test("a fetch that never settles: each waiter goes on after its own timer, and a request after the window fetches again", async () => {
+test("a fetch that never settles: each waiter goes on after its own timer, refused, as a set whose time is up serves only after a try that failed; a request after the window fetches again", async () => {
   const { w, apps: [A] } = await remoteApps("hung");
-  let hang = true;
-  await withKeys(async () => (hang ? new Promise(() => {}) : served(setOf(A.es), 600)), async (host) => {
-    const t = Date.now();
-    const rs = await Promise.all([tryKey(w, A.app, A.es), tryKey(w, A.app, A.es)]);
-    assert.ok(rs.every(refused), "no set: both refused once their timers ran out");
-    assert.ok(Date.now() - t < OAUTH_FETCH_TIMEOUT_MS + 3000, "each waited about OAUTH_FETCH_TIMEOUT_MS and a second, no more");
-    assert.equal(host.count(), 1, "one fetch for both");
+  let hang = false;
+  await withKeys(async () => (hang ? new Promise(() => {}) : served(setOf(A.es), OAUTH_KEYSET_TTL_MIN_S)), async (host) => {
+    assert.ok(taken(await tryKey(w, A.app, A.es)));
+    hang = true;
+    await later((OAUTH_KEYSET_TTL_MIN_S + 1) * 1000, async () => {
+      const t = Date.now();
+      const rs = await Promise.all([tryKey(w, A.app, A.es), tryKey(w, A.app, A.es)]);
+      assert.ok(rs.every(refused), "the set's time up and its try still in flight: both refused once their timers ran out");
+      assert.ok(Date.now() - t < OAUTH_FETCH_TIMEOUT_MS + 3000, "each waited about OAUTH_FETCH_TIMEOUT_MS and a second, no more");
+      assert.equal(host.count(), 2, "one fetch for both");
+    });
     hang = false;
-    await later((OAUTH_KEYSET_REFETCH_S + 1) * 1000, async () => {
+    await later((OAUTH_KEYSET_TTL_MIN_S + OAUTH_KEYSET_REFETCH_S + 2) * 1000, async () => {
       assert.ok(taken(await tryKey(w, A.app, A.es)), "after the window: the hung fetch forgotten, fetched again");
-      assert.equal(host.count(), 2);
+      assert.equal(host.count(), 3);
     });
   });
 });
